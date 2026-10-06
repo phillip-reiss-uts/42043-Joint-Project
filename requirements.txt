@@ -1,1 +1,9 @@
+# Core simulation
+mujoco>=3.0.0
+mujoco-menagerie>=0.1.0
 
+# Numerical computing
+numpy>=1.24.0
+
+# Inverse kinematics
+mink>=1.0.0
