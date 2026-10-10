@@ -4,7 +4,7 @@ import mujoco.viewer
 
 from src.model_loader import load_robot_model
 from src.camera import RGBDCamera
-from src.floor import fit_plane_ransac, remove_plane
+from src.floor import fit_plane_ransac, remove_plane, remove_self
 
 def main():
    
@@ -66,6 +66,10 @@ def main():
         print(f"[CAL] floor plane n={np.round(floor.n, 4)} d={floor.d:.5f} "
               f"({inlier_frac:.1%} inliers)")
 
+    # Wrist camera is bolted to the gripper, so the gripper occupies the near
+    # field permanently. Cut everything within reach of the lens.
+    cam_pos = data.cam_xpos[cam_id].copy()
+
     # Viewer
     print("[INFO] Launching viewer. Press ESC to exit.")
     step = 0
@@ -89,12 +93,16 @@ def main():
 
                 if floor is None:
                     continue
-                
-                # Remove floor
-                keep, object_points = remove_plane(points, floor, tol=0.005)
-                print(f"[RGB-D] {keep.sum()} object points of "
-                      f"{np.isfinite(points).all(axis=-1).sum()} valid")
-                
+
+                # 1) self-filter: drop the gripper (near field)
+                keep_self, scene = remove_self(points, cam_pos, min_dist=0.20)
+
+                # 2) floor removal
+                keep_floor, object_points = remove_plane(scene, floor, tol=0.005)
+
+                print(f"[RGB-D] {keep_self.sum()} scene pts -> "
+                    f"{keep_floor.sum()} object pts")
+
                 '''
                 valid = np.isfinite(points).all(axis=-1)
                 n_valid = int(valid.sum())

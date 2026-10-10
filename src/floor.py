@@ -140,3 +140,20 @@ def load_plane(path):
         return Plane.from_dict(payload["plane"])
     except (OSError, ValueError, KeyError):
         return None
+
+DEFAULT_SELF_DIST = 0.20   # camera-to-gripper cutoff, metres
+
+
+def remove_self(points, camera_pos, min_dist=DEFAULT_SELF_DIST):
+    """Drop points closer to the camera than min_dist.
+
+    The gripper is bolted to the camera, so it always occupies the near field.
+    A spherical cut centred on the lens removes it without any geometry work.
+
+    Returns (keep_mask, kept_points).
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    finite = np.isfinite(pts).all(axis=-1)
+    near = np.linalg.norm(pts - np.asarray(camera_pos, dtype=np.float64), axis=-1)
+    keep = finite & (near > min_dist)
+    return keep, pts[keep]
