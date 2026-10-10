@@ -2,8 +2,9 @@
 mujoco>=3.0.0
 mujoco-menagerie>=0.1.0
 
-# Numerical computing
+# Math libraries
 numpy>=1.24.0
+matplotlib>=3.11.1 
 
 # Inverse kinematics
 mink>=1.0.0

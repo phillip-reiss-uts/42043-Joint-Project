@@ -114,7 +114,7 @@ class RGBDCamera:
         z = depth.astype(np.float64)
         x_cam = (uu - cx) * z / fx
         y_cam = (vv - cy) * z / fy
-        z_cam = z
+        z_cam = -z
 
         # Stack into (H, W, 3), mark invalid as NaN
         p_cam = np.stack([x_cam, y_cam, z_cam], axis=-1)
