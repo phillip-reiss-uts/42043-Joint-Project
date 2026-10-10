@@ -15,10 +15,13 @@ TABLE_HEIGHT  = 0.02                  # top face z
 TABLE_THICK   = 0.02                  # slab thickness
 TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
 TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
+
+
 # Target object, resting on the work surface.
 # OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
 OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
 OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
+OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
 
 
 def load_robot_model():
@@ -131,7 +134,12 @@ def load_robot_model():
     obj_geom.conaffinity = 1
 
     # ------------------------------------------------------------------
-    # 7. Compile
+    # 7. Gravity compensation
+    # ------------------------------------------------------------------
+    for body in arm.bodies:
+        body.gravcomp = 1.0
+    # ------------------------------------------------------------------
+    # 8. Compile
     # ------------------------------------------------------------------
 
     try:

@@ -115,8 +115,10 @@ class RGBDCamera:
 
         # Camera-frame points (dense)
         z = depth.astype(np.float64)
-        x_cam = (uu - cx) * z / fx
-        y_cam = (vv - cy) * z / fy
+        #x_cam = (uu - cx) * z / fx
+        x_cam = -(uu - cx) * z / fx
+        #y_cam = (vv - cy) * z / fy
+        y_cam = -(vv - cy) * z / fy      
         z_cam = -z
 
         # Stack into (H, W, 3), mark invalid as NaN
