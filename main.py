@@ -11,8 +11,9 @@ import mink
 
 from src.model_loader import (
     load_robot_model,
-    TABLE_HEIGHT, OBJECT_HEIGHT,
+    TABLE_HEIGHT, TABLE_CENTRE, TABLE_HALF, OBJECT_SIZE, OBJECT_HEIGHT,
 )
+
 from src.camera import RGBDCamera
 
 # Constants
@@ -31,16 +32,51 @@ STEPS_GRASP = 1200       # final contact descent
 STEPS_CLOSE = 3000
 STEPS_LIFT = 3000
 
+STEPS_PEEK = 1500        # wrist reposition for a second look
+
 MOTION_SPEED = 1.0       # scale speed 
 
 GRASP_HEIGHT_FRAC = 0.2    
-TIP_OFFSET = 0.12 - (GRASP_HEIGHT_FRAC - 0.5) * OBJECT_HEIGHT
+TIP_OFFSET = 0.1094 - (GRASP_HEIGHT_FRAC - 0.5) * OBJECT_HEIGHT
 
 R_DOWN = np.array([[1.0, 0.0, 0.0],
                    [0.0, -1.0, 0.0],
                    [0.0, 0.0, -1.0]])   # gripper +z aligned with world -z
 
 ARM_DOF = 6
+
+RANDOMIZE_SPAWN = True
+SPAWN_X = (-0.30, 0.05)      # world x range for the object
+SPAWN_Y = (0.40, 0.62)       # world y range
+SPAWN_MARGIN = 0.06
+SPAWN_Y_MIN = 0.45
+SPAWN_CLEARANCE = 0.032
+
+SPAWN_X_RANGE = (TABLE_CENTRE[0] - TABLE_HALF[0] + SPAWN_MARGIN + OBJECT_SIZE[0],
+                 TABLE_CENTRE[0] + TABLE_HALF[0] - SPAWN_MARGIN - OBJECT_SIZE[0])
+SPAWN_Y_RANGE = (max(TABLE_CENTRE[1] - TABLE_HALF[1] + SPAWN_MARGIN + OBJECT_SIZE[1], SPAWN_Y_MIN),
+                 TABLE_CENTRE[1] + TABLE_HALF[1] - SPAWN_MARGIN - OBJECT_SIZE[1])
+
+MIN_OBJECT_POINTS = 1500      # clean views give ~3000-5000; occluded ones <1500
+PERCEPTION_TRIES = 5
+
+VIEW_Y_LEAD = 0.05
+VIEW_OFFSETS = ((0.0, 0.0), (0.0, VIEW_Y_LEAD), (0.0, -VIEW_Y_LEAD))
+
+
+# Deliberately awkward spawns for exercising the perception-recovery path.
+# (x, y) only; height comes from SPAWN_CLEARANCE. Measured against this scene:
+HARD_SPAWNS = (
+    # occluded by the gripper: ~540 pts, 27 mm xy error from a clipped bbox
+    (-0.219, 0.411),
+    # occluded by the gripper: ~1020 pts, 20 mm xy error
+    (0.030, 0.400),
+    # outside the home-pose camera footprint: 0 pts found
+    (-0.200, 0.350),
+    # marginal footprint, just inside the far edge
+    (-0.320, 0.700),
+)
+HARD_SPAWN_MODE = True     # True -> ignore the random range, use HARD_SPAWNS
 
 def find_camera(model):
     """Return (name, id) of the wrist camera."""
@@ -54,6 +90,29 @@ def find_camera(model):
             return name, i
     return None, -1
 
+def peek(model, data, cam_id, q_home, obj_xyz, dx, dy):
+    """Move the wrist sideways so the fingers stop occluding the object.
+
+    Offsets gripper/base in world x/y from the object's position, keeping the
+    approach axis pointing down. Returns the joint vector actually reached, or
+    q_home unchanged if every offset failed IK.
+    """
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
+    base_z = float(data.xpos[base_id][2])
+    obj_xyz = np.asarray(obj_xyz, float)
+
+    for scale in (1.0, 1.6, 2.4):
+        target = [obj_xyz[0] + dx * scale, obj_xyz[1] + dy * scale, base_z]
+        q = solve_ik(model, target, q_home)
+        check = mujoco.MjData(model)
+        check.qpos[:] = q
+        mujoco.mj_forward(model, check)
+        posed = np.array(check.xpos[base_id])
+        if np.linalg.norm(posed - np.array(target)) < 5e-3:
+            cam = np.array(check.cam_xpos[cam_id])
+            if cam[2] > TABLE_HEIGHT + 0.05:
+                return q
+    return q_home
 
 def perceive(model, data, camera, cam_id):
     """Locate the object on the work surface.
@@ -185,6 +244,8 @@ def main():
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'target')
     base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
     grip_act = model.nu - 1                       # fingers_actuator
+    free_joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'target_free')
+    rng = np.random.default_rng()
 
     camera = RGBDCamera(model, cam_name, width=640, height=480)
     print(f'[INFO] intrinsics K:\n{camera.K}')
@@ -237,14 +298,83 @@ def main():
         while viewer.is_running():
             restart[0] = False
 
-            # ---- reset scene and let it settle -------------------------
-            mujoco.mj_resetDataKeyframe(model, data, home_id)
-            mujoco.mj_forward(model, data)
-            q_home = data.qpos[:ARM_DOF].copy()
-            for _ in range(2000):
-                data.ctrl[:ARM_DOF] = q_home          # hold the home pose
-                data.ctrl[grip_act] = GRIP_OPEN
-                mujoco.mj_step(model, data)
+            # ---- reset scene, randomise object position and let it settle, move camera back if occluded  ------------------
+            estimate = None
+            q_plan = data.qpos[:ARM_DOF].copy()
+
+            for attempt in range(PERCEPTION_TRIES):
+                mujoco.mj_resetDataKeyframe(model, data, home_id)
+                mujoco.mj_forward(model, data)
+
+                if HARD_SPAWN_MODE:
+                    hx, hy = HARD_SPAWNS[attempt % len(HARD_SPAWNS)]
+                    adr = model.jnt_qposadr[free_joint_id]
+                    data.qpos[adr:adr + 3] = [hx, hy, TABLE_HEIGHT + SPAWN_CLEARANCE]
+                    data.qpos[adr + 3:adr + 7] = [1.0, 0.0, 0.0, 0.0]
+                    mujoco.mj_forward(model, data)
+
+                elif RANDOMIZE_SPAWN:
+                    adr = model.jnt_qposadr[free_joint_id]
+                    data.qpos[adr:adr + 3] = [rng.uniform(*SPAWN_X_RANGE),
+                                              rng.uniform(*SPAWN_Y_RANGE),
+                                              TABLE_HEIGHT + SPAWN_CLEARANCE]
+                    data.qpos[adr + 3:adr + 7] = [1.0, 0.0, 0.0, 0.0]
+                    mujoco.mj_forward(model, data)
+
+                viewer.sync() 
+                q_home = data.qpos[:ARM_DOF].copy()
+                for _ in range(2000):
+                    data.ctrl[:ARM_DOF] = q_home
+                    data.ctrl[grip_act] = GRIP_OPEN
+                    mujoco.mj_step(model, data)
+                    if _ % 50 == 0:
+                        viewer.sync()
+
+                est, n_pts, _ = perceive(model, data, camera, cam_id)
+                if est is None or n_pts < MIN_OBJECT_POINTS:
+                    print(f'[PERCEPTION] nominal view weak ({n_pts} points); '
+                          f'peeking around the gripper')
+                    for dx, dy in VIEW_OFFSETS[1:]:
+                        q_peek = peek(model, data, cam_id, q_home, est, dx, dy)
+                        move_arm(q_peek, scaled(STEPS_PEEK), viewer)
+                        if restart[0]:
+                            break
+                        est2, n2, _ = perceive(model, data, camera, cam_id)
+                        print(f'[PERCEPTION] peek dx={dx:+.3f} dy={dy:+.3f} '
+                              f'-> {n2} points')
+                        if est2 is not None and n2 >= MIN_OBJECT_POINTS:
+                            est, n_pts = est2, n2
+                            q_plan = data.qpos[:ARM_DOF].copy()
+                            break
+                        move_arm(q_home, scaled(STEPS_PEEK), viewer)   # back to nominal
+                        if restart[0]:
+                            break
+                        # data.qpos[:ARM_DOF] = q_peek[:ARM_DOF]
+                        # mujoco.mj_forward(model, data)
+                        # for _ in range(300):
+                        #     data.ctrl[:ARM_DOF] = q_peek[:ARM_DOF]
+                        #     data.ctrl[grip_act] = GRIP_OPEN
+                        #     mujoco.mj_step(model, data)
+                        est2, n2, _ = perceive(model, data, camera, cam_id)
+                        print(f'[PERCEPTION] peek dx={dx:+.3f} dy={dy:+.3f} '
+                              f'-> {n2} points')
+                        if est2 is not None and n2 >= MIN_OBJECT_POINTS:
+                            est, n_pts = est2, n2
+                            q_plan = data.qpos[:ARM_DOF].copy()
+                            break
+
+                if est is not None and n_pts >= MIN_OBJECT_POINTS:
+                    estimate = est
+                    q_plan = data.qpos[:ARM_DOF].copy()
+                    break
+                print(f'[PERCEPTION] rejected sample ({n_pts} points); resampling')
+
+            if estimate is None:
+                print('[WARN] no usable perception after '
+                      f'{PERCEPTION_TRIES} attempts; press R to retry')
+                while viewer.is_running() and not restart[0]:
+                    viewer.sync()
+                continue
 
             # ---- perceive ----------------------------------------------
             estimate, n_pts, _ = perceive(model, data, camera, cam_id)
@@ -262,7 +392,7 @@ def main():
             # ---- plan ---------------------------------------------------
             grasp_z = estimate[2] + TIP_OFFSET
             q_approach = solve_ik(model, [estimate[0], estimate[1],
-                                          grasp_z + APPROACH_Z], q_home)
+                                          grasp_z + APPROACH_Z], q_plan)
             q_final = solve_ik(model, [estimate[0], estimate[1],
                                        grasp_z + FINAL_Z], q_approach)
             q_grasp = solve_ik(model, [estimate[0], estimate[1], grasp_z], q_final)
