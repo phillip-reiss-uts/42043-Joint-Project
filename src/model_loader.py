@@ -6,9 +6,20 @@ import mujoco_menagerie as mm
 CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
 CAM_POS = [0.05, 0.0, -0.03]
 
-# Camer mesh position and rotation
+# Camera mesh position and rotation
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
 MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
+
+# Work surface (top face at TABLE_HEIGHT)
+TABLE_HEIGHT  = 0.02                  # top face z
+TABLE_THICK   = 0.02                  # slab thickness
+TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
+TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
+# Target object, resting on the work surface.
+# OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
+OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
+OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
+
 
 def load_robot_model():
     """
@@ -92,7 +103,35 @@ def load_robot_model():
         print(f"[WARNING] Could not add floor texture: {e}")
 
     # ------------------------------------------------------------------
-    # 5. Compile
+    # 5. Work surface. Top face lands exactly on TABLE_HEIGHT.
+    # ------------------------------------------------------------------
+    table_geom = arm.worldbody.add_geom()
+    table_geom.name = "table"
+    table_geom.type = mujoco.mjtGeom.mjGEOM_BOX
+    table_geom.size = [TABLE_HALF[0], TABLE_HALF[1], TABLE_THICK / 2.0]
+    table_geom.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT - TABLE_THICK / 2.0]
+    table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
+
+    # ------------------------------------------------------------------
+    # 6. Target object (its own body, so it can carry a freejoint)
+    # ------------------------------------------------------------------
+    obj_body = arm.worldbody.add_body()
+    obj_body.name = "target"
+    obj_body.pos = OBJECT_POS
+
+    obj_joint = obj_body.add_freejoint()
+    obj_joint.name = "target_free"
+
+    obj_geom = obj_body.add_geom()
+    obj_geom.name = "target_geom"
+    obj_geom.type = mujoco.mjtGeom.mjGEOM_BOX
+    obj_geom.size = OBJECT_SIZE
+    obj_geom.rgba = [0.9, 0.3, 0.2, 1.0]
+    obj_geom.contype = 1
+    obj_geom.conaffinity = 1
+
+    # ------------------------------------------------------------------
+    # 7. Compile
     # ------------------------------------------------------------------
 
     try:
