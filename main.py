@@ -4,9 +4,10 @@ import mujoco.viewer
 
 from src.model_loader import load_robot_model
 from src.camera import RGBDCamera
-
+from src.floor import fit_plane_ransac, remove_plane
 
 def main():
+   
     model = load_robot_model()
     if model is None:
         return
@@ -17,6 +18,7 @@ def main():
     home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, "home")
     if home_id >= 0:
         mujoco.mj_resetDataKeyframe(model, data, home_id)
+        mujoco.mj_forward(model, data)          # <-- derived quantities (cam_xpos/xmat)
         print("[INFO] Reset to 'home' keyframe.")
     else:
         print("[INFO] No 'home' keyframe found, using default state.")
@@ -52,6 +54,18 @@ def main():
 
     print(f"[INFO] Intrinsics K:\n{camera.K}")
 
+    # RANSAC fit floor plane for removal (replace with calibration later ) 
+    rgb0, depth0 = camera.capture(data)
+    pts0 = camera.deproject(depth0, data)
+    cloud0 = pts0[np.isfinite(pts0).all(axis=-1)]
+
+    floor, inlier_frac = fit_plane_ransac(cloud0)
+    if floor is None:
+        print("[WARN] Floor fit failed; continuing without floor removal.")
+    else:
+        print(f"[CAL] floor plane n={np.round(floor.n, 4)} d={floor.d:.5f} "
+              f"({inlier_frac:.1%} inliers)")
+
     # Viewer
     print("[INFO] Launching viewer. Press ESC to exit.")
     step = 0
@@ -73,6 +87,15 @@ def main():
                 rgb, depth = camera.capture(data)
                 points = camera.deproject(depth, data)
 
+                if floor is None:
+                    continue
+                
+                # Remove floor
+                keep, object_points = remove_plane(points, floor, tol=0.005)
+                print(f"[RGB-D] {keep.sum()} object points of "
+                      f"{np.isfinite(points).all(axis=-1).sum()} valid")
+                
+                '''
                 valid = np.isfinite(points).all(axis=-1)
                 n_valid = int(valid.sum())
                 if n_valid > 0:
@@ -80,6 +103,9 @@ def main():
                     print(f"[RGB-D] rgb={rgb.shape} depth={depth.shape} "
                           f"valid={n_valid} "
                           f"z=[{z.min():.3f}, {z.max():.3f}] m")
+                '''
+
+
 
             viewer.sync()
 

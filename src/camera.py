@@ -96,6 +96,9 @@ class RGBDCamera:
         points : (H, W, 3) float64 — one world-frame point per pixel.
                  Invalid pixels (depth <= 0 or non-finite) are set to NaN.
         """
+
+        mujoco.mj_forward(self.model, data)
+
         H, W = depth.shape
         fx = self.K[0, 0]
         fy = self.K[1, 1]
