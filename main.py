@@ -78,6 +78,20 @@ HARD_SPAWNS = (
 )
 HARD_SPAWN_MODE = True     # True -> ignore the random range, use HARD_SPAWNS
 
+
+# Place target. 
+PLACE_DX = 0.0          # offset from TABLE_CENTRE in x
+PLACE_DY = 0.0          # offset from TABLE_CENTRE in y
+STEPS_PLACE_APPROACH = 2000
+STEPS_PLACE_DOWN = 1500
+STEPS_RELEASE = 2000
+STEPS_RETREAT = 1500
+
+ARM_SPEED = 0.04        # m/s, at MOTION_SPEED = 1.0
+MIN_PHASE_STEPS = 400    # so very short moves still ramp rather than snap
+
+PLACE_CLEARANCE = 0.002      
+
 def find_camera(model):
     """Return (name, id) of the wrist camera."""
     for candidate in ('camera/depth_cam', 'depth_cam'):
@@ -90,6 +104,8 @@ def find_camera(model):
             return name, i
     return None, -1
 
+
+
 def peek(model, data, cam_id, q_home, obj_xyz, dx, dy):
     """Move the wrist sideways so the fingers stop occluding the object.
 
@@ -101,9 +117,20 @@ def peek(model, data, cam_id, q_home, obj_xyz, dx, dy):
     base_z = float(data.xpos[base_id][2])
     obj_xyz = np.asarray(obj_xyz, float)
 
+    # --- ADD 1: orientation to hold, taken from the pose we are peeking from ---
+    d_hold = mujoco.MjData(model)
+    d_hold.qpos[:] = data.qpos          # full nq; q_home is arm-only
+    mujoco.mj_forward(model, d_hold)
+    R_hold = np.array(d_hold.xmat[base_id]).reshape(3, 3)
+    # --------------------------------------------------------------------------
+
     for scale in (1.0, 1.6, 2.4):
         target = [obj_xyz[0] + dx * scale, obj_xyz[1] + dy * scale, base_z]
-        q = solve_ik(model, target, q_home)
+
+        # --- CHANGE 2: pin the orientation so wrist_3 cannot spin ~1.77 rad ---
+        q = solve_ik(model, target, q_home, R_target=R_hold)
+        # ----------------------------------------------------------------------
+
         check = mujoco.MjData(model)
         check.qpos[:] = q
         mujoco.mj_forward(model, check)
@@ -152,16 +179,9 @@ def perceive(model, data, camera, cam_id):
 def scaled(steps):
     return max(1, int(round(steps / MOTION_SPEED)))
 
-def solve_ik(model, target, q_init, iters=600, gain_p=0.5, gain_o=0.5,
-             damp=1e-2, max_joint=3.0):
-    """DLS IK for gripper/base -- position AND orientation -- seeded near q_init.
+def solve_ik(model, target, q_init, R_target=R_DOWN, iters=600,
+             gain_p=0.5, gain_o=0.5, damp=1e-2, max_joint=3.0):
 
-    Position-only IK reaches the right point with the tool tilted (30 deg at the
-    grasp pose), leaving the fingers above the object and closing along a skewed
-    axis. The orientation term pins the approach axis to world -z via R_DOWN.
-
-    Operates on the arm joints only; the object freejoint keeps its keyframe value.
-    """
     base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
     target = np.asarray(target, float)
 
@@ -180,7 +200,7 @@ def solve_ik(model, target, q_init, iters=600, gain_p=0.5, gain_o=0.5,
         err_p = target - np.array(d.xpos[base_id])
 
         R = np.array(d.xmat[base_id]).reshape(3, 3)
-        eR = R_DOWN @ R.T
+        eR = R_target @ R.T
         err_o = np.array([eR[2, 1] - eR[1, 2],
                           eR[0, 2] - eR[2, 0],
                           eR[1, 0] - eR[0, 1]]) * 0.5
@@ -252,12 +272,24 @@ def main():
 
     restart = [False]
 
+    def steps_for(q_from, q_to):
+        """Step count that covers the joint-space move at ARM_SPEED."""
+        return max(MIN_PHASE_STEPS,
+                   int(np.linalg.norm(np.asarray(q_to)[:arm_dof]
+                                      - np.asarray(q_from)[:arm_dof])
+                       / ARM_SPEED / model.opt.timestep))
+
     def on_key(keycode):
         if keycode in (ord('R'), ord('r')):
             restart[0] = True
 
-    def move_arm(q_target, steps, viewer, grip=GRIP_OPEN, ease='quintic'):
+    def move_arm(q_target, viewer, grip=GRIP_OPEN, ease='quintic'):
+
         q_start = data.qpos[:ARM_DOF].copy()
+        dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
+                                    - np.asarray(q_start)[:ARM_DOF]))
+        steps = max(MIN_PHASE_STEPS,
+                    int(dist / ARM_SPEED / model.opt.timestep))
         for i in range(steps):
             a = (i + 1) / steps
             if ease == 'quintic':
@@ -284,6 +316,17 @@ def main():
             a = (i + 1) / steps
             data.ctrl[:ARM_DOF] = q_hold
             data.ctrl[grip_act] = GRIP_OPEN + a * (grip_end - GRIP_OPEN)
+            mujoco.mj_step(model, data)
+            if viewer is not None and i % 25 == 0:
+                viewer.sync()
+
+    def open_gripper(steps, viewer):
+        """Ramp the fingers open while holding the present arm pose."""
+        q_hold = data.qpos[:ARM_DOF].copy()
+        for i in range(steps):
+            a = (i + 1) / steps
+            data.ctrl[:ARM_DOF] = q_hold
+            data.ctrl[grip_act] = GRIP_CLOSED + a * (GRIP_OPEN - GRIP_CLOSED)
             mujoco.mj_step(model, data)
             if viewer is not None and i % 25 == 0:
                 viewer.sync()
@@ -336,7 +379,7 @@ def main():
                           f'peeking around the gripper')
                     for dx, dy in VIEW_OFFSETS[1:]:
                         q_peek = peek(model, data, cam_id, q_home, est, dx, dy)
-                        move_arm(q_peek, scaled(STEPS_PEEK), viewer)
+                        move_arm(q_peek, viewer)
                         if restart[0]:
                             break
                         est2, n2, _ = perceive(model, data, camera, cam_id)
@@ -346,7 +389,7 @@ def main():
                             est, n_pts = est2, n2
                             q_plan = data.qpos[:ARM_DOF].copy()
                             break
-                        move_arm(q_home, scaled(STEPS_PEEK), viewer)   # back to nominal
+                        move_arm(q_home, viewer)   # back to nominal
                         if restart[0]:
                             break
                         # data.qpos[:ARM_DOF] = q_peek[:ARM_DOF]
@@ -402,24 +445,24 @@ def main():
             print(f'[PLAN] grasp base z={grasp_z:.4f}, lift base z={grasp_z + LIFT_Z:.4f}')
 
 
-            move_arm(q_approach, scaled(STEPS_APPROACH), viewer, grip=GRIP_OPEN)
+            move_arm(q_approach, viewer, grip=GRIP_OPEN)
             if restart[0]:
                 continue
             print(f'[EXEC] approach  base={np.round(data.xpos[base_id], 4)}')
 
-            move_arm(q_final,    scaled(STEPS_FINAL),    viewer, grip=GRIP_OPEN)   # descend, still open
-            move_arm(q_grasp,    scaled(STEPS_GRASP),    viewer, grip=GRIP_OPEN)
+            move_arm(q_final, viewer, grip=GRIP_OPEN)   # descend, still open
+            move_arm(q_grasp, viewer, grip=GRIP_OPEN)
             if restart[0]:
                 continue
             print(f'[EXEC] at grasp  base={np.round(data.xpos[base_id], 4)} '
                   f'obj={np.round(data.xpos[body_id], 4)}')
 
-            close_gripper(GRIP_CLOSED, scaled(STEPS_CLOSE), viewer)         # close in place
+            close_gripper(GRIP_CLOSED, scaled(STEPS_CLOSE), viewer)        # close in place
             if restart[0]: 
                 continue
             print(f'[EXEC] closed    obj={np.round(data.xpos[body_id], 4)}')
 
-            move_arm(q_lift,     scaled(STEPS_LIFT),     viewer, grip=GRIP_CLOSED)   # lift, holding
+            move_arm(q_lift, viewer, grip=GRIP_CLOSED)   # lift, holding
 
             axis = np.array(data.xmat[base_id]).reshape(3, 3)[:, 2]
             print(f'[EXEC] grasp axis={np.round(axis, 4)} '
@@ -430,6 +473,46 @@ def main():
             ok = height > 0.06
             print(f'[RESULT] {"PICK SUCCEEDED" if ok else "PICK FAILED"} '
                   f'-- object {height:+.4f} m above the surface')
+
+            # ---- place --------------------------------------------------
+            # The fingers must reach the surface exactly, so the drop height is
+            # object-centre height + the base->fingertip offset.
+            place_xy = (TABLE_CENTRE[0] + PLACE_DX, TABLE_CENTRE[1] + PLACE_DY)
+            #place_base_z = TABLE_HEIGHT + OBJECT_HEIGHT / 2.0 + TIP_OFFSET
+            place_base_z = grasp_z + PLACE_CLEARANCE
+
+            q_place_app = solve_ik(model, [place_xy[0], place_xy[1],
+                                           place_base_z + APPROACH_Z], q_lift)
+            q_place = solve_ik(model, [place_xy[0], place_xy[1],
+                                       place_base_z], q_place_app)
+            q_retreat = solve_ik(model, [place_xy[0], place_xy[1],
+                                         place_base_z + LIFT_Z], q_place)
+
+            print(f'[PLAN] place at ({place_xy[0]:+.3f}, {place_xy[1]:+.3f}) '
+                  f'base z={place_base_z:.4f}')
+
+            move_arm(q_place_app, viewer, grip=GRIP_CLOSED)
+            if restart[0]:
+                continue
+            move_arm(q_place, viewer, grip=GRIP_CLOSED)
+            if restart[0]:
+                continue
+
+            print(f'[EXEC] placed {np.round(data.xpos[base_id], 4)} '
+                  f'obj={np.round(data.xpos[body_id], 4)}')
+
+            open_gripper(scaled(STEPS_RELEASE), viewer)
+            if restart[0]:
+                continue
+
+            move_arm(q_retreat, viewer, grip=GRIP_OPEN)
+
+            placed = np.array(data.xpos[body_id])
+            err = np.linalg.norm(placed[:2] - np.array(place_xy))
+            resting = abs(placed[2] - (TABLE_HEIGHT + OBJECT_HEIGHT / 2.0)) < 0.005
+            print(f'[RESULT] PLACE {"OK" if resting else "FAILED"} -- '
+                  f'object at {np.round(placed, 4)}, '
+                  f'{err * 1000:.1f} mm from target')
 
             # ---- hold until R or window close ---------------------------
             print('[INFO] holding -- R to re-run, close the window to exit')
