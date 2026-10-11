@@ -54,6 +54,38 @@ def _hull2d(P):
     up = half(P[::-1])
     return np.array(lo[:-1] + up[:-1])
 
+def fitted_centre(obj_pts, band=0.004):
+    """Centre of the minimum-area rectangle of the object's top face.
+
+    Preferred over an axis-aligned bbox centre, which leans toward whichever side
+    is more complete when the cluster is clipped or the object is rotated. Uses
+    the same rotating-calipers fit as detect_yaw.
+    """
+    z_med = np.median(obj_pts[:, 2])
+    top = obj_pts[np.abs(obj_pts[:, 2] - z_med) < band]
+    if len(top) < 30:
+        return None
+
+    H = _hull2d(top[:, :2])
+    if len(H) < 3:
+        return None
+
+    best = None
+    for i in range(len(H)):
+        e = H[(i + 1) % len(H)] - H[i]
+        n = np.linalg.norm(e)
+        if n < 1e-12:
+            continue
+        u = e / n
+        v = np.array([-u[1], u[0]])
+        pu, pv = H @ u, H @ v
+        area = (pu.max() - pu.min()) * (pv.max() - pv.min())
+        if best is None or area < best[0]:
+            cu = 0.5 * (pu.max() + pu.min())
+            cv = 0.5 * (pv.max() + pv.min())
+            best = (area, u * cu + v * cv)
+
+    return best[1] if best else None
 
 def detect_yaw(obj_pts, band=0.004):
     """Orientation of a box-like object, degrees modulo 90.
@@ -147,15 +179,21 @@ def perceive(model, data, camera, cam_id):
     if len(obj) < 50:
         return Detection(None, 0, None, 0.0)
 
-    # A point-count gate alone cannot tell the object from the table: an
-    # out-of-view peek returned 19412 points -- the whole tabletop -- which
-    # passed MIN_OBJECT_POINTS. Reject anything with a far larger footprint.
-    obj_half = np.asarray(OBJECT_SIZE)
+    # A clean cluster is the object's top face. Its axis-aligned span varies with
+    # yaw: 0.060 at 0/90 deg, rising to 0.060*sqrt(2)=0.085 at 45 deg (measured
+    # 0.076 at yaw 20, 0.061 at yaw 0). So the cap must allow the diagonal -- a
+    # 1.25x cap rejected perfectly-centred detections at intermediate yaw.
+    # The floor still rejects clipped slivers, which bias the centre by 20-30 mm.
+    obj_size = np.asarray(OBJECT_SIZE)[:2] * 2.0
     span = obj[:, :2].max(axis=0) - obj[:, :2].min(axis=0)
-    if np.any(span > 3.0 * obj_half[:2]):
+    if np.any(span > obj_size.max() * np.sqrt(2.0) * 1.10):
+        return Detection(None, len(obj), None, 0.0)
+    if np.any(span < obj_size.max() * 0.70):
         return Detection(None, len(obj), None, 0.0)
 
-    centre_xy = 0.5 * (obj[:, :2].min(axis=0) + obj[:, :2].max(axis=0))
+    centre_xy = fitted_centre(obj)
+    if centre_xy is None:
+        centre_xy = 0.5 * (obj[:, :2].min(axis=0) + obj[:, :2].max(axis=0))
 
     # The camera only ever sees the top face, so the centroid's z is the top of
     # the object, not its centre. Derive the centre from the known surface height.

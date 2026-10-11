@@ -11,7 +11,7 @@ import numpy as np
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, R_DOWN,
     RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS,
-    TABLE_HEIGHT,  
+    TABLE_HEIGHT, SYNC_DT, SYNC_STEPS,
 )
 
 
@@ -101,15 +101,18 @@ class Arm:
               f'axis={np.round(axis, 4)}')
         return tilt
 
-    # ---------------------------------------------------------------- motion ---
     def move(self, q_target, grip, rate=RAPID, viewer=None, ease='quintic'):
-        """Servo the arm to q_target at a fixed rate, holding a gripper command."""
         data, model = self.data, self.model
         q_start = data.qpos[:ARM_DOF].copy()
         dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
                                     - np.asarray(q_start)[:ARM_DOF]))
         floor = FEED_MIN_STEPS if rate <= FEED else RAPID_MIN_STEPS
         steps = max(floor, int(dist / rate / model.opt.timestep))
+
+        # Pace frames by simulated time (~60 Hz), not by move length: a fixed
+        # interval either stutters on a short fast hop or burns hundreds of
+        # renders on a long slow one. Syncs then total ~(sim duration)/16ms.
+        sync_every = max(1, SYNC_STEPS)
 
         for i in range(steps):
             a = (i + 1) / steps
@@ -120,7 +123,7 @@ class Arm:
             data.ctrl[:ARM_DOF] = a * q_target[:ARM_DOF] + (1 - a) * q_start
             data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
-            if viewer is not None and i % 25 == 0:
+            if viewer is not None and i % sync_every == 0:
                 viewer.sync()
 
     def close_gripper(self, steps, viewer=None):
@@ -145,7 +148,7 @@ class Arm:
             data.ctrl[:ARM_DOF] = q_hold
             data.ctrl[self.grip_act] = g_from + a * (g_to - g_from)
             mujoco.mj_step(model, data)
-            if viewer is not None and i % 25 == 0:
+            if viewer is not None and i % SYNC_STEPS  == 0:
                 viewer.sync()
 
     def hold(self, grip):

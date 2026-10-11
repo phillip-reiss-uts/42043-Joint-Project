@@ -1,8 +1,7 @@
 """One pick-and-place attempt, end to end.
 
 Owns scene reset and object placement, the perception retry policy, and the
-grasp/place sequence. Knows nothing about the viewer loop or restart handling
-beyond a callback that lets it bail out mid-sequence.
+grasp/place sequence. Knows nothing about the viewer loop.
 """
 
 from dataclasses import dataclass
@@ -10,45 +9,63 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
+from src import config as cfg
 from src.config import (
-    ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED,
+    ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED, R_DOWN,
     TABLE_HEIGHT, TABLE_CENTRE, OBJECT_HEIGHT,
-    SPAWN_X_RANGE, SPAWN_Y_RANGE, SPAWN_CLEARANCE, 
+    SPAWN_X_RANGE, SPAWN_Y_RANGE, SPAWN_CLEARANCE,
     HARD_SPAWNS, HARD_SPAWN_MODE, REALLY_HARD_MODE, HARD_BLIND_Y,
     RANDOMIZE_SPAWN, RANDOMIZE_YAW,
-    MIN_OBJECT_POINTS, PERCEPTION_TRIES, VIEW_OFFSETS,
+    MIN_OBJECT_POINTS,  
     TIP_OFFSET, APPROACH_Z, FINAL_Z, LIFT_Z,
-    PLACE_DX, PLACE_DY, PLACE_CLEARANCE, STEPS_CLOSE, STEPS_RELEASE,
+    PLACE_DX, PLACE_DY, PLACE_OFFSET_X, PLACE_OFFSET_Y,
+    PLACE_CLEARANCE, STEPS_CLOSE, STEPS_RELEASE,
+    REVOLVE_DEG, REVOLVE_SPEED, SYNC_DT, SYNC_STEPS,
+    SEARCH_OFFSETS, SEARCH_SPEED, REVOLVE_DEG, REVOLVE_SPEED,
 )
 from src.perception import perceive, rotation_with_yaw
 
 
 @dataclass
 class Result:
-    picked: bool = False
-    placed: bool = False
+    """Outcome of one attempt. The batch harness reads these fields."""
+    found: bool = False         # perception produced a usable object
+    picked: bool = False        # object left the table
+    placed: bool = False        # object settled back on the surface
     yaw: float = 0.0
-    perr: float = float('nan')     # perception error vs truth (sim only)
+    perr: float = float('nan')  # perception error vs truth (simulation only)
     placed_err: float = float('nan')
-    aborted: bool = False          # caller asked to restart mid-sequence
+    n_samples: int = 0          # resamples consumed before perception succeeded
+    n_peeks: int = 0
+    aborted: bool = False
 
 
-# scene setup
-def place_object(model, data, rng, home_id, free_joint_id):
+def _log(msg):
+    """Stage logging, gated at call time so config.VERBOSE can be toggled."""
+    if cfg.VERBOSE:
+        print(msg)
+
+
+# ------------------------------------------------------------ scene setup ---
+def place_object(model, data, rng, home_id, free_joint_id, body_id, viewer=None):
     """Reset the scene, put the object somewhere, and let it settle.
 
-    Returns the home joint vector and the object's true position.
+    Returns (home joint vector, true object position).
     """
     mujoco.mj_resetDataKeyframe(model, data, home_id)
     mujoco.mj_forward(model, data)
 
+    if viewer is not None:
+        viewer.sync()  
+
+    q_home = data.qpos[:ARM_DOF].copy()
     adr = model.jnt_qposadr[free_joint_id]
 
     if REALLY_HARD_MODE:
         x = rng.uniform(*SPAWN_X_RANGE)
         y = rng.uniform(*HARD_BLIND_Y)
     elif HARD_SPAWN_MODE:
-        x, y = HARD_SPAWNS[rng.integers(len(HARD_SPAWNS))]
+        x, y = HARD_SPAWNS[int(rng.integers(len(HARD_SPAWNS)))]
     elif RANDOMIZE_SPAWN:
         x = rng.uniform(*SPAWN_X_RANGE)
         y = rng.uniform(*SPAWN_Y_RANGE)
@@ -65,112 +82,190 @@ def place_object(model, data, rng, home_id, free_joint_id):
     mujoco.mj_forward(model, data)
 
     q_home = data.qpos[:ARM_DOF].copy()
-    for _ in range(2000):
+    for i in range(2000):
         data.ctrl[:ARM_DOF] = q_home
         data.ctrl[model.nu - 1] = GRIP_OPEN
         mujoco.mj_step(model, data)
-
-    return q_home, np.array(data.xpos[mujoco.mj_name2id(
-        model, mujoco.mjtObj.mjOBJ_BODY, 'target')]).copy()
-
-
-# perception 
-def find_object(arm, camera, cam_id, model, data, rng, home_id,
-                free_joint_id, viewer=None, aborted=None):
-    """Place the object and locate it, resampling then peeking if occluded.
-
-    Resample first: it costs one reset plus one settle, and most occluded samples
-    clear on a new draw. Moving the camera costs arm moves, so it is the last
-    resort.
-
-    Returns (Detection, q_plan, truth) or (None, None, truth).
-    """
-    det = None
-    estimate = None
-    q_home = None
-    truth = None
-
-    for _ in range(PERCEPTION_TRIES):
-        q_home, truth = place_object(model, data, rng, home_id, free_joint_id)
+        # the object only moves for the first ~200 steps; sync there so the fall
+        # is visible, then step silently. A flat i % 5 here is 400 renders per
+        # attempt, 390 of them showing an object already at rest.
         if viewer is not None:
-            viewer.sync()
+            if i < 200 and i % SYNC_STEPS  == 0:
+                viewer.sync()
+            elif i >= 200 and i % 200 == 0:
+                viewer.sync()
+
+    return q_home, np.array(data.xpos[body_id]).copy()
+
+
+def _detect_once(model, data, arm, camera, cam_id, rng, result, home_id,
+                 free_joint_id, body_id, viewer, aborted, respawn=True):
+    """Place the object once, then search for it.
+
+    Two searches, in order of what actually clears the obstruction:
+
+    1. Translate. The wrist camera sits 50 mm behind gripper/base, so anything
+       more than ~50 mm ahead of the jaws is in the camera's own shadow, and no
+       wrist rotation can move the camera past it. Moving the gripper forward is
+       the only fix.
+    2. Revolve. For close-range jaw occlusion that translation alone does not
+       clear -- the camera looks past the jaws and the gap depends on yaw.
+
+    Only the nominal view and the searched views are attempted; a miss returns
+    None and the caller reports it. Nothing resets the scene.
+
+    Returns (Detection, q_plan, truth), Detection None if nothing was found.
+    """
+    def stopped():
+        return aborted is not None and aborted()
+
+    def reached(q, target):
+        """True if IK actually put gripper/base at target."""
+        check = mujoco.MjData(model)
+        check.qpos[:] = q
+        mujoco.mj_forward(model, check)
+        return np.linalg.norm(np.array(check.xpos[arm.base_id])
+                              - np.array(target)) < 1e-3
+
+    if respawn:
+        q_home, truth = place_object(model, data, rng, home_id,
+                                     free_joint_id, body_id, viewer=viewer)
+    else:
+
+
+        print(f'[DBG] no-respawn branch, object at '
+              f'{np.round(data.xpos[body_id][:2], 3)}')        
+        # keep the scene, but return to the nominal viewing pose. The search
+        # offsets are relative to the current gripper position, so from the
+        # post-place retreat pose they sweep the wrong part of the table.
+        # Moving the arm does not move the object, so this is not a reset.
+        truth = np.array(data.xpos[body_id]).copy()
+        d_ref = mujoco.MjData(model)
+        mujoco.mj_resetDataKeyframe(model, d_ref, home_id)
+        q_home = np.array(d_ref.qpos[:ARM_DOF])
+        arm.move(q_home, GRIP_OPEN, rate=SEARCH_SPEED, viewer=viewer)
+    if stopped():
+        result.aborted = True
+        return None, None, truth
+
+    det = perceive(model, data, camera, cam_id)
+    if det.ok and det.n_points >= MIN_OBJECT_POINTS:
+        return det, data.qpos[:ARM_DOF].copy(), truth
+    _log(f'[PERCEPTION] nominal view weak ({det.n_points} pts); searching')
+
+    # the nominal pose is the anchor: offsets are applied to it, not accumulated
+    anchor = np.array(data.xpos[arm.base_id], float)
+    tgt_z = float(anchor[2])
+
+    # --- 1. translate: get the camera ahead of the object -------------------
+    for dx, dy in SEARCH_OFFSETS:
+        target = [anchor[0] + dx, anchor[1] + dy, tgt_z]
+        q = arm.solve_ik(target, data.qpos[:ARM_DOF], R_target=R_DOWN)
+        if not reached(q, target):
+            _log(f'[PERCEPTION] search ({dx:+.2f},{dy:+.2f}): IK failed')
+            continue
+
+        arm.move(q, GRIP_OPEN, rate=SEARCH_SPEED, viewer=viewer)
+        result.n_peeks += 1
+        if stopped():
+            result.aborted = True
+            return None, None, truth
 
         det = perceive(model, data, camera, cam_id)
+        _log(f'[PERCEPTION] search ({dx:+.2f},{dy:+.2f}) -> {det.n_points} pts')
         if det.ok and det.n_points >= MIN_OBJECT_POINTS:
-            break
-        print(f'[PERCEPTION] rejected sample ({det.n_points} points); resampling')
+            return det, data.qpos[:ARM_DOF].copy(), truth
 
-    if det is not None and det.ok and det.n_points >= MIN_OBJECT_POINTS:
-        return det, data.qpos[:ARM_DOF].copy(), truth
+    # --- 2. revolve: change which gap the camera looks through --------------
+    for ang in REVOLVE_DEG:
+        R_ang = rotation_with_yaw(ang, R_DOWN)
+        q = arm.solve_ik([anchor[0], anchor[1], tgt_z], data.qpos[:ARM_DOF],
+                         R_target=R_ang)
+        if not reached(q, [anchor[0], anchor[1], tgt_z]):
+            _log(f'[PERCEPTION] revolve {ang:3d} deg: IK failed')
+            continue
 
-    # every draw was occluded (or nothing was in view) -- try moving the camera
-    if q_home is not None:
-        print('[PERCEPTION] no clean sample; peeking around the gripper')
-        for dx, dy in VIEW_OFFSETS[1:]:
-            anchor = (det.centre if (det is not None and det.ok)
-                      else np.array(data.xpos[free_joint_id and mujoco.mj_name2id(
-                          model, mujoco.mjtObj.mjOBJ_BODY, 'target')]))
-            q_peek = arm.peek_target(q_home, anchor, dx, dy)
-            arm.move(q_peek, GRIP_OPEN, viewer=viewer)
-            if aborted is not None and aborted():
-                return None, None, truth
+        arm.move(q, GRIP_OPEN, rate=REVOLVE_SPEED, viewer=viewer)
+        result.n_peeks += 1
+        if stopped():
+            result.aborted = True
+            return None, None, truth
 
-            det2 = perceive(model, data, camera, cam_id)
-            print(f'[PERCEPTION] peek dx={dx:+.3f} dy={dy:+.3f} '
-                  f'-> {det2.n_points} points')
-            if det2.ok and det2.n_points >= MIN_OBJECT_POINTS:
-                return det2, data.qpos[:ARM_DOF].copy(), truth
-
-            arm.move(q_home, GRIP_OPEN, viewer=viewer)
-            if aborted is not None and aborted():
-                return None, None, truth
+        det = perceive(model, data, camera, cam_id)
+        _log(f'[PERCEPTION] revolve {ang:3d} deg -> {det.n_points} pts')
+        if det.ok and det.n_points >= MIN_OBJECT_POINTS:
+            return det, data.qpos[:ARM_DOF].copy(), truth
 
     return None, None, truth
 
 
-# task 
-def pick_and_place(model, data, arm, camera, cam_id, rng, viewer=None,
-                   aborted=None):
-    """One pick-and-place attempt. Never raises for a perception miss."""
-    home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home')
-    free_joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'target_free')
-    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'target')
+def find_object(model, data, arm, camera, cam_id, rng, result,
+                home_id, free_joint_id, body_id, viewer=None, aborted=None,
+                respawn=True):
+    """Place the object once, then search for it.
+
+    No resampling: a rejected view is recovered by revolving the wrist, which
+    addresses the actual cause (occlusion) without discarding the scene. Earlier
+    versions re-placed the object on a miss, which reset the whole scene every
+    2000 steps and looked like the object teleporting around the table.
+
+    Returns (Detection, q_plan, truth). Detection is None if nothing was found.
+    """
+    det, q_plan, truth = _detect_once(
+        model, data, arm, camera, cam_id, rng, result, home_id,
+        free_joint_id, body_id, viewer, aborted, respawn=respawn)
+
+    return det, q_plan, truth
+
+# ------------------------------------------------------------------ task ---
+def pick_and_place(model, data, arm, camera, cam_id, rng,
+                   viewer=None, aborted=None, respawn=True):
+    """One pick-and-place attempt.
+
+    respawn=True  reset the scene and place the object at a new random pose
+    respawn=False keep the current scene and pick the object up where it lies
+    """
     result = Result()
 
     def stopped():
         return aborted is not None and aborted()
 
-    det, q_plan, truth = find_object(arm, camera, cam_id, model, data, rng,
-                                     home_id, free_joint_id,
-                                     viewer=viewer, aborted=aborted)
+    home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home')
+    free_joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'target_free')
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'target')
+
+    det, q_plan, truth = find_object(
+        model, data, arm, camera, cam_id, rng, result,
+        home_id, free_joint_id, body_id, viewer=viewer, aborted=aborted,
+        respawn=respawn)
+
     if det is None:
-        print(f'[WARN] object not found after {PERCEPTION_TRIES} samples and '
-              f'{len(VIEW_OFFSETS) - 1} peeks; press R to retry')
+        print(f'[WARN] object not found after {result.n_samples} samples and '
+              f'{result.n_peeks} peeks')
         return result
 
-    estimate, yaw = det.centre, det.yaw
+    result.found = True
+    centre, yaw = det.centre, det.yaw
     result.yaw = yaw
     if truth is not None:
-        result.perr = float(np.linalg.norm(estimate - truth))
-    print(f'[PERCEPTION] {det.n_points} points  centre={np.round(estimate, 4)}  '
-          f'yaw={yaw:.1f} deg  truth={np.round(truth, 4)}  '
-          f'error={result.perr:.4f} m')
+        result.perr = float(np.linalg.norm(centre - truth))
 
-    R_grasp = rotation_with_yaw(yaw, np.array([[1.0, 0.0, 0.0],
-                                               [0.0, -1.0, 0.0],
-                                               [0.0, 0.0, -1.0]]))
+    _log(f'[PERCEPTION] {det.n_points} points  centre={np.round(centre, 4)}  '
+         f'yaw={yaw:.1f} deg  error={result.perr:.4f} m')
+
+    R_grasp = rotation_with_yaw(yaw, R_DOWN)
     R_place = R_grasp
 
-    grasp_z = estimate[2] + TIP_OFFSET
-    q_approach = arm.solve_ik([estimate[0], estimate[1], grasp_z + APPROACH_Z],
+    grasp_z = centre[2] + TIP_OFFSET
+    q_approach = arm.solve_ik([centre[0], centre[1], grasp_z + APPROACH_Z],
                               q_plan, R_target=R_grasp)
-    q_final = arm.solve_ik([estimate[0], estimate[1], grasp_z + FINAL_Z],
+    q_final = arm.solve_ik([centre[0], centre[1], grasp_z + FINAL_Z],
                            q_approach, R_target=R_grasp)
-    q_grasp = arm.solve_ik([estimate[0], estimate[1], grasp_z],
+    q_grasp = arm.solve_ik([centre[0], centre[1], grasp_z],
                            q_final, R_target=R_grasp)
-    q_lift = arm.solve_ik([estimate[0], estimate[1], grasp_z + LIFT_Z],
+    q_lift = arm.solve_ik([centre[0], centre[1], grasp_z + LIFT_Z],
                           q_grasp, R_target=R_grasp)
-    print(f'[PLAN] grasp base z={grasp_z:.4f}, lift base z={grasp_z + LIFT_Z:.4f}')
+    _log(f'[PLAN] grasp base z={grasp_z:.4f}')
 
     arm.move(q_approach, GRIP_OPEN, rate=RAPID, viewer=viewer)
     if stopped():
@@ -181,9 +276,7 @@ def pick_and_place(model, data, arm, camera, cam_id, rng, viewer=None,
     if stopped():
         result.aborted = True
         return result
-    print(f'[EXEC] at grasp  base={np.round(data.xpos[arm.base_id], 4)} '
-          f'obj={np.round(data.xpos[
-              mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "target")], 4)}')
+    _log(f'[EXEC] at grasp base={np.round(data.xpos[arm.base_id], 4)}')
 
     arm.close_gripper(STEPS_CLOSE, viewer)
     if stopped():
@@ -191,15 +284,13 @@ def pick_and_place(model, data, arm, camera, cam_id, rng, viewer=None,
         return result
 
     arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=viewer)
-
-    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'target')
     lifted = float(data.xpos[body_id][2]) - TABLE_HEIGHT
     result.picked = lifted > 0.06
-    print(f'[RESULT] {"PICK SUCCEEDED" if result.picked else "PICK FAILED"} '
-          f'-- object {lifted:+.4f} m above the surface')
+    _log(f'[RESULT] PICK {"OK" if result.picked else "FAILED"} '
+         f'-- object {lifted:+.4f} m above the surface')
 
-    # place 
-    place_xy = (TABLE_CENTRE[0] + PLACE_DX, TABLE_CENTRE[1] + PLACE_DY)
+    # ---- place ---------------------------------------------------------
+    place_xy = (TABLE_CENTRE[0] + PLACE_DX + PLACE_OFFSET_X, TABLE_CENTRE[1] + PLACE_DY + PLACE_OFFSET_Y)
     place_base_z = grasp_z + PLACE_CLEARANCE
 
     q_place_app = arm.solve_ik([place_xy[0], place_xy[1],
@@ -210,8 +301,6 @@ def pick_and_place(model, data, arm, camera, cam_id, rng, viewer=None,
     q_retreat = arm.solve_ik([place_xy[0], place_xy[1],
                               place_base_z + LIFT_Z],
                              q_place, R_target=R_place)
-    print(f'[PLAN] place at ({place_xy[0]:+.3f}, {place_xy[1]:+.3f}) '
-          f'base z={place_base_z:.4f}')
 
     arm.move(q_place_app, GRIP_CLOSED, rate=RAPID, viewer=viewer)
     if stopped():
@@ -232,8 +321,7 @@ def pick_and_place(model, data, arm, camera, cam_id, rng, viewer=None,
     placed = np.array(data.xpos[body_id])
     result.placed_err = float(np.linalg.norm(placed[:2] - np.array(place_xy)))
     result.placed = abs(placed[2] - (TABLE_HEIGHT + OBJECT_HEIGHT / 2.0)) < 0.005
-    print(f'[RESULT] PLACE {"OK" if result.placed else "FAILED"} -- '
-          f'object at {np.round(placed, 4)}, '
-          f'{result.placed_err * 1000:.1f} mm from target')
+    _log(f'[RESULT] PLACE {"OK" if result.placed else "FAILED"} '
+         f'-- {result.placed_err * 1000:.1f} mm from target')
 
     return result

@@ -29,9 +29,18 @@ R_DOWN = np.array([[1.0, 0.0, 0.0],
 
 # motion rates (CNC style)
 RAPID = 0.20
-FEED = 0.015
+FEED = 0.05
 RAPID_MIN_STEPS = 200
 FEED_MIN_STEPS = 400
+
+# Viewer frame pacing. Sync once per ~16 ms of simulated time (~60 Hz), rather
+# than every N steps or a fixed number of frames per move: a fixed step interval
+# stutters on a short fast hop (a 60 mm move at RAPID is ~30 steps, so syncing
+# every 25 renders one frame) while a fixed frame count burns hundreds of
+# renders on a long slow one. Each viewer.sync() blocks on a render, so this is
+# the dominant cost of a search: measured, it was worth seconds per attempt.
+SYNC_DT = 0.016
+SYNC_STEPS = 8      # SYNC_DT at the default 0.002 timestep; steps between syncs
 
 # perception
 SELF_FILTER = 0.20
@@ -57,7 +66,7 @@ STEPS_RELEASE = 2000
 # spawn parameters
 RANDOMIZE_SPAWN = True
 RANDOMIZE_YAW = True     # spin the object about z
-SPAWN_CLEARANCE = 0.032  # spawn height above the surface; it settles onto it
+SPAWN_CLEARANCE = 0.05  # spawn height above the surface
 SPAWN_MARGIN = 0.06      # keep this clear of the table edge
 SPAWN_Y_MIN = 0.45       # measured: below this the object leaves the camera footprint
 
@@ -75,7 +84,7 @@ HARD_SPAWNS = (
     (-0.200, 0.350),     # outside the home-pose footprint: 0 pts found
     (-0.320, 0.700),     # marginal footprint, just inside the far edge
 )
-HARD_SPAWN_MODE = False
+HARD_SPAWN_MODE = True
 
 # Spawns in the strip the home camera cannot see at all (footprint is y >= 0.354).
 # KNOWN FAILING: perception returns a table-sized cluster that the bbox guard
@@ -87,3 +96,58 @@ HARD_BLIND_Y = (TABLE_CENTRE[1] - TABLE_HALF[1] + OBJECT_SIZE[1], 0.30)
 # debug flags
 VERIFY_IK = True         # run the IK self-test at startup
 VERBOSE = True           # per-stage [EXEC]/[PERCEPTION] logging
+
+# Camera position and rotation
+# Position: 5 cm off-axis, 3 cm back along -Z.
+CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
+CAM_POS = [0.05, 0.0, -0.03]
+
+# Camera mesh position and rotation
+MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
+MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
+
+# Work surface (top face at TABLE_HEIGHT)
+TABLE_HEIGHT  = 0.02                  # top face z
+TABLE_THICK   = 0.02                  # slab thickness
+TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
+TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
+
+
+# Target object, resting on the work surface.
+# OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
+OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
+OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
+OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
+
+# object placement for batch run
+PLACE_DX = 0.15          # place target offset from TABLE_CENTRE
+PLACE_DY = 0.08
+
+# The object has a consitent 5.4 mm offset when placed, using an offset value does not affect this
+PLACE_OFFSET_X = PLACE_OFFSET_Y = 0.0
+
+# Revolve search: when the nominal view can't see the object, rotate the gripper
+# at a fixed standoff. The camera sits behind gripper/base while the jaws rotate,
+# so sweeping yaw changes which gap the camera looks through without changing
+# standoff. Measured: clears 19/20 spawns, first clearing angle 0-60 deg,
+# mean 8 deg -- usually the nominal view alone works.
+REVOLVE_DEG = tuple(range(15, 260, 15))
+REVOLVE_SPEED = RAPID     # RAPID is safe here; the gripper is high, not near the object
+SEARCH_SPEED = RAPID     # looks are not contact moves; the gripper is high
+
+# Search offsets around the nominal gripper xy, tried in order.
+# Measured: for objects at the blind edge (y 0.35-0.43) the offsets that expose
+# them are +y, -x and the diagonals -- NOT -y. An earlier list of (0,-0.08),
+# (0,-0.16), (0,-0.24) searched the wrong half entirely.
+SEARCH_OFFSETS = (
+    (0.0, 0.0),        # nominal, retried after any arm settling
+    (0.0, +0.06),      # back -- puts the camera over the object
+    (-0.10, 0.0),      # left
+    (+0.10, 0.0),      # right
+    (0.0, +0.12),
+    (-0.10, +0.06),
+    (+0.10, +0.06),
+    (-0.10, +0.12),
+    (+0.10, +0.12),
+    (0.0, -0.06),      # forward last: rarely helps, kept for completeness
+)
