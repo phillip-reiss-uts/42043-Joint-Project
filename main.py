@@ -76,21 +76,37 @@ HARD_SPAWNS = (
     # marginal footprint, just inside the far edge
     (-0.320, 0.700),
 )
-HARD_SPAWN_MODE = True     # True -> ignore the random range, use HARD_SPAWNS
+HARD_SPAWN_MODE = False #True     # True -> ignore the random range, use HARD_SPAWNS
 
 
 # Place target. 
 PLACE_DX = 0.0          # offset from TABLE_CENTRE in x
 PLACE_DY = 0.0          # offset from TABLE_CENTRE in y
-STEPS_PLACE_APPROACH = 2000
-STEPS_PLACE_DOWN = 1500
+# STEPS_PLACE_APPROACH = 2000
+# STEPS_PLACE_DOWN = 1500
 STEPS_RELEASE = 2000
-STEPS_RETREAT = 1500
+# STEPS_RETREAT = 1500
+
+RANDOMIZE_YAW = True      # spin the object about z at spawn
 
 ARM_SPEED = 0.04        # m/s, at MOTION_SPEED = 1.0
 MIN_PHASE_STEPS = 400    # so very short moves still ramp rather than snap
 
-PLACE_CLEARANCE = 0.002      
+# ARM_SPEED_FAR = 0.2     # m/s of joint-space travel when far from the goal
+# ARM_SPEED_NEAR = 0.015   # m/s while finalising; held below NEAR_DIST
+# NEAR_DIST = 0.08         # joint-space distance under which speed stays NEAR
+# SPEED_RAMP_DIST = 0.6    # joint-space distance over which speed ramps down
+
+PLACE_CLEARANCE = 0.02   
+
+
+# Travel rates, CNC style: rapids between safe positions, feeds near the object.
+RAPID = 0.20     # m/s joint-space, non-contact positioning
+FEED = 0.015     # m/s joint-space, any move while near the object
+RAPID_MIN_STEPS = 200    # so a short rapid is still a smooth ramp, not a snap
+FEED_MIN_STEPS = 400
+
+
 
 def find_camera(model):
     """Return (name, id) of the wrist camera."""
@@ -178,6 +194,15 @@ def perceive(model, data, camera, cam_id):
 
 def scaled(steps):
     return max(1, int(round(steps / MOTION_SPEED)))
+
+# def speed_for(q_from, q_to):
+
+#     d = float(np.linalg.norm(np.asarray(q_to)[:ARM_DOF]
+#                                 - np.asarray(q_from)[:ARM_DOF]))
+#     if d <= NEAR_DIST:
+#         return ARM_SPEED_NEAR
+#     t = min(1.0, (d - NEAR_DIST) / SPEED_RAMP_DIST)
+#     return ARM_SPEED_NEAR + (ARM_SPEED_FAR - ARM_SPEED_NEAR) * t
 
 def solve_ik(model, target, q_init, R_target=R_DOWN, iters=600,
              gain_p=0.5, gain_o=0.5, damp=1e-2, max_joint=3.0):
@@ -272,24 +297,24 @@ def main():
 
     restart = [False]
 
-    def steps_for(q_from, q_to):
-        """Step count that covers the joint-space move at ARM_SPEED."""
-        return max(MIN_PHASE_STEPS,
-                   int(np.linalg.norm(np.asarray(q_to)[:arm_dof]
-                                      - np.asarray(q_from)[:arm_dof])
-                       / ARM_SPEED / model.opt.timestep))
+    # def steps_for(q_from, q_to):
+    #     """Step count that covers the joint-space move at ARM_SPEED."""
+    #     return max(MIN_PHASE_STEPS,
+    #                int(np.linalg.norm(np.asarray(q_to)[:arm_dof]
+    #                                   - np.asarray(q_from)[:arm_dof])
+    #                    / ARM_SPEED / model.opt.timestep))
 
     def on_key(keycode):
         if keycode in (ord('R'), ord('r')):
             restart[0] = True
 
-    def move_arm(q_target, viewer, grip=GRIP_OPEN, ease='quintic'):
-
+    def move_arm(q_target, viewer, grip=GRIP_OPEN, rate=RAPID, ease='quintic'):
         q_start = data.qpos[:ARM_DOF].copy()
         dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
                                     - np.asarray(q_start)[:ARM_DOF]))
-        steps = max(MIN_PHASE_STEPS,
-                    int(dist / ARM_SPEED / model.opt.timestep))
+        floor = FEED_MIN_STEPS if rate <= FEED else RAPID_MIN_STEPS
+        steps = max(floor, int(dist / rate / model.opt.timestep))
+
         for i in range(steps):
             a = (i + 1) / steps
             if ease == 'quintic':
@@ -445,13 +470,13 @@ def main():
             print(f'[PLAN] grasp base z={grasp_z:.4f}, lift base z={grasp_z + LIFT_Z:.4f}')
 
 
-            move_arm(q_approach, viewer, grip=GRIP_OPEN)
+            move_arm(q_approach, viewer, grip=GRIP_OPEN, rate=RAPID)
             if restart[0]:
                 continue
             print(f'[EXEC] approach  base={np.round(data.xpos[base_id], 4)}')
 
-            move_arm(q_final, viewer, grip=GRIP_OPEN)   # descend, still open
-            move_arm(q_grasp, viewer, grip=GRIP_OPEN)
+            move_arm(q_final, viewer, grip=GRIP_OPEN, rate=FEED)   # descend, still open
+            move_arm(q_grasp, viewer, grip=GRIP_OPEN, rate=FEED)
             if restart[0]:
                 continue
             print(f'[EXEC] at grasp  base={np.round(data.xpos[base_id], 4)} '
@@ -462,7 +487,7 @@ def main():
                 continue
             print(f'[EXEC] closed    obj={np.round(data.xpos[body_id], 4)}')
 
-            move_arm(q_lift, viewer, grip=GRIP_CLOSED)   # lift, holding
+            move_arm(q_lift, viewer, grip=GRIP_CLOSED, rate=FEED)   # lift, holding
 
             axis = np.array(data.xmat[base_id]).reshape(3, 3)[:, 2]
             print(f'[EXEC] grasp axis={np.round(axis, 4)} '
@@ -491,10 +516,10 @@ def main():
             print(f'[PLAN] place at ({place_xy[0]:+.3f}, {place_xy[1]:+.3f}) '
                   f'base z={place_base_z:.4f}')
 
-            move_arm(q_place_app, viewer, grip=GRIP_CLOSED)
+            move_arm(q_place_app, viewer, grip=GRIP_CLOSED, rate=RAPID)
             if restart[0]:
                 continue
-            move_arm(q_place, viewer, grip=GRIP_CLOSED)
+            move_arm(q_place, viewer, grip=GRIP_CLOSED, rate=FEED)
             if restart[0]:
                 continue
 
@@ -505,7 +530,7 @@ def main():
             if restart[0]:
                 continue
 
-            move_arm(q_retreat, viewer, grip=GRIP_OPEN)
+            move_arm(q_retreat, viewer, grip=GRIP_OPEN, rate=RAPID)
 
             placed = np.array(data.xpos[body_id])
             err = np.linalg.norm(placed[:2] - np.array(place_xy))
