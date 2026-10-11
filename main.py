@@ -20,7 +20,9 @@ from src.perception import find_camera
 from src.arm import Arm
 
 # import tasks
-from src.pick_place import pick_and_place
+# pick_and_place is the OLD single-object path, no longer called by main(); it
+# remains in pick_place.py for batch.py.
+from src.pick_place import (ObjectRegistry, reset_scene, clear_table)
 
 def _log(msg):
     """Optional diagnostics; gated by config.VERBOSE."""
@@ -50,28 +52,38 @@ def main():
     _log(f'[INFO] {model.nbody} bodies, {model.njnt} joints, '
          f'{model.nu} actuators; wrist camera = {cam_name}')
 
-    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'target')
-    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
-    grip_act = model.nu - 1                       # fingers_actuator
-    free_joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'target_free')
+    # leftover single-object ids -- unused by the pool/registry flow
+    # body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'target')
+    # base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
+    # grip_act = model.nu - 1                       # fingers_actuator
+    # free_joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'target_free')
     rng = np.random.default_rng()
 
     camera = RGBDCamera(model, cam_name, width=640, height=480)
     _log(f'[INFO] intrinsics K:\n{camera.K}')
 
     restart = [False]
-    go = [False]
-    respawn = [False]
- 
+    spawn_q = [False]
+    paused = [False]
 
     def on_key(keycode):
         if keycode in (ord('R'), ord('r')):
             restart[0] = True
-            respawn[0] = True          # R: fresh scene
-            go[0] = True               # ...and run it
-        elif keycode in (ord('G'), ord('g')):
-            respawn[0] = False         # G: whatever is in the scene
-            go[0] = True
+        elif keycode in (ord('P'), ord('p')):
+            spawn_q[0] = True
+        elif keycode in (ord('E'), ord('e')):
+            paused[0] = not paused[0]
+            print('[INFO] e-stop %s' % ('PAUSED' if paused[0] else 'resumed'))
+
+    def spawn_request():
+        """Consume a queued spawn. True once per P press."""
+        if spawn_q[0]:
+            spawn_q[0] = False
+            return True
+        return False
+
+    def estop():
+        return paused[0]
 
     arm = Arm(model, data)
 
@@ -83,26 +95,43 @@ def main():
         viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         viewer.cam.fixedcamid = cam_id
 
-        _log('[INFO] G = pick and place what is in the scene, '
-             'R = new scene, close = exit')
+        reg = ObjectRegistry(model, POOL_SIZE)
+        print('[INFO] R = reset and clear, P = drop, E = e-stop pause, close = exit')
 
         while viewer.is_running():
-            # hold after a run: waiting here means a press lands as the trigger
-            # for the next run rather than being consumed and discarded
-            while viewer.is_running() and not restart[0] and not go[0]:
-                arm.hold(GRIP_OPEN)
+            _log('[INFO] waiting -- press R to start clearing')
+            while viewer.is_running() and not restart[0]:
                 mujoco.mj_step(model, data)
                 viewer.sync()
             if not viewer.is_running():
                 break
-
-            respawn_now = respawn[0]
-            respawn[0] = False        # one-shot: only R asks for a new scene
-            go[0] = False
             restart[0] = False
 
-            pick_and_place(model, data, arm, camera, cam_id, rng,
-                           viewer=viewer, aborted=lambda: restart[0],
-                           respawn=respawn_now)
+            reset_scene(model, data, reg, rng, viewer=viewer)
+            clear_table(model, data, arm, camera, cam_id, rng, reg,
+                        viewer=viewer,
+                        aborted=lambda: restart[0],
+                        spawn_request=spawn_request,
+                        estop=estop)
+
+            while viewer.is_running() and not restart[0]:
+                arm.hold(GRIP_OPEN)
+                mujoco.mj_step(model, data)
+                viewer.sync()
+
+            # leftover from the old G/R single-object loop: references respawn[]
+            # and go[], which no longer exist. Unreachable.
+            # if not viewer.is_running():
+            #     break
+            #
+            # respawn_now = respawn[0]
+            # respawn[0] = False        # one-shot: only R asks for a new scene
+            # go[0] = False
+            # restart[0] = False
+            #
+            # pick_and_place(model, data, arm, camera, cam_id, rng,
+            #                viewer=viewer, aborted=lambda: restart[0],
+            #                respawn=respawn_now)
+
 if __name__ == '__main__':
     main()

@@ -4,37 +4,20 @@ import mujoco_menagerie as mm
 from src.config import (
     CAM_QUAT, CAM_POS, MESH_QUAT, MESH_POS,
     TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
-    OBJECT_SIZE, OBJECT_POS,
+    OBJECT_SIZE,
+    # LEFTOVER: imported but never used here -- OBJECT_POS was for the old single
+    # 'target' body; INITIAL_OBJECTS and MIN_OBJECT_SEPARATION are used by the
+    # task layer (pick_place.py), not by model construction.
+    # OBJECT_POS,
+    # INITIAL_OBJECTS, MIN_OBJECT_SEPARATION,
+    POOL_SIZE,
+    CHUTE_X, CHUTE_Y, CHUTE_FLOOR_Z, CHUTE_WALL_THICK, CHUTE_WALL_HEIGHT,
+    PARK_POS,
 )
-
-# # Camera position and rotation
-# # Position: 5 cm off-axis, 3 cm back along -Z.
-# CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
-# CAM_POS = [0.05, 0.0, -0.03]
-
-# # Camera mesh position and rotation
-# MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
-# MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
-
-# # Work surface (top face at TABLE_HEIGHT)
-# TABLE_HEIGHT  = 0.02                  # top face z
-# TABLE_THICK   = 0.02                  # slab thickness
-# TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
-# TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
-
-
-# # Target object, resting on the work surface.
-# # OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
-# OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
-# OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
-# OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
 
 
 def load_robot_model():
-    """
-    Compose UR5e + Robotiq 2F-85 + Realsense D435i + ground plane.
-    Adds a functional MuJoCo camera element to the gripper base so the
-    wrist camera can actually render RGB-D.
+    """Compose UR5e + Robotiq 2F-85 + Realsense D435i + table + chute + object pool.
 
     Returns a compiled MjModel, or None on failure.
     """
@@ -64,15 +47,13 @@ def load_robot_model():
         gripper_base = arm.body("base")
 
     gripper_frame = gripper_base.add_frame()
-    gripper_frame.pos  = MESH_POS
-    gripper_frame.quat = MESH_QUAT#[1.0, 0.0, 0.0, 0.0]  # no rotation on the frame
+    gripper_frame.pos = MESH_POS
+    gripper_frame.quat = MESH_QUAT
 
     arm.attach(camera, prefix="camera/", frame=gripper_frame)
 
     # ------------------------------------------------------------------
-    # 3. Add the camera element to the gripper base.
-    #    Must be after attach: MjSpec.attach() does not propagate
-    #    <camera> elements from the child spec into the parent.
+    # 3. Camera element on the gripper base (must come after attach)
     # ------------------------------------------------------------------
     gripper_base.add_camera(
         name="depth_cam",
@@ -83,33 +64,21 @@ def load_robot_model():
     print(f"[INFO] Added 'depth_cam' to {gripper_base.name}")
 
     # ------------------------------------------------------------------
-    # 4. Ground plane with checkerboard texture
+    # 4. Ground plane
     # ------------------------------------------------------------------
     floor_geom = arm.worldbody.add_geom()
     floor_geom.name = "floor"
     floor_geom.type = mujoco.mjtGeom.mjGEOM_PLANE
     floor_geom.size = [10, 10, 0.1]
-    floor_geom.pos = [0, 0, 0]
+    floor_geom.pos = [0, 0, -0.50]
+    #floor_geom.pos = [0, 0, 0]
 
-    try:
-        texture = arm.add_texture()
-        texture.name = "groundplane"
-        texture.type = mujoco.mjtTexture.mjTEXTURE_2D
-        texture.builtin = mujoco.mjtBuiltin.mjBUILTIN_CHECKER
-        texture.rgb1 = [0.2, 0.3, 0.4]
-        texture.rgb2 = [0.1, 0.2, 0.3]
-        texture.width = 300
-        texture.height = 300
-
-        material = arm.add_material()
-        material.name = "groundplane"
-        material.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = texture.name
-        material.texuniform = True
-        material.texrepeat = [10, 10]
-
-        floor_geom.material = "groundplane"
-    except Exception as e:
-        print(f"[WARNING] Could not add floor texture: {e}")
+    plinth = arm.worldbody.add_geom()
+    plinth.name = "table_plinth"
+    plinth.type = mujoco.mjtGeom.mjGEOM_BOX
+    plinth.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], -0.25]
+    plinth.size = [TABLE_HALF[0], TABLE_HALF[1], 0.25]
+    plinth.rgba = [0.45, 0.38, 0.30, 1.0]
 
     # ------------------------------------------------------------------
     # 5. Work surface. Top face lands exactly on TABLE_HEIGHT.
@@ -122,34 +91,72 @@ def load_robot_model():
     table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
 
     # ------------------------------------------------------------------
-    # 6. Target object (its own body, so it can carry a freejoint)
+    # 6. Chute: a sunk bin attached to the right edge of the table.
+    #    Floor at CHUTE_FLOOR_Z, walls rising to the tabletop. Objects
+    #    dropped over it fall in and are despawned by the task code.
     # ------------------------------------------------------------------
-    obj_body = arm.worldbody.add_body()
-    obj_body.name = "target"
-    obj_body.pos = OBJECT_POS
+    chx0, chx1 = CHUTE_X
+    chy0, chy1 = CHUTE_Y
+    chute_cx = 0.5 * (chx0 + chx1)
+    chute_cy = 0.5 * (chy0 + chy1)
 
-    obj_joint = obj_body.add_freejoint()
-    obj_joint.name = "target_free"
+    chute_floor = arm.worldbody.add_geom()
+    chute_floor.name = "chute_floor"
+    chute_floor.type = mujoco.mjtGeom.mjGEOM_BOX
+    chute_floor.size = [0.5 * (chx1 - chx0), 0.5 * (chy1 - chy0), 0.01]
+    chute_floor.pos = [chute_cx, chute_cy, CHUTE_FLOOR_Z - 0.01]
+    chute_floor.rgba = [0.25, 0.30, 0.40, 1.0]
 
-    obj_geom = obj_body.add_geom()
-    obj_geom.name = "target_geom"
-    obj_geom.type = mujoco.mjtGeom.mjGEOM_BOX
-    obj_geom.size = OBJECT_SIZE
-    obj_geom.rgba = [0.9, 0.3, 0.2, 1.0]
-    obj_geom.contype = 1
-    obj_geom.conaffinity = 1
+    wall_h = CHUTE_WALL_HEIGHT
+    wall_t = CHUTE_WALL_THICK
+    wall_z = CHUTE_FLOOR_Z + wall_h / 2.0
+
+    def add_wall(name, x, y, sx, sy):
+        g = arm.worldbody.add_geom()
+        g.name = name
+        g.type = mujoco.mjtGeom.mjGEOM_BOX
+        g.size = [sx, sy, wall_h / 2.0]
+        g.pos = [x, y, wall_z]
+        g.rgba = [0.20, 0.45, 0.50, 1.0]
+
+    # inner wall (table side): flush against the table's right edge
+    add_wall("chute_wall_inner", 0.216 + wall_t, chute_cy, wall_t, 0.5 * (chy1 - chy0))
+    # outer wall
+    add_wall("chute_wall_outer", 0.566 - wall_t, chute_cy, wall_t, 0.5 * (chy1 - chy0))
+    # end walls
+    add_wall("chute_wall_near", chute_cx, chy0 - wall_t, 0.5 * (chx1 - chx0), wall_t)
+    add_wall("chute_wall_far", chute_cx, chy1 + wall_t, 0.5 * (chx1 - chx0), wall_t)
 
     # ------------------------------------------------------------------
-    # 7. Gravity compensation
+    # 7. Object pool: POOL_SIZE bodies, each with its own freejoint.
+    #    All start parked below the scene; the task code spawns them.
+    # ------------------------------------------------------------------
+    for i in range(POOL_SIZE):
+        b = arm.worldbody.add_body()
+        b.name = f"obj_{i}"
+        b.pos = PARK_POS
+
+        j = b.add_freejoint()
+        j.name = f"obj_{i}_free"
+
+        g = b.add_geom()
+        g.name = f"obj_{i}_geom"
+        g.type = mujoco.mjtGeom.mjGEOM_BOX
+        g.size = OBJECT_SIZE
+        g.rgba = [0.9, 0.3, 0.2, 1.0]
+        g.contype = 1
+        g.conaffinity = 1
+
+    # ------------------------------------------------------------------
+    # 8. Gravity compensation: everything except the pooled objects.
     # ------------------------------------------------------------------
     for body in arm.bodies:
-        if body.name != "target":
+        if not body.name.startswith("obj_"):
             body.gravcomp = 1.0
 
     # ------------------------------------------------------------------
-    # 8. Compile
+    # 9. Compile
     # ------------------------------------------------------------------
-
     try:
         model = arm.compile()
     except Exception as e:

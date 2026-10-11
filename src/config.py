@@ -13,6 +13,26 @@ OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
 OBJECT_POS = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + OBJECT_SIZE[2]]
 
+# object pool -------------------------------------------------------------
+# Pre-compiled objects; bodies are created once at model build and activated
+# by moving them from the parking pose onto the table. MuJoCo cannot add
+# bodies after compile, so this pool is the ceiling on simultaneously
+# spawnable objects.
+POOL_SIZE = 8
+INITIAL_OBJECTS = 4       # spawned when the scene is reset
+MIN_OBJECT_SEPARATION = 0.10   # centre-to-centre; keeps clusters from merging
+
+# chute: attached to the table's right edge, nearest the robot, sunk below
+# the tabletop. Dropped objects land in it and despawn until R.
+CHUTE_X = (0.216, 0.566)        # x extent; left edge touches the table edge
+CHUTE_Y = (0.142, 0.492)        # y extent; 1/4 of the table's area
+CHUTE_FLOOR_Z = 0.02 - 0.35     # floor 35 cm below the tabletop
+CHUTE_WALL_THICK = 0.03         # wall thickness, half-extent in x/y
+CHUTE_WALL_HEIGHT = 0.35        # walls rise to tabletop height
+
+# pool parking pose: far below the scene; objects are frozen here until spawned
+PARK_POS = [5.0, 5.0, -0.6]
+
 # camera mount 
 CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
 CAM_POS = [0.05, 0.0, -0.03]
@@ -47,9 +67,11 @@ SELF_FILTER = 0.20
 SURFACE_BAND = 0.005
 DEPTH_MAX = 5.0
 MIN_OBJECT_POINTS = 1500
-PERCEPTION_TRIES = 5
-VIEW_Y_LEAD = 0.05
-VIEW_OFFSETS = ((0.0, 0.0), (0.0, VIEW_Y_LEAD), (0.0, -VIEW_Y_LEAD))
+# LEFTOVER: unused -- the singleton peek/revolve path these fed was replaced by
+# the search inside clear_table.
+# PERCEPTION_TRIES = 5
+# VIEW_Y_LEAD = 0.05
+# VIEW_OFFSETS = ((0.0, 0.0), (0.0, VIEW_Y_LEAD), (0.0, -VIEW_Y_LEAD))
 
 # grasp / place 
 GRASP_HEIGHT_FRAC = 0.2
@@ -62,6 +84,7 @@ PLACE_DY = 0.0
 PLACE_CLEARANCE = 0.002
 STEPS_CLOSE = 3000
 STEPS_RELEASE = 2000
+DROP_HOLD_STEPS = 500      # hold the fingers open after a drop before the next pick
 
 # spawn parameters
 RANDOMIZE_SPAWN = True
@@ -93,35 +116,36 @@ HARD_SPAWN_MODE = True
 REALLY_HARD_MODE = False
 HARD_BLIND_Y = (TABLE_CENTRE[1] - TABLE_HALF[1] + OBJECT_SIZE[1], 0.30)
 
-# debug flags
-VERIFY_IK = True         # run the IK self-test at startup
-VERBOSE = True           # per-stage [EXEC]/[PERCEPTION] logging
-
-# Camera position and rotation
-# Position: 5 cm off-axis, 3 cm back along -Z.
-CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
-CAM_POS = [0.05, 0.0, -0.03]
-
-# Camera mesh position and rotation
-MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
-MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
-
-# Work surface (top face at TABLE_HEIGHT)
-TABLE_HEIGHT  = 0.02                  # top face z
-TABLE_THICK   = 0.02                  # slab thickness
-TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
-TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
-
-
-# Target object, resting on the work surface.
-# OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
-OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
-OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
-OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
-
-# object placement for batch run
-PLACE_DX = 0.15          # place target offset from TABLE_CENTRE
-PLACE_DY = 0.08
+# --- LEFTOVER: duplicate block from the old config ---------------------------
+# These names are already defined near the top of this file. Python keeps the
+# LAST assignment, so this block was silently overriding the earlier values
+# (notably OBJECT_POS and PLACE_DX/PLACE_DY). Commented out; the definitions at
+# the top now take effect.
+# # Camera position and rotation
+# # Position: 5 cm off-axis, 3 cm back along -Z.
+# CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
+# CAM_POS = [0.05, 0.0, -0.03]
+#
+# # Camera mesh position and rotation
+# MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
+# MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
+#
+# # Work surface (top face at TABLE_HEIGHT)
+# TABLE_HEIGHT  = 0.02                  # top face z
+# TABLE_THICK   = 0.02                  # slab thickness
+# TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
+# TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
+#
+#
+# # Target object, resting on the work surface.
+# # OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
+# OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
+# OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
+# OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
+#
+# # object placement for batch run
+# PLACE_DX = 0.15          # place target offset from TABLE_CENTRE
+# PLACE_DY = 0.08
 
 # The object has a consitent 5.4 mm offset when placed, using an offset value does not affect this
 PLACE_OFFSET_X = PLACE_OFFSET_Y = 0.0
@@ -151,3 +175,9 @@ SEARCH_OFFSETS = (
     (+0.10, +0.12),
     (0.0, -0.06),      # forward last: rarely helps, kept for completeness
 )
+
+DROP_RADIUS = 0.07        # scatter drops this far around the chute centre
+
+# debug flags
+VERIFY_IK = False         # run the IK self-test at startup
+VERBOSE = False           # per-stage [EXEC]/[PERCEPTION] logging

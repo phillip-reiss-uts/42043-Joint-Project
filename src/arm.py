@@ -11,7 +11,12 @@ import numpy as np
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, R_DOWN,
     RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS,
-    TABLE_HEIGHT, SYNC_DT, SYNC_STEPS,
+    SYNC_STEPS,
+    # LEFTOVER: SYNC_DT is documentation for where SYNC_STEPS comes from; the
+    # code only ever uses SYNC_STEPS.
+    # SYNC_DT,
+    # TABLE_HEIGHT was only used by the commented-out peek_target.
+    # TABLE_HEIGHT,
 )
 
 
@@ -101,7 +106,15 @@ class Arm:
               f'axis={np.round(axis, 4)}')
         return tilt
 
-    def move(self, q_target, grip, rate=RAPID, viewer=None, ease='quintic'):
+    def move(self, q_target, grip, rate=RAPID, viewer=None, ease='quintic',
+             estop=None):
+        """Move to q_target, pausing in place whenever estop() is true.
+
+        estop is polled every step: while it returns True the arm re-commands the
+        current interpolated pose and does not advance the trajectory, so an
+        e-stop freezes the arm exactly where it is and resume continues the same
+        move from there (Option A, no re-plan).
+        """
         data, model = self.data, self.model
         q_start = data.qpos[:ARM_DOF].copy()
         dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
@@ -120,13 +133,25 @@ class Arm:
                 a = a * a * a * (a * (a * 6.0 - 15.0) + 10.0)
             else:
                 a = a * a * (3.0 - 2.0 * a)
-            data.ctrl[:ARM_DOF] = a * q_target[:ARM_DOF] + (1 - a) * q_start
+
+            ctrl_arm = a * q_target[:ARM_DOF] + (1 - a) * q_start
+            data.ctrl[:ARM_DOF] = ctrl_arm
             data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
             if viewer is not None and i % sync_every == 0:
                 viewer.sync()
 
-    def close_gripper(self, steps, viewer=None):
+            # freeze in place while paused; keep re-sending the same command so
+            # gravity comp doesn't let the arm drift, and keep syncing so the
+            # key callback still fires.
+            while estop is not None and estop():
+                data.ctrl[:ARM_DOF] = ctrl_arm
+                data.ctrl[self.grip_act] = grip
+                mujoco.mj_step(model, data)
+                if viewer is not None:
+                    viewer.sync()
+
+    def close_gripper(self, steps, viewer=None, estop=None):
         """Ramp the fingers shut while holding the present arm pose.
 
         The grip command is interpolated rather than stepped: commanding 0 -> 255
@@ -134,22 +159,30 @@ class Arm:
         spikes to ~412 N. Ramping over this phase gives the same final grip at
         ~80 N peak.
         """
-        self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer)
+        self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer, estop)
 
-    def open_gripper(self, steps, viewer=None):
+    def open_gripper(self, steps, viewer=None, estop=None):
         """Ramp the fingers open while holding the present arm pose."""
-        self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer)
+        self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop)
 
-    def _ramp_grip(self, g_from, g_to, steps, viewer):
+    def _ramp_grip(self, g_from, g_to, steps, viewer, estop=None):
         data, model = self.data, self.model
         q_hold = data.qpos[:ARM_DOF].copy()
         for i in range(steps):
             a = (i + 1) / steps
+            grip = g_from + a * (g_to - g_from)
             data.ctrl[:ARM_DOF] = q_hold
-            data.ctrl[self.grip_act] = g_from + a * (g_to - g_from)
+            data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
-            if viewer is not None and i % SYNC_STEPS  == 0:
+            if viewer is not None and i % SYNC_STEPS == 0:
                 viewer.sync()
+
+            while estop is not None and estop():
+                data.ctrl[:ARM_DOF] = q_hold
+                data.ctrl[self.grip_act] = grip
+                mujoco.mj_step(model, data)
+                if viewer is not None:
+                    viewer.sync()
 
     def hold(self, grip):
         """Command the current pose and grip without advancing a ramp."""
@@ -166,35 +199,38 @@ class Arm:
             data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
 
-    # ------------------------------------------------------------------ view ---
-    def peek_target(self, q_home, obj_xyz, dx, dy):
-        """Joints for a lateral viewing offset, holding the current orientation.
-
-        Does NOT move the arm -- returns the joint target so the caller decides
-        how to get there. Returns q_home unchanged if every offset failed IK.
-        """
-        obj_xyz = np.asarray(obj_xyz, float).reshape(-1)
-        if obj_xyz.size != 3:
-            return q_home
-
-        base_z = float(self.data.xpos[self.base_id][2])
-
-        d_hold = mujoco.MjData(self.model)
-        d_hold.qpos[:] = self.data.qpos
-        mujoco.mj_forward(self.model, d_hold)
-        R_hold = np.array(d_hold.xmat[self.base_id]).reshape(3, 3)
-
-        for scale in (1.0, 1.6, 2.4):
-            target = [obj_xyz[0] + dx * scale, obj_xyz[1] + dy * scale, base_z]
-            q = self.solve_ik(target, q_home, R_target=R_hold)
-            check = mujoco.MjData(self.model)
-            check.qpos[:] = q
-            mujoco.mj_forward(self.model, check)
-            posed = np.array(check.xpos[self.base_id])
-            if np.linalg.norm(posed - np.array(target)) < 5e-3:
-                cam = np.array(check.cam_xpos[
-                    mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA,
-                                      'depth_cam')])
-                if cam[2] > TABLE_HEIGHT + 0.05:
-                    return q
-        return q_home
+    # ---------------------------------------------------------------- view ---
+    # LEFTOVER: peek_target is not called anywhere. It was the singleton
+    # "nudge the camera sideways" helper; the search inside clear_table now does
+    # translate + revolve instead.
+    # def peek_target(self, q_home, obj_xyz, dx, dy):
+    #     """Joints for a lateral viewing offset, holding the current orientation.
+    #
+    #     Does NOT move the arm -- returns the joint target so the caller decides
+    #     how to get there. Returns q_home unchanged if every offset failed IK.
+    #     """
+    #     obj_xyz = np.asarray(obj_xyz, float).reshape(-1)
+    #     if obj_xyz.size != 3:
+    #         return q_home
+    #
+    #     base_z = float(self.data.xpos[self.base_id][2])
+    #
+    #     d_hold = mujoco.MjData(self.model)
+    #     d_hold.qpos[:] = self.data.qpos
+    #     mujoco.mj_forward(self.model, d_hold)
+    #     R_hold = np.array(d_hold.xmat[self.base_id]).reshape(3, 3)
+    #
+    #     for scale in (1.0, 1.6, 2.4):
+    #         target = [obj_xyz[0] + dx * scale, obj_xyz[1] + dy * scale, base_z]
+    #         q = self.solve_ik(target, q_home, R_target=R_hold)
+    #         check = mujoco.MjData(self.model)
+    #         check.qpos[:] = q
+    #         mujoco.mj_forward(self.model, check)
+    #         posed = np.array(check.xpos[self.base_id])
+    #         if np.linalg.norm(posed - np.array(target)) < 5e-3:
+    #             cam = np.array(check.cam_xpos[
+    #                 mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA,
+    #                                   'depth_cam')])
+    #             if cam[2] > TABLE_HEIGHT + 0.05:
+    #                 return q
+    #     return q_home

@@ -17,7 +17,7 @@ from src.config import (
 
 @dataclass
 class Detection:
-    """One perception result.
+    """One perceived object cluster.
 
     Replaces the (estimate, n_pts, obj_pts) triple, which call sites unpacked as
     `est, n, _` -- silently discarding the point array that detect_yaw needs.
@@ -26,12 +26,15 @@ class Detection:
     n_points: int           # points in the accepted cluster (0 = not found)
     points: np.ndarray      # (N,3) world points of that cluster, or None
     yaw: float              # degrees modulo 90; 0.0 if undetectable
+    span: np.ndarray = None # (2,) xy extent of the cluster, if computed
+    score: float = 0.0      # quality score; higher = cleaner, denser cloud
 
     @property
     def ok(self):
         return self.centre is not None and self.n_points > 0
 
 
+# --------------------------------------------------------------- geometry ---
 def _hull2d(P):
     """Convex hull of (N,2) points, monotone chain."""
     P = np.unique(np.round(P, 9), axis=0)
@@ -54,12 +57,13 @@ def _hull2d(P):
     up = half(P[::-1])
     return np.array(lo[:-1] + up[:-1])
 
+
 def fitted_centre(obj_pts, band=0.004):
     """Centre of the minimum-area rectangle of the object's top face.
 
-    Preferred over an axis-aligned bbox centre, which leans toward whichever side
-    is more complete when the cluster is clipped or the object is rotated. Uses
-    the same rotating-calipers fit as detect_yaw.
+    Preferred over an axis-aligned bbox centre, which leans toward whichever
+    side is more complete when the cluster is clipped or the object is rotated.
+    Uses the same rotating-calipers fit as detect_yaw.
     """
     z_med = np.median(obj_pts[:, 2])
     top = obj_pts[np.abs(obj_pts[:, 2] - z_med) < band]
@@ -86,6 +90,7 @@ def fitted_centre(obj_pts, band=0.004):
             best = (area, u * cu + v * cv)
 
     return best[1] if best else None
+
 
 def detect_yaw(obj_pts, band=0.004):
     """Orientation of a box-like object, degrees modulo 90.
@@ -153,18 +158,9 @@ def find_camera(model):
     return None, -1
 
 
-def perceive(model, data, camera, cam_id):
-    """Locate the object on the work surface.
-
-    The floor plane is not fitted by RANSAC here: with the object close to a
-    downward camera it has more inliers than the surface, and the fit locks onto
-    the object's top face. The work surface height is known, so use it.
-
-    Known limitation: this is a measurement function, not a search. It assumes
-    the object is in view. From a raised/back pose it returns a table-sized
-    cluster, which the span guard rejects -- it cannot find an object outside
-    the camera footprint.
-    """
+# ---------------------------------------------------------------- sensing ---
+def _filter_points(model, data, camera, cam_id):
+    """Shared point filter: world points above the surface, in range, finite."""
     rgb, depth = camera.capture(data)
     points = camera.deproject(depth, data)
 
@@ -174,32 +170,120 @@ def perceive(model, data, camera, cam_id):
             & (near > SELF_FILTER)
             & (near < DEPTH_MAX)
             & (points[..., 2] > TABLE_HEIGHT + SURFACE_BAND))
+    return points[keep]
 
-    obj = points[keep]
+
+def _span_ok(span):
+    """True if the cluster's xy extent matches a single object.
+
+    A clean top face spans 2*half-extent (0.060) rising to the diagonal
+    (0.060*sqrt2 = 0.085) at 45 deg yaw. Larger means merged objects or table;
+    smaller means a clipped view. Both bias the centre, so both are rejected.
+    """
+    size = float(np.asarray(OBJECT_SIZE)[0]) * 2.0
+    return (not np.any(span > size * np.sqrt(2.0) * 1.10)
+            and not np.any(span < size * 0.70))
+
+
+def score_cluster(span, n_points):
+    """Quality score: span fidelity x log point count.
+
+    A clean object has span ~0.060-0.085 and 3000-5000 points; a clipped one has
+    a short span and fewer points. Fidelity dominates, so a partially visible
+    object never outranks a fully visible one just because it is nearer.
+    """
+    size = float(np.asarray(OBJECT_SIZE)[0]) * 2.0
+    fidelity = min(1.0, min(span) / size)
+    return fidelity * np.log(max(n_points, 1.0))
+
+
+def cluster_objects(points, voxel=0.02):
+    """Split a point cloud into connected components.
+
+    Voxel-grid flood fill, 6-connectivity. Correct when objects do not touch:
+    MIN_OBJECT_SEPARATION guarantees that, which is why the span guard is a
+    reliable per-cluster check rather than a heuristic.
+
+    Returns a list of (N,3) point arrays, largest first.
+    """
+    if points is None or len(points) == 0:
+        return []
+
+    keys = np.floor(points[:, :3] / voxel).astype(np.int64)
+    voxels = {}
+    for i, k in enumerate(keys):
+        voxels.setdefault(tuple(k), []).append(i)
+
+    clusters = []
+    seen = set()
+    for v in voxels:
+        if v in seen:
+            continue
+        # flood fill
+        stack = [v]
+        seen.add(v)
+        idx = []
+        while stack:
+            c = stack.pop()
+            idx.extend(voxels[c])
+            for d in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0),
+                      (0, 0, 1), (0, 0, -1)):
+                nb = (c[0] + d[0], c[1] + d[1], c[2] + d[2])
+                if nb in voxels and nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+        clusters.append(points[idx])
+
+    clusters.sort(key=len, reverse=True)
+    return clusters
+
+
+def perceive_all(model, data, camera, cam_id):
+    """Detect every object on the surface.
+
+    The single-object perceive() assumed exactly one cluster; with a pool this
+    becomes cluster + span-guard + score per connected component. Selection
+    among objects is then `max(dets, key=lambda d: d.score)`.
+
+    Returns a list of Detection, possibly empty.
+    """
+    obj = _filter_points(model, data, camera, cam_id)
     if len(obj) < 50:
+        return []
+
+    dets = []
+    for pts in cluster_objects(obj):
+        if len(pts) < 50:
+            continue
+        span = pts[:, :2].max(axis=0) - pts[:, :2].min(axis=0)
+        if not _span_ok(span):
+            continue
+
+        centre_xy = fitted_centre(pts)
+        if centre_xy is None:
+            centre_xy = 0.5 * (pts[:, :2].min(axis=0) + pts[:, :2].max(axis=0))
+        centre = np.array([centre_xy[0], centre_xy[1],
+                           TABLE_HEIGHT + OBJECT_HEIGHT / 2.0])
+
+        yaw, _, _ = detect_yaw(pts)
+        dets.append(Detection(
+            centre, len(pts), pts,
+            yaw if yaw is not None else 0.0,
+            span=span,
+            score=score_cluster(span, len(pts)),
+        ))
+
+    dets.sort(key=lambda d: d.score, reverse=True)
+    return dets
+
+
+def perceive(model, data, camera, cam_id):
+    """Single-object path: best cluster from perceive_all, or empty Detection.
+
+    Kept so the original single-object pick_and_place flow keeps working while
+    the multi-object flow is built out.
+    """
+    dets = perceive_all(model, data, camera, cam_id)
+    if not dets:
         return Detection(None, 0, None, 0.0)
-
-    # A clean cluster is the object's top face. Its axis-aligned span varies with
-    # yaw: 0.060 at 0/90 deg, rising to 0.060*sqrt(2)=0.085 at 45 deg (measured
-    # 0.076 at yaw 20, 0.061 at yaw 0). So the cap must allow the diagonal -- a
-    # 1.25x cap rejected perfectly-centred detections at intermediate yaw.
-    # The floor still rejects clipped slivers, which bias the centre by 20-30 mm.
-    obj_size = np.asarray(OBJECT_SIZE)[:2] * 2.0
-    span = obj[:, :2].max(axis=0) - obj[:, :2].min(axis=0)
-    if np.any(span > obj_size.max() * np.sqrt(2.0) * 1.10):
-        return Detection(None, len(obj), None, 0.0)
-    if np.any(span < obj_size.max() * 0.70):
-        return Detection(None, len(obj), None, 0.0)
-
-    centre_xy = fitted_centre(obj)
-    if centre_xy is None:
-        centre_xy = 0.5 * (obj[:, :2].min(axis=0) + obj[:, :2].max(axis=0))
-
-    # The camera only ever sees the top face, so the centroid's z is the top of
-    # the object, not its centre. Derive the centre from the known surface height.
-    centre = np.array([centre_xy[0], centre_xy[1],
-                       TABLE_HEIGHT + OBJECT_HEIGHT / 2.0])
-
-    yaw, _, _ = detect_yaw(obj)
-
-    return Detection(centre, len(obj), obj, yaw if yaw is not None else 0.0)
+    return dets[0]
