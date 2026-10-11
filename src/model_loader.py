@@ -1,27 +1,33 @@
 import mujoco
 import mujoco_menagerie as mm
 
-# Camera position and rotation
-# Position: 5 cm off-axis, 3 cm back along -Z.
-CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
-CAM_POS = [0.05, 0.0, -0.03]
+from src.config import (
+    CAM_QUAT, CAM_POS, MESH_QUAT, MESH_POS,
+    TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
+    OBJECT_SIZE, OBJECT_POS,
+)
 
-# Camera mesh position and rotation
-MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
-MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
+# # Camera position and rotation
+# # Position: 5 cm off-axis, 3 cm back along -Z.
+# CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
+# CAM_POS = [0.05, 0.0, -0.03]
 
-# Work surface (top face at TABLE_HEIGHT)
-TABLE_HEIGHT  = 0.02                  # top face z
-TABLE_THICK   = 0.02                  # slab thickness
-TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
-TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
+# # Camera mesh position and rotation
+# MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
+# MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
+
+# # Work surface (top face at TABLE_HEIGHT)
+# TABLE_HEIGHT  = 0.02                  # top face z
+# TABLE_THICK   = 0.02                  # slab thickness
+# TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
+# TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
 
 
-# Target object, resting on the work surface.
-# OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
-OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
-OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
-OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
+# # Target object, resting on the work surface.
+# # OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
+# OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
+# OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
+# OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
 
 
 def load_robot_model():
@@ -139,7 +145,7 @@ def load_robot_model():
     for body in arm.bodies:
         if body.name != "target":
             body.gravcomp = 1.0
-            
+
     # ------------------------------------------------------------------
     # 8. Compile
     # ------------------------------------------------------------------
