@@ -11,6 +11,14 @@ wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
 
     python main.py
 
+## Usage
+
+ - `E key` — Pause / Resume running pick and place sequence.
+ - `P key` — Place a new object in a random location. Limit of 8 per scene.
+ - `R key` — Resets scene. Places four object at random on table and begins pick and place.
+ 
+
+
 ## Layout
 
 - `main.py` — entry point, orchestrates the pipeline
