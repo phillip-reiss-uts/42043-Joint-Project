@@ -227,39 +227,3 @@ class Arm:
             data.ctrl[:ARM_DOF] = q
             data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
-
-    # ---------------------------------------------------------------- view ---
-    # LEFTOVER: peek_target is not called anywhere. It was the singleton
-    # "nudge the camera sideways" helper; the search inside clear_table now does
-    # translate + revolve instead.
-    # def peek_target(self, q_home, obj_xyz, dx, dy):
-    #     """Joints for a lateral viewing offset, holding the current orientation.
-    #
-    #     Does NOT move the arm -- returns the joint target so the caller decides
-    #     how to get there. Returns q_home unchanged if every offset failed IK.
-    #     """
-    #     obj_xyz = np.asarray(obj_xyz, float).reshape(-1)
-    #     if obj_xyz.size != 3:
-    #         return q_home
-    #
-    #     base_z = float(self.data.xpos[self.base_id][2])
-    #
-    #     d_hold = mujoco.MjData(self.model)
-    #     d_hold.qpos[:] = self.data.qpos
-    #     mujoco.mj_forward(self.model, d_hold)
-    #     R_hold = np.array(d_hold.xmat[self.base_id]).reshape(3, 3)
-    #
-    #     for scale in (1.0, 1.6, 2.4):
-    #         target = [obj_xyz[0] + dx * scale, obj_xyz[1] + dy * scale, base_z]
-    #         q = self.solve_ik(target, q_home, R_target=R_hold)
-    #         check = mujoco.MjData(self.model)
-    #         check.qpos[:] = q
-    #         mujoco.mj_forward(self.model, check)
-    #         posed = np.array(check.xpos[self.base_id])
-    #         if np.linalg.norm(posed - np.array(target)) < 5e-3:
-    #             cam = np.array(check.cam_xpos[
-    #                 mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA,
-    #                                   'depth_cam')])
-    #             if cam[2] > TABLE_HEIGHT + 0.05:
-    #                 return q
-    #     return q_home
