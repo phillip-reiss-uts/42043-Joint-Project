@@ -5,6 +5,7 @@ from src.config import (
     CAM_QUAT, CAM_POS, MESH_QUAT, MESH_POS,
     TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
     OBJECT_SIZE,
+    GRIP_FORCE_RANGE,
     # LEFTOVER: imported but never used here -- OBJECT_POS was for the old single
     # 'target' body; INITIAL_OBJECTS and MIN_OBJECT_SEPARATION are used by the
     # task layer (pick_place.py), not by model construction.
@@ -162,5 +163,14 @@ def load_robot_model():
     except Exception as e:
         print(f"[ERROR] Failed to compile composed model: {e}")
         return None
+
+    # ------------------------------------------------------------------
+    # 10. Gripper squeeze force limit.
+    #     Set here rather than in the spec so it is tunable from config.py in
+    #     one place. The last actuator is gripper/fingers_actuator.
+    # ------------------------------------------------------------------
+    grip_act = model.nu - 1
+    model.actuator_forcerange[grip_act] = GRIP_FORCE_RANGE
+    print(f"[INFO] gripper force range = {GRIP_FORCE_RANGE} N")
 
     return model

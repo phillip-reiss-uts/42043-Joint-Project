@@ -107,13 +107,21 @@ class Arm:
         return tilt
 
     def move(self, q_target, grip, rate=RAPID, viewer=None, ease='quintic',
-             estop=None):
+             estop=None, spawn_hook=None, stop=None):
         """Move to q_target, pausing in place whenever estop() is true.
 
         estop is polled every step: while it returns True the arm re-commands the
         current interpolated pose and does not advance the trajectory, so an
         e-stop freezes the arm exactly where it is and resume continues the same
         move from there (Option A, no re-plan).
+
+        stop is polled every step and ABANDONS the move when true (used to bail
+        out promptly when the viewer window is closed, rather than finishing a
+        long trajectory against a dead window).
+
+        spawn_hook, if given, is called every step. It must not block -- it is
+        how the P key drops a cube instantly mid-motion without disturbing the
+        trajectory.
         """
         data, model = self.data, self.model
         q_start = data.qpos[:ARM_DOF].copy()
@@ -128,6 +136,8 @@ class Arm:
         sync_every = max(1, SYNC_STEPS)
 
         for i in range(steps):
+            if stop is not None and stop():
+                return
             a = (i + 1) / steps
             if ease == 'quintic':
                 a = a * a * a * (a * (a * 6.0 - 15.0) + 10.0)
@@ -138,6 +148,8 @@ class Arm:
             data.ctrl[:ARM_DOF] = ctrl_arm
             data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
+            if spawn_hook is not None:
+                spawn_hook()
             if viewer is not None and i % sync_every == 0:
                 viewer.sync()
 
@@ -145,13 +157,18 @@ class Arm:
             # gravity comp doesn't let the arm drift, and keep syncing so the
             # key callback still fires.
             while estop is not None and estop():
+                if stop is not None and stop():
+                    return
                 data.ctrl[:ARM_DOF] = ctrl_arm
                 data.ctrl[self.grip_act] = grip
                 mujoco.mj_step(model, data)
+                if spawn_hook is not None:
+                    spawn_hook()
                 if viewer is not None:
                     viewer.sync()
 
-    def close_gripper(self, steps, viewer=None, estop=None):
+    def close_gripper(self, steps, viewer=None, estop=None, spawn_hook=None,
+                      stop=None):
         """Ramp the fingers shut while holding the present arm pose.
 
         The grip command is interpolated rather than stepped: commanding 0 -> 255
@@ -159,28 +176,40 @@ class Arm:
         spikes to ~412 N. Ramping over this phase gives the same final grip at
         ~80 N peak.
         """
-        self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer, estop)
+        self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer, estop,
+                        spawn_hook, stop)
 
-    def open_gripper(self, steps, viewer=None, estop=None):
+    def open_gripper(self, steps, viewer=None, estop=None, spawn_hook=None,
+                     stop=None):
         """Ramp the fingers open while holding the present arm pose."""
-        self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop)
+        self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop,
+                        spawn_hook, stop)
 
-    def _ramp_grip(self, g_from, g_to, steps, viewer, estop=None):
+    def _ramp_grip(self, g_from, g_to, steps, viewer, estop=None,
+                   spawn_hook=None, stop=None):
         data, model = self.data, self.model
         q_hold = data.qpos[:ARM_DOF].copy()
         for i in range(steps):
+            if stop is not None and stop():
+                return
             a = (i + 1) / steps
             grip = g_from + a * (g_to - g_from)
             data.ctrl[:ARM_DOF] = q_hold
             data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
+            if spawn_hook is not None:
+                spawn_hook()
             if viewer is not None and i % SYNC_STEPS == 0:
                 viewer.sync()
 
             while estop is not None and estop():
+                if stop is not None and stop():
+                    return
                 data.ctrl[:ARM_DOF] = q_hold
                 data.ctrl[self.grip_act] = grip
                 mujoco.mj_step(model, data)
+                if spawn_hook is not None:
+                    spawn_hook()
                 if viewer is not None:
                     viewer.sync()
 

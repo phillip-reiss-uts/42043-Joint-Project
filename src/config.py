@@ -53,6 +53,10 @@ FEED = 0.05
 RAPID_MIN_STEPS = 200
 FEED_MIN_STEPS = 400
 
+# Gripper squeeze force limit, newtons, applied to the fingers actuator
+# menagerie default is [-5, 5], so this changes nothing until edited.
+GRIP_FORCE_RANGE = (-5.0, 5.0)
+
 # Viewer frame pacing. Sync once per ~16 ms of simulated time (~60 Hz), rather
 # than every N steps or a fixed number of frames per move: a fixed step interval
 # stutters on a short fast hop (a 60 mm move at RAPID is ~30 steps, so syncing
@@ -92,6 +96,7 @@ RANDOMIZE_YAW = True     # spin the object about z
 SPAWN_CLEARANCE = 0.05  # spawn height above the surface
 SPAWN_MARGIN = 0.06      # keep this clear of the table edge
 SPAWN_Y_MIN = 0.45       # measured: below this the object leaves the camera footprint
+SPAWN_ARM_CLEARANCE = 0.12   # instant drops keep this clear of gripper/base (xy)
 
 SPAWN_X_RANGE = (TABLE_CENTRE[0] - TABLE_HALF[0] + SPAWN_MARGIN + OBJECT_SIZE[0],
                  TABLE_CENTRE[0] + TABLE_HALF[0] - SPAWN_MARGIN - OBJECT_SIZE[0])
@@ -107,45 +112,13 @@ HARD_SPAWNS = (
     (-0.200, 0.350),     # outside the home-pose footprint: 0 pts found
     (-0.320, 0.700),     # marginal footprint, just inside the far edge
 )
-HARD_SPAWN_MODE = True
+HARD_SPAWN_MODE = False
 
 # Spawns in the strip the home camera cannot see at all (footprint is y >= 0.354).
-# KNOWN FAILING: perception returns a table-sized cluster that the bbox guard
-# rejects, so every attempt exhausts PERCEPTION_TRIES. Kept as documentation of
-# the limit rather than a working mode.
+# Currently fails, every attempt exhausts PERCEPTION_TRIES. 
 REALLY_HARD_MODE = False
 HARD_BLIND_Y = (TABLE_CENTRE[1] - TABLE_HALF[1] + OBJECT_SIZE[1], 0.30)
 
-# --- LEFTOVER: duplicate block from the old config ---------------------------
-# These names are already defined near the top of this file. Python keeps the
-# LAST assignment, so this block was silently overriding the earlier values
-# (notably OBJECT_POS and PLACE_DX/PLACE_DY). Commented out; the definitions at
-# the top now take effect.
-# # Camera position and rotation
-# # Position: 5 cm off-axis, 3 cm back along -Z.
-# CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
-# CAM_POS = [0.05, 0.0, -0.03]
-#
-# # Camera mesh position and rotation
-# MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
-# MESH_POS = CAM_POS #[0.05, 0.0, -0.03]
-#
-# # Work surface (top face at TABLE_HEIGHT)
-# TABLE_HEIGHT  = 0.02                  # top face z
-# TABLE_THICK   = 0.02                  # slab thickness
-# TABLE_CENTRE = [-0.134, 0.492]        # x, y -- gripper/base home position
-# TABLE_HALF   = [0.35, 0.35]           # half-extents -> 0.7 x 0.7 m top
-#
-#
-# # Target object, resting on the work surface.
-# # OBJECT_POS is the box CENTRE: TABLE_HEIGHT + OBJECT_SIZE[2] sits it on the top.
-# OBJECT_SIZE = [0.03, 0.03, 0.03]     # half-extents -> 6 cm cube
-# OBJECT_POS  = [-0.30, 0.45, TABLE_HEIGHT + OBJECT_SIZE[2]]
-# OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
-#
-# # object placement for batch run
-# PLACE_DX = 0.15          # place target offset from TABLE_CENTRE
-# PLACE_DY = 0.08
 
 # The object has a consitent 5.4 mm offset when placed, using an offset value does not affect this
 PLACE_OFFSET_X = PLACE_OFFSET_Y = 0.0

@@ -14,7 +14,7 @@ from src import config as cfg
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED, R_DOWN,
     TABLE_HEIGHT, TABLE_CENTRE, OBJECT_HEIGHT,
-    SPAWN_X_RANGE, SPAWN_Y_RANGE, SPAWN_CLEARANCE,
+    SPAWN_X_RANGE, SPAWN_Y_RANGE, SPAWN_CLEARANCE, SPAWN_ARM_CLEARANCE,
     HARD_SPAWNS, HARD_SPAWN_MODE, REALLY_HARD_MODE, HARD_BLIND_Y,
     RANDOMIZE_SPAWN, RANDOMIZE_YAW,
     MIN_OBJECT_POINTS, MIN_OBJECT_SEPARATION,
@@ -122,6 +122,35 @@ def _separation_ok(reg, data, cand_xy, active_only=True):
     return True
 
 
+def _choose_spawn_xy(rng, fallback=False):
+    """Pick a spawn xy according to the configured spawn mode.
+
+    This is the single place the hard-spawn modes are honoured. It was
+    previously only inside place_object(), which meant the pool flow
+    (spawn_one/spawn_now) always drew from the easy band and HARD_SPAWN_MODE
+    had no effect.
+
+      REALLY_HARD_MODE -- the strip the home camera cannot see at all
+      HARD_SPAWN_MODE  -- one of the measured awkward positions (HARD_SPAWNS)
+      RANDOMIZE_SPAWN  -- the ordinary visible band
+      otherwise        -- table centre
+
+    fallback=True ignores the mode and uses the ordinary visible band. Callers
+    set it on their later attempts so a hard spawn that is occupied (too close
+    to an existing cube) degrades to an easy position instead of failing.
+    """
+    if fallback:
+        return rng.uniform(*SPAWN_X_RANGE), rng.uniform(*SPAWN_Y_RANGE)
+    if REALLY_HARD_MODE:
+        return rng.uniform(*SPAWN_X_RANGE), rng.uniform(*HARD_BLIND_Y)
+    if HARD_SPAWN_MODE:
+        x, y = HARD_SPAWNS[int(rng.integers(len(HARD_SPAWNS)))]
+        return float(x), float(y)
+    if RANDOMIZE_SPAWN:
+        return rng.uniform(*SPAWN_X_RANGE), rng.uniform(*SPAWN_Y_RANGE)
+    return TABLE_CENTRE[0], TABLE_CENTRE[1]
+
+
 def spawn_one(model, data, reg, rng, viewer=None):
     """Activate one parked object at a separation-checked pose.
 
@@ -133,9 +162,10 @@ def spawn_one(model, data, reg, rng, viewer=None):
         return None
 
     i = parked[0]
-    for _ in range(60):
-        x = rng.uniform(*SPAWN_X_RANGE)
-        y = rng.uniform(*SPAWN_Y_RANGE)
+    for k in range(60):
+        # prefer the configured (possibly hard) positions, then fall back to the
+        # ordinary visible band so an occupied hard spot is not a failed spawn
+        x, y = _choose_spawn_xy(rng, fallback=(k >= 30))
         cand = np.array([x, y])
         if not _separation_ok(reg, data, cand):
             continue
@@ -158,6 +188,48 @@ def spawn_one(model, data, reg, rng, viewer=None):
                 viewer.sync()
         if viewer is not None:
             viewer.sync()
+        return i
+
+    return None
+
+
+def spawn_now(model, data, reg, rng, viewer=None):
+    """Drop a parked object onto the table immediately -- no settle loop.
+
+    Used for the P key while a pick is running: the cube teleports in and falls
+    under the physics that is already being stepped, so the arm never pauses.
+
+    Rejects any candidate that would collide:
+      * within SPAWN_ARM_CLEARANCE (xy) of gripper/base
+      * within MIN_OBJECT_SEPARATION (xy) of another active object
+
+    Returns the pool index, or None if nothing could be placed safely.
+    """
+    parked = reg.parked()
+    if not parked:
+        return None
+
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
+    base_xy = np.array(data.xpos[base_id][:2], float)
+
+    i = parked[0]
+    for k in range(120):
+        # hard positions first, easy band once they are exhausted or occupied
+        cand = np.array(_choose_spawn_xy(rng, fallback=(k >= 60)))
+        # clear of the arm/gripper
+        if np.linalg.norm(cand - base_xy) < SPAWN_ARM_CLEARANCE:
+            continue
+        # clear of every cube already on the table
+        if not _separation_ok(reg, data, cand):
+            continue
+
+        yaw = rng.uniform(0.0, np.pi / 2.0) if RANDOMIZE_YAW else 0.0
+        reg.teleport(data, i,
+                     [cand[0], cand[1], TABLE_HEIGHT + SPAWN_CLEARANCE],
+                     quat=(np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)))
+        reg.state[i] = 'active'
+        reg.freeze(data, i)
+        mujoco.mj_forward(model, data)
         return i
 
     return None
@@ -196,16 +268,9 @@ def place_object(model, data, rng, home_id, free_joint_id, body_id, viewer=None)
     q_home = data.qpos[:ARM_DOF].copy()
     adr = model.jnt_qposadr[free_joint_id]
 
-    if REALLY_HARD_MODE:
-        x = rng.uniform(*SPAWN_X_RANGE)
-        y = rng.uniform(*HARD_BLIND_Y)
-    elif HARD_SPAWN_MODE:
-        x, y = HARD_SPAWNS[int(rng.integers(len(HARD_SPAWNS)))]
-    elif RANDOMIZE_SPAWN:
-        x = rng.uniform(*SPAWN_X_RANGE)
-        y = rng.uniform(*SPAWN_Y_RANGE)
-    else:
-        x, y = TABLE_CENTRE
+    # spawn mode lives in _choose_spawn_xy so the pool flow and this path cannot
+    # drift apart (they had: HARD_SPAWN_MODE only applied here)
+    x, y = _choose_spawn_xy(rng)
 
     data.qpos[adr:adr + 3] = [x, y, TABLE_HEIGHT + SPAWN_CLEARANCE]
     if RANDOMIZE_YAW:
@@ -463,7 +528,7 @@ def pick_and_place(model, data, arm, camera, cam_id, rng,
 
 # Clear table
 def pick_one(model, data, arm, reg, i, drop_xy, yaw, viewer=None, aborted=None,
-             estop=None):
+             estop=None, spawn_hook=None):
     """Pick pooled object i and drop it at drop_xy.
 
     Assumes the object's pose is already known to the caller (clear_table runs
@@ -486,20 +551,26 @@ def pick_one(model, data, arm, reg, i, drop_xy, yaw, viewer=None, aborted=None,
     q_lift = arm.solve_ik([body_pos[0], body_pos[1], grasp_z + LIFT_Z],
                           q_grasp, R_target=R)
 
-    arm.move(q_approach, GRIP_OPEN, rate=RAPID, viewer=viewer, estop=estop)
+    arm.move(q_approach, GRIP_OPEN, rate=RAPID, viewer=viewer, estop=estop,
+             spawn_hook=spawn_hook, stop=stopped)
     if stopped():
         return False
-    arm.move(q_final, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop)
-    arm.move(q_grasp, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop)
+    arm.move(q_final, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop,
+             spawn_hook=spawn_hook, stop=stopped)
+    arm.move(q_grasp, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop,
+             spawn_hook=spawn_hook, stop=stopped)
     if stopped():
         return False
-    arm.close_gripper(STEPS_CLOSE, viewer, estop=estop)
+    arm.close_gripper(STEPS_CLOSE, viewer, estop=estop, spawn_hook=spawn_hook,
+                      stop=stopped)
     if stopped():
         return False
-    arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop)
+    arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
+             spawn_hook=spawn_hook, stop=stopped)
     if reg.pose(data, i)[2] < TABLE_HEIGHT + OBJECT_HEIGHT / 2.0:
         # it did not leave the table -- abort this object rather than drop air
-        arm.open_gripper(STEPS_RELEASE, viewer, estop=estop)
+        arm.open_gripper(STEPS_RELEASE, viewer, estop=estop,
+                         spawn_hook=spawn_hook, stop=stopped)
         return False
 
     # carry to the drop point, high enough that the cube clears the chute walls
@@ -508,14 +579,17 @@ def pick_one(model, data, arm, reg, i, drop_xy, yaw, viewer=None, aborted=None,
                          q_lift, R_target=R)
     q_drop = arm.solve_ik([drop_xy[0], drop_xy[1], drop_z],
                           q_app, R_target=R)
-    arm.move(q_app, GRIP_CLOSED, rate=RAPID, viewer=viewer, estop=estop)
+    arm.move(q_app, GRIP_CLOSED, rate=RAPID, viewer=viewer, estop=estop,
+             spawn_hook=spawn_hook, stop=stopped)
     if stopped():
         return False
-    arm.move(q_drop, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop)
+    arm.move(q_drop, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
+             spawn_hook=spawn_hook, stop=stopped)
     if stopped():
         return False
 
-    arm.open_gripper(STEPS_RELEASE, viewer, estop=estop)
+    arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, spawn_hook=spawn_hook,
+                     stop=stopped)
     return True
 
 
@@ -527,12 +601,21 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
     in the chute -> despawn anything that landed. Ends when no active object
     is seen and none remain active, or when aborted.
 
-    spawn_request, when given, is a callable checked between phases; a queued
-    spawn is processed before the next perception pass, so a P press takes
-    effect at the next phase boundary (which is the agreed semantics).
+    spawn_request, when given, is a callable polled every physics step from
+    inside the arm's motion loops (via spawn_hook). A P press therefore drops a
+    cube immediately -- mid-motion -- without pausing or re-planning the pick.
     """
     def stopped():
         return aborted is not None and aborted()
+
+    def spawn_hook():
+        """Called every step by Arm.move/_ramp_grip. Non-blocking."""
+        if spawn_request is not None and spawn_request():
+            idx = spawn_now(model, data, reg, rng)
+            if idx is None:
+                print('[TASK] spawn skipped: no clear space on the table')
+            else:
+                print(f'[TASK] dropped object {idx} mid-motion')
 
     home = mujoco.MjData(model)
     mujoco.mj_resetDataKeyframe(
@@ -547,13 +630,13 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
     while not stopped():
         passes += 1
 
-        # service a queued spawn before looking again
-        if spawn_request is not None and spawn_request():
-            idx = spawn_one(model, data, reg, rng, viewer=viewer)
-            print(f'[TASK] spawned object {idx}')
+        # also service a queued spawn here, so P works while the arm is idle
+        # between passes rather than only during motion
+        spawn_hook()
 
         # back to the viewing pose so the nominal view is the known-good one
-        arm.move(home_q, GRIP_OPEN, rate=RAPID, viewer=viewer, estop=estop)
+        arm.move(home_q, GRIP_OPEN, rate=RAPID, viewer=viewer, estop=estop,
+                 spawn_hook=spawn_hook, stop=stopped)
         if stopped():
             return
 
@@ -585,7 +668,7 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
                                   - np.array(target)) > 1e-3:
                     continue
                 arm.move(q, GRIP_OPEN, rate=SEARCH_SPEED, viewer=viewer,
-                         estop=estop)
+                         estop=estop, stop=stopped)
                 if stopped():
                     return
                 dets = perceive_all(model, data, camera, cam_id)
@@ -604,7 +687,7 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
                                       - np.array([anchor[0], anchor[1], z])) > 1e-3:
                         continue
                     arm.move(q, GRIP_OPEN, rate=REVOLVE_SPEED, viewer=viewer,
-                             estop=estop)
+                             estop=estop, stop=stopped)
                     if stopped():
                         return
                     dets = perceive_all(model, data, camera, cam_id)
@@ -627,20 +710,25 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
         drop_xy = (rng.uniform(chute_cx - DROP_RADIUS, chute_cx + DROP_RADIUS),
                    rng.uniform(chute_cy - DROP_RADIUS, chute_cy + DROP_RADIUS))
         if pick_one(model, data, arm, reg, chosen, drop_xy, best.yaw,
-                    viewer=viewer, aborted=aborted, estop=estop):
+                    viewer=viewer, aborted=aborted, estop=estop,
+                    spawn_hook=spawn_hook):
             # let it fall, then despawn whatever reached the bin.
             # Hold the fingers open the whole time: without a command the
             # gripper spring closes them and the drop looks like a snap-shut.
             for _ in range(3000):
                 arm.hold(GRIP_OPEN)
                 mujoco.mj_step(model, data)
+                spawn_hook()
                 if viewer is not None and _ % SYNC_STEPS == 0:
                     viewer.sync()
                 if stopped():
                     break
                 while estop is not None and estop():
+                    if stopped():
+                        break
                     arm.hold(GRIP_OPEN)
                     mujoco.mj_step(model, data)
+                    spawn_hook()
                     if viewer is not None:
                         viewer.sync()
             despawn_into_chute(model, data, reg, viewer=viewer)
@@ -648,13 +736,19 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
         # hold the fingers open after the drop, so the release does not blur
         # straight into the next pick's close_gripper (which reads as a snap-shut)
         for _ in range(DROP_HOLD_STEPS):
+            if stopped():
+                return
             arm.hold(GRIP_OPEN)
             mujoco.mj_step(model, data)
+            spawn_hook()
             if viewer is not None and _ % SYNC_STEPS == 0:
                 viewer.sync()
             while estop is not None and estop():
+                if stopped():
+                    return
                 arm.hold(GRIP_OPEN)
                 mujoco.mj_step(model, data)
+                spawn_hook()
                 if viewer is not None:
                     viewer.sync()
 

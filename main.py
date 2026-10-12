@@ -98,6 +98,10 @@ def main():
         reg = ObjectRegistry(model, POOL_SIZE)
         print('[INFO] R = reset and clear, P = drop, E = e-stop pause, close = exit')
 
+        def should_stop():
+            """True when the run should abandon: R pressed, or the window closed."""
+            return restart[0] or not viewer.is_running()
+
         while viewer.is_running():
             _log('[INFO] waiting -- press R to start clearing')
             while viewer.is_running() and not restart[0]:
@@ -110,28 +114,19 @@ def main():
             reset_scene(model, data, reg, rng, viewer=viewer)
             clear_table(model, data, arm, camera, cam_id, rng, reg,
                         viewer=viewer,
-                        aborted=lambda: restart[0],
+                        aborted=should_stop,
                         spawn_request=spawn_request,
                         estop=estop)
 
-            while viewer.is_running() and not restart[0]:
+            # exits on R or on the window closing, so the hold cannot outlive
+            # the viewer
+            while viewer.is_running() and not should_stop():
                 arm.hold(GRIP_OPEN)
                 mujoco.mj_step(model, data)
                 viewer.sync()
 
-            # leftover from the old G/R single-object loop: references respawn[]
-            # and go[], which no longer exist. Unreachable.
-            # if not viewer.is_running():
-            #     break
-            #
-            # respawn_now = respawn[0]
-            # respawn[0] = False        # one-shot: only R asks for a new scene
-            # go[0] = False
-            # restart[0] = False
-            #
-            # pick_and_place(model, data, arm, camera, cam_id, rng,
-            #                viewer=viewer, aborted=lambda: restart[0],
-            #                respawn=respawn_now)
+            if not viewer.is_running():
+                break
 
 if __name__ == '__main__':
     main()
