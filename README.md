@@ -11,6 +11,14 @@ wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
 
     python main.py
 
+## Usage
+
+ - `E key` — Pause / Resume running pick and place sequence.
+ - `P key` — Place a new object in a random location. Limit of 8 per scene.
+ - `R key` — Resets scene. Places four object at random on table and begins pick and place.
+ 
+
+
 ## Layout
 
 - `main.py` — entry point, orchestrates the pipeline
@@ -24,5 +32,10 @@ wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
 - `requirements.txt` — dependencies
 
 ## Status
-- Composed model loader & main file boilerplate
-- Mounted wrist camera with RGB-D capture
+- Robot will pick objects from table and place them in a chute.
+- The robot will seach for objects that are partially hidden.
+- The search routine will fail on full hidden objects.
+- Move speeds and gripper strength are configurable.
+- The table surface is filtered by Z height.
+- User controls are responsive and reliable.
+- Behaviour is deterministic and repeatable.
