@@ -20,12 +20,10 @@ from src.perception import find_camera
 from src.arm import Arm
 
 # import tasks
-# pick_and_place is the OLD single-object path, no longer called by main(); it
-# remains in pick_place.py for batch.py.
 from src.pick_place import (ObjectRegistry, reset_scene, clear_table)
 
 def _log(msg):
-    """Optional diagnostics; gated by config.VERBOSE."""
+    # Optional diagnostics; gated by config.VERBOSE.
     if cfg.VERBOSE:
         print(msg)
 
@@ -53,10 +51,6 @@ def main():
          f'{model.nu} actuators; wrist camera = {cam_name}')
 
     # leftover single-object ids -- unused by the pool/registry flow
-    # body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'target')
-    # base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
-    # grip_act = model.nu - 1                       # fingers_actuator
-    # free_joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'target_free')
     rng = np.random.default_rng()
 
     camera = RGBDCamera(model, cam_name, width=640, height=480)
@@ -76,7 +70,7 @@ def main():
             print('[INFO] e-stop %s' % ('PAUSED' if paused[0] else 'resumed'))
 
     def spawn_request():
-        """Consume a queued spawn. True once per P press."""
+        # Consume a queued spawn. True once per P press.
         if spawn_q[0]:
             spawn_q[0] = False
             return True
@@ -99,7 +93,7 @@ def main():
         print('[INFO] R = reset and clear, P = drop, E = e-stop pause, close = exit')
 
         def should_stop():
-            """True when the run should abandon: R pressed, or the window closed."""
+            # True when the run should abandon: R pressed, or the window closed.
             return restart[0] or not viewer.is_running()
 
         while viewer.is_running():
@@ -112,14 +106,36 @@ def main():
             restart[0] = False
 
             reset_scene(model, data, reg, rng, viewer=viewer)
+
+            # Close the loop on an estimated state for the duration of the run
+            if USE_OBSERVER:
+                # imported here so scipy is not loaded when the observer is off
+                from src.observer import ArmObserver
+                from src.controller import (
+                    JointController, LQRController, Encoder, lqr_weights,
+                )
+                observer = ArmObserver(
+                    model, data, data.qpos[:ARM_DOF],
+                    lqr_weights=(lqr_weights() if USE_LQR else None))
+                ctl = (LQRController(observer) if USE_LQR
+                       else JointController())
+                arm.attach_observer(observer, controller=ctl,
+                                    encoder=Encoder())
+                print('[INFO] feedback on estimated state: %s'
+                      % arm.controller.describe())
+                if USE_LQR:
+                    print('[INFO] LQR gains at start: %s'
+                          % arm.controller.gain_summary())
+
             clear_table(model, data, arm, camera, cam_id, rng, reg,
                         viewer=viewer,
                         aborted=should_stop,
                         spawn_request=spawn_request,
                         estop=estop)
 
-            # exits on R or on the window closing, so the hold cannot outlive
-            # the viewer
+            arm.detach_observer()
+
+            # exits on R or on window close, so the hold cannot outlive the viewer
             while viewer.is_running() and not should_stop():
                 arm.hold(GRIP_OPEN)
                 mujoco.mj_step(model, data)

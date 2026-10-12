@@ -6,22 +6,17 @@ from src.config import (
     TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
     OBJECT_SIZE,
     GRIP_FORCE_RANGE,
-    # LEFTOVER: imported but never used here -- OBJECT_POS was for the old single
-    # 'target' body; INITIAL_OBJECTS and MIN_OBJECT_SEPARATION are used by the
-    # task layer (pick_place.py), not by model construction.
-    # OBJECT_POS,
-    # INITIAL_OBJECTS, MIN_OBJECT_SEPARATION,
+    CALIB_MARKERS, CALIB_SPACING, CALIB_MARKER_R, CALIB_BOARD_THICK,
+    CALIB_BOARD_MARGIN,
+    # LEFTOVER: OBJECT_POS was for the old single 'target' body; unused here.
     POOL_SIZE,
     CHUTE_X, CHUTE_Y, CHUTE_FLOOR_Z, CHUTE_WALL_THICK, CHUTE_WALL_HEIGHT,
     PARK_POS,
 )
 
 
-def load_robot_model():
-    """Compose UR5e + Robotiq 2F-85 + Realsense D435i + table + chute + object pool.
-
-    Returns a compiled MjModel, or None on failure.
-    """
+def load_robot_model(with_calibration_board=False):
+    # Compose UR5e + Robotiq 2F-85 + Realsense D435i + table + chute + object pool.
     try:
         arm = mm.get('universal_robots_ur5e').spec('ur5e')
         gripper = mm.get('robotiq_2f85').spec('2f85')
@@ -31,18 +26,14 @@ def load_robot_model():
         print("Ensure 'mujoco-menagerie' is installed: pip install mujoco-menagerie")
         return None
 
-    # ------------------------------------------------------------------
     # 1. Attach gripper to the UR5e flange
-    # ------------------------------------------------------------------
     attachment_site = arm.site("attachment_site")
     if attachment_site is None:
         print("[ERROR] Could not find 'attachment_site' in UR5e model.")
         return None
     arm.attach(gripper, prefix="gripper/", site=attachment_site)
 
-    # ------------------------------------------------------------------
     # 2. Attach D435i mesh to the gripper base via a frame
-    # ------------------------------------------------------------------
     gripper_base = arm.body("gripper/base")
     if gripper_base is None:
         gripper_base = arm.body("base")
@@ -53,9 +44,7 @@ def load_robot_model():
 
     arm.attach(camera, prefix="camera/", frame=gripper_frame)
 
-    # ------------------------------------------------------------------
     # 3. Camera element on the gripper base (must come after attach)
-    # ------------------------------------------------------------------
     gripper_base.add_camera(
         name="depth_cam",
         pos=CAM_POS,
@@ -64,9 +53,7 @@ def load_robot_model():
     )
     print(f"[INFO] Added 'depth_cam' to {gripper_base.name}")
 
-    # ------------------------------------------------------------------
     # 4. Ground plane
-    # ------------------------------------------------------------------
     floor_geom = arm.worldbody.add_geom()
     floor_geom.name = "floor"
     floor_geom.type = mujoco.mjtGeom.mjGEOM_PLANE
@@ -81,9 +68,7 @@ def load_robot_model():
     plinth.size = [TABLE_HALF[0], TABLE_HALF[1], 0.25]
     plinth.rgba = [0.45, 0.38, 0.30, 1.0]
 
-    # ------------------------------------------------------------------
     # 5. Work surface. Top face lands exactly on TABLE_HEIGHT.
-    # ------------------------------------------------------------------
     table_geom = arm.worldbody.add_geom()
     table_geom.name = "table"
     table_geom.type = mujoco.mjtGeom.mjGEOM_BOX
@@ -91,11 +76,7 @@ def load_robot_model():
     table_geom.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT - TABLE_THICK / 2.0]
     table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
 
-    # ------------------------------------------------------------------
     # 6. Chute: a sunk bin attached to the right edge of the table.
-    #    Floor at CHUTE_FLOOR_Z, walls rising to the tabletop. Objects
-    #    dropped over it fall in and are despawned by the task code.
-    # ------------------------------------------------------------------
     chx0, chx1 = CHUTE_X
     chy0, chy1 = CHUTE_Y
     chute_cx = 0.5 * (chx0 + chx1)
@@ -128,10 +109,7 @@ def load_robot_model():
     add_wall("chute_wall_near", chute_cx, chy0 - wall_t, 0.5 * (chx1 - chx0), wall_t)
     add_wall("chute_wall_far", chute_cx, chy1 + wall_t, 0.5 * (chx1 - chx0), wall_t)
 
-    # ------------------------------------------------------------------
     # 7. Object pool: POOL_SIZE bodies, each with its own freejoint.
-    #    All start parked below the scene; the task code spawns them.
-    # ------------------------------------------------------------------
     for i in range(POOL_SIZE):
         b = arm.worldbody.add_body()
         b.name = f"obj_{i}"
@@ -148,27 +126,62 @@ def load_robot_model():
         g.contype = 1
         g.conaffinity = 1
 
-    # ------------------------------------------------------------------
+    # 7b. Calibration board (optional): slab with a grid of emissive markers.
+    if with_calibration_board:
+        half = 0.5 * (CALIB_MARKERS - 1) * CALIB_SPACING + CALIB_BOARD_MARGIN
+
+        # emission is a material property in MuJoCo, not a geom one.
+        slab_mat = arm.add_material()
+        slab_mat.name = "calib_slab_mat"
+        slab_mat.rgba = [0.02, 0.02, 0.02, 1.0]
+        slab_mat.emission = 0.0
+
+        marker_mat = arm.add_material()
+        marker_mat.name = "calib_marker_mat"
+        marker_mat.rgba = [1.0, 1.0, 1.0, 1.0]
+        marker_mat.emission = 1.0
+
+        board = arm.worldbody.add_body()
+        board.name = "calib_board"
+        board.pos = PARK_POS
+        j = board.add_freejoint()
+        j.name = "calib_board_free"
+
+        slab = board.add_geom()
+        slab.name = "calib_slab"
+        slab.type = mujoco.mjtGeom.mjGEOM_BOX
+        slab.size = [half, half, 0.5 * CALIB_BOARD_THICK]
+        slab.material = "calib_slab_mat"
+        slab.contype = 0
+        slab.conaffinity = 0
+
+        c = 0.5 * (CALIB_MARKERS - 1)
+        for i in range(CALIB_MARKERS):
+            for k in range(CALIB_MARKERS):
+                g = board.add_geom()
+                g.name = f"calib_m_{i}_{k}"
+                g.type = mujoco.mjtGeom.mjGEOM_SPHERE
+                g.size = [CALIB_MARKER_R, 0.0, 0.0]
+                # local marker grid: XY plane of the board, front face at +z.
+                g.pos = [(i - c) * CALIB_SPACING, (k - c) * CALIB_SPACING,
+                         0.5 * CALIB_BOARD_THICK]
+                g.material = "calib_marker_mat"
+                g.contype = 0
+                g.conaffinity = 0
+
     # 8. Gravity compensation: everything except the pooled objects.
-    # ------------------------------------------------------------------
     for body in arm.bodies:
         if not body.name.startswith("obj_"):
             body.gravcomp = 1.0
 
-    # ------------------------------------------------------------------
     # 9. Compile
-    # ------------------------------------------------------------------
     try:
         model = arm.compile()
     except Exception as e:
         print(f"[ERROR] Failed to compile composed model: {e}")
         return None
 
-    # ------------------------------------------------------------------
     # 10. Gripper squeeze force limit.
-    #     Set here rather than in the spec so it is tunable from config.py in
-    #     one place. The last actuator is gripper/fingers_actuator.
-    # ------------------------------------------------------------------
     grip_act = model.nu - 1
     model.actuator_forcerange[grip_act] = GRIP_FORCE_RANGE
     print(f"[INFO] gripper force range = {GRIP_FORCE_RANGE} N")

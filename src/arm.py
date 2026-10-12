@@ -1,9 +1,4 @@
-"""Arm motion: IK, trajectory execution, gripper, and view repositioning.
-
-Owns the model/data pair it drives. The viewer stays a method parameter rather
-than instance state, because passing it to launch_passive rebinds it and a
-stored reference would go stale.
-"""
+# Arm motion: IK, trajectory execution, gripper, and view repositioning.
 
 import mujoco
 import numpy as np
@@ -12,11 +7,6 @@ from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, R_DOWN,
     RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS,
     SYNC_STEPS,
-    # LEFTOVER: SYNC_DT is documentation for where SYNC_STEPS comes from; the
-    # code only ever uses SYNC_STEPS.
-    # SYNC_DT,
-    # TABLE_HEIGHT was only used by the commented-out peek_target.
-    # TABLE_HEIGHT,
 )
 
 
@@ -27,25 +17,37 @@ class Arm:
         self.base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
         self.grip_act = model.nu - 1          # fingers_actuator
 
-    # ------------------------------------------------------------------ IK ---
+        # Optional closed loop on an estimated state (see controller.py).
+        self.observer = None
+        self.controller = None
+        self.encoder = None
+
+    # STATE FEEDBACK
+    def attach_observer(self, observer, controller=None, encoder=None):
+        # Close the loop on an estimated state.
+        from src.controller import JointController, Encoder
+        self.observer = observer
+        self.controller = controller or JointController()
+        self.encoder = encoder or Encoder()
+
+    def detach_observer(self):
+        # Return to open-loop interpolation.
+        self.observer = None
+        self.controller = None
+        self.encoder = None
+
+    def observe(self):
+        # Advance the observer one step using the command currently in ctrl.
+        if self.observer is None:
+            return
+        u = np.array(self.data.ctrl[:ARM_DOF], float)
+        self.observer.predict(u)
+        self.observer.update(self.encoder.read(self.data))
+
+    # IK
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,
                  gain_p=0.5, gain_o=0.5, damp=1e-2, max_joint=3.0):
-        """Damped-least-squares IK for gripper/base -- position AND orientation.
-
-        mink's QP finds *a* solution, not the nearest one: for this target it
-        winds wrist_1 to 4.29 rad and wrist_3 to -4.37 rad, so the arm takes a
-        full turn (~6.8 rad of travel) before reaching the pose. DLS from the
-        current configuration stays local, giving ~0.4 rad for the same target.
-
-        R_target pins the tool orientation. The default R_DOWN (approach axis
-        along world -z) leaves rotation about that axis unconstrained -- harmless
-        for an approach or grasp, but for a pure lateral peek the solver picks an
-        arbitrary wrist_3 and spends ~1.77 rad turning instead of translating.
-        Pass the current orientation to suppress that.
-
-        Operates on the arm joints only; the object freejoint keeps its keyframe
-        value. Returns a full-length qpos.
-        """
+        # Damped-least-squares IK for gripper/base -- position AND orientation.
         model, base_id = self.model, self.base_id
         target = np.asarray(target, float)
 
@@ -82,12 +84,7 @@ class Arm:
         return q_full
 
     def verify_ik(self):
-        """Self-test: drive IK to a known target and report position + orientation.
-
-        Position-only IK reaches the right point with the tool tilted (30 deg at
-        the grasp pose), which leaves the fingers above the object closing along
-        a skewed axis. This is the check that catches that class of regression.
-        """
+        # Self-test: drive IK to a known target and report position + orientation.
         home = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, 'home')
         d = mujoco.MjData(self.model)
         mujoco.mj_resetDataKeyframe(self.model, d, home)
@@ -108,21 +105,7 @@ class Arm:
 
     def move(self, q_target, grip, rate=RAPID, viewer=None, ease='quintic',
              estop=None, spawn_hook=None, stop=None):
-        """Move to q_target, pausing in place whenever estop() is true.
-
-        estop is polled every step: while it returns True the arm re-commands the
-        current interpolated pose and does not advance the trajectory, so an
-        e-stop freezes the arm exactly where it is and resume continues the same
-        move from there (Option A, no re-plan).
-
-        stop is polled every step and ABANDONS the move when true (used to bail
-        out promptly when the viewer window is closed, rather than finishing a
-        long trajectory against a dead window).
-
-        spawn_hook, if given, is called every step. It must not block -- it is
-        how the P key drops a cube instantly mid-motion without disturbing the
-        trajectory.
-        """
+        # Move to q_target, pausing in place whenever estop() is true.
         data, model = self.data, self.model
         q_start = data.qpos[:ARM_DOF].copy()
         dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
@@ -130,10 +113,9 @@ class Arm:
         floor = FEED_MIN_STEPS if rate <= FEED else RAPID_MIN_STEPS
         steps = max(floor, int(dist / rate / model.opt.timestep))
 
-        # Pace frames by simulated time (~60 Hz), not by move length: a fixed
-        # interval either stutters on a short fast hop or burns hundreds of
-        # renders on a long slow one. Syncs then total ~(sim duration)/16ms.
+        # Pace frames by simulated time (~60 Hz), not by move length.
         sync_every = max(1, SYNC_STEPS)
+        self._q_ref_prev = np.array(q_start, float)
 
         for i in range(steps):
             if stop is not None and stop():
@@ -144,24 +126,39 @@ class Arm:
             else:
                 a = a * a * (3.0 - 2.0 * a)
 
-            ctrl_arm = a * q_target[:ARM_DOF] + (1 - a) * q_start
+            q_ref = a * q_target[:ARM_DOF] + (1 - a) * q_start
+            if self.observer is not None:
+                # close the outer loop on the estimate
+                qd_ref = (q_ref - self._q_ref_prev) / model.opt.timestep
+                ctrl_arm = self.controller.command(q_ref, qd_ref,
+                                                   self.observer.xhat)
+                self.observer.predict(ctrl_arm)
+            else:
+                ctrl_arm = q_ref
+            self._q_ref_prev = q_ref
+
             data.ctrl[:ARM_DOF] = ctrl_arm
             data.ctrl[self.grip_act] = grip
             mujoco.mj_step(model, data)
+            if self.observer is not None:
+                self.observer.update(self.encoder.read(data))
             if spawn_hook is not None:
                 spawn_hook()
             if viewer is not None and i % sync_every == 0:
                 viewer.sync()
 
-            # freeze in place while paused; keep re-sending the same command so
-            # gravity comp doesn't let the arm drift, and keep syncing so the
-            # key callback still fires.
+            # freeze in place while paused, re-sending the same command
             while estop is not None and estop():
                 if stop is not None and stop():
                     return
                 data.ctrl[:ARM_DOF] = ctrl_arm
                 data.ctrl[self.grip_act] = grip
+                if self.observer is not None:
+                    # keep tracking while frozen so a resume is not stale
+                    self.observer.predict(ctrl_arm)
                 mujoco.mj_step(model, data)
+                if self.observer is not None:
+                    self.observer.update(self.encoder.read(data))
                 if spawn_hook is not None:
                     spawn_hook()
                 if viewer is not None:
@@ -169,19 +166,13 @@ class Arm:
 
     def close_gripper(self, steps, viewer=None, estop=None, spawn_hook=None,
                       stop=None):
-        """Ramp the fingers shut while holding the present arm pose.
-
-        The grip command is interpolated rather than stepped: commanding 0 -> 255
-        in one tick drives the fingers into the object and the contact solver
-        spikes to ~412 N. Ramping over this phase gives the same final grip at
-        ~80 N peak.
-        """
+        # Ramp the fingers shut while holding the present arm pose.
         self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer, estop,
                         spawn_hook, stop)
 
     def open_gripper(self, steps, viewer=None, estop=None, spawn_hook=None,
                      stop=None):
-        """Ramp the fingers open while holding the present arm pose."""
+        # Ramp the fingers open while holding the present arm pose.
         self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop,
                         spawn_hook, stop)
 
@@ -196,7 +187,11 @@ class Arm:
             grip = g_from + a * (g_to - g_from)
             data.ctrl[:ARM_DOF] = q_hold
             data.ctrl[self.grip_act] = grip
+            if self.observer is not None:
+                self.observer.predict(q_hold)
             mujoco.mj_step(model, data)
+            if self.observer is not None:
+                self.observer.update(self.encoder.read(data))
             if spawn_hook is not None:
                 spawn_hook()
             if viewer is not None and i % SYNC_STEPS == 0:
@@ -207,20 +202,24 @@ class Arm:
                     return
                 data.ctrl[:ARM_DOF] = q_hold
                 data.ctrl[self.grip_act] = grip
+                if self.observer is not None:
+                    self.observer.predict(q_hold)
                 mujoco.mj_step(model, data)
+                if self.observer is not None:
+                    self.observer.update(self.encoder.read(data))
                 if spawn_hook is not None:
                     spawn_hook()
                 if viewer is not None:
                     viewer.sync()
 
     def hold(self, grip):
-        """Command the current pose and grip without advancing a ramp."""
+        # Command the current pose and grip without advancing a ramp.
         data = self.data
         data.ctrl[:ARM_DOF] = data.qpos[:ARM_DOF]
         data.ctrl[self.grip_act] = grip
 
     def settle(self, steps, grip=GRIP_OPEN):
-        """Step in place with the current pose commanded, letting the scene rest."""
+        # Step in place with the current pose commanded, letting the scene rest.
         data, model = self.data, self.model
         q = data.qpos[:ARM_DOF].copy()
         for _ in range(steps):

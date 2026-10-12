@@ -1,16 +1,5 @@
 # src/floor.py
-"""Floor-plane estimation and removal.
-
-Fits the dominant plane in a point cloud (the floor), then removes it so
-downstream code sees only objects standing on it.
-
-The plane is *discovered from the data*, never assumed. That makes the same
-code path work in simulation (floor at z=0) and on a real cell where the
-mounting height is unknown and the floor may be slightly tilted.
-
-A fitted plane can be saved to JSON and reloaded, so commissioning can run
-the fit once and later runs skip it.
-"""
+# Floor-plane estimation and removal.
 
 from __future__ import annotations          # allows Plane | None on py3.9
 
@@ -20,8 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# RANSAC defaults. With a floor filling ~74% of the frame the theoretical
-# iteration bound is ~9 (N = log(1-p)/log(1-w^3)); 100 is a large margin.
+# RANSAC defaults: a floor fills ~74% of the frame, so few iterations suffice.
 DEFAULT_ITERS = 100
 DEFAULT_TOL = 0.005         # inlier band, metres
 DEFAULT_SUBSAMPLE = 1000    # points drawn for the fit
@@ -29,17 +17,17 @@ DEFAULT_SUBSAMPLE = 1000    # points drawn for the fit
 
 @dataclass
 class Plane:
-    """Plane n . p + d = 0, with n a unit normal."""
+    # Plane n . p + d = 0, with n a unit normal.
 
     n: np.ndarray           # (3,) unit normal, +z component >= 0
     d: float                # offset, metres
 
     def distance(self, points):
-        """Signed distance from each point to the plane, shape broadcastable."""
+        # Signed distance from each point to the plane, shape broadcastable.
         return points @ self.n + self.d
 
     def above(self, points):
-        """Signed height above the plane; >= 0 means on the normal side."""
+        # Signed height above the plane; >= 0 means on the normal side.
         return points @ self.n + self.d
 
     def to_dict(self):
@@ -59,14 +47,7 @@ def fit_plane_ransac(
     subsample=DEFAULT_SUBSAMPLE,
     seed=0,
 ):
-    """Fit the dominant plane in ``points`` (N,3) by RANSAC.
-
-    Returns (Plane, inlier_fraction), or (None, 0.0) if no plane is found.
-
-    The normal is forced to have a non-negative z component, so the fitted
-    plane is oriented like a floor rather than a ceiling. ``seed`` is exposed
-    so a commissioning fit is reproducible.
-    """
+    # Fit the dominant plane in ``points`` (N,3) by RANSAC.
     pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
     if len(pts) < 3:
         return None, 0.0
@@ -106,11 +87,7 @@ def fit_plane_ransac(
 
 
 def remove_plane(points, plane, tol=DEFAULT_TOL):
-    """Return (kept_mask, kept_points).
-
-    ``points`` may be (H,W,3); the mask comes back with the leading shape.
-    Points within ``tol`` of the plane are treated as floor and dropped.
-    """
+    # Return (kept_mask, kept_points).
     pts = np.asarray(points, dtype=np.float64)
     finite = np.isfinite(pts).all(axis=-1)
     dist = np.abs(pts @ plane.n + plane.d)
@@ -120,7 +97,7 @@ def remove_plane(points, plane, tol=DEFAULT_TOL):
 
 
 def save_plane(plane, path):
-    """Write a fitted plane to JSON."""
+    # Write a fitted plane to JSON.
     payload = {
         "version": 1,
         "plane": plane.to_dict(),
@@ -131,7 +108,7 @@ def save_plane(plane, path):
 
 
 def load_plane(path):
-    """Read a plane from JSON. Returns None if the file is absent or invalid."""
+    # Read a plane from JSON. Returns None if the file is absent or invalid.
     if not os.path.isfile(path):
         return None
     try:
@@ -145,13 +122,7 @@ DEFAULT_SELF_DIST = 0.20   # camera-to-gripper cutoff, metres
 
 
 def remove_self(points, camera_pos, min_dist=DEFAULT_SELF_DIST):
-    """Drop points closer to the camera than min_dist.
-
-    The gripper is bolted to the camera, so it always occupies the near field.
-    A spherical cut centred on the lens removes it without any geometry work.
-
-    Returns (keep_mask, kept_points).
-    """
+    # Drop points closer to the camera than min_dist.
     pts = np.asarray(points, dtype=np.float64)
     finite = np.isfinite(pts).all(axis=-1)
     near = np.linalg.norm(pts - np.asarray(camera_pos, dtype=np.float64), axis=-1)

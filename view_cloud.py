@@ -1,4 +1,4 @@
-"""view_cloud.py — visualise the wrist-camera point cloud. Writes pointcloud.png."""
+# view_cloud.py — visualise the wrist-camera point cloud. Writes pointcloud.png.
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
