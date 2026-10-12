@@ -32,5 +32,10 @@ wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
 - `requirements.txt` — dependencies
 
 ## Status
-- Composed model loader & main file boilerplate
-- Mounted wrist camera with RGB-D capture
+- Robot will pick objects from table and place them in a chute.
+- The robot will seach for objects that are partially hidden.
+- The search routine will fail on full hidden objects.
+- Move speeds and gripper strength are configurable.
+- The table surface is filtered by Z height.
+- User controls are responsive and reliable.
+- Behaviour is deterministic and repeatable.
