@@ -18,6 +18,8 @@ from src.config import (
     PLACE_DX, PLACE_DY, PLACE_OFFSET_X, PLACE_OFFSET_Y,
     PLACE_CLEARANCE, STEPS_CLOSE, STEPS_RELEASE, DROP_HOLD_STEPS,
     SERVO_V_TRANSIT, SERVO_V_DESCENT, SERVO_MAX_ITERS, SERVO_PERCEIVE_EVERY,
+    SERVO_OCCLUSION_RECOVERY, SERVO_OCCLUDE_RATIO, SERVO_OCCLUDE_RECOVER,
+    SERVO_OCCLUDE_FAILS, SERVO_RETREAT_STEP, SERVO_RETREAT_MAX, SERVO_STANDOFF,
     REVOLVE_DEG, REVOLVE_SPEED, SYNC_STEPS,
     SEARCH_OFFSETS, SEARCH_SPEED,
     # LEFTOVER: POOL_SIZE is passed in by main.py; this module never reads it.
@@ -545,12 +547,20 @@ def pick_one(model, data, arm, reg, i, drop_xy, camera=None, cam_id=-1,
     # which the overlay shows as the trail turning red.
     sv = PBVSServo(model, data, arm, camera, cam_id, smooth=0.3,
                    perceive_every=SERVO_PERCEIVE_EVERY,
-                   v_max=SERVO_V_TRANSIT, v_descent=SERVO_V_DESCENT)
+                   v_max=SERVO_V_TRANSIT, v_descent=SERVO_V_DESCENT,
+                   occlude_ratio=SERVO_OCCLUDE_RATIO,
+                   occlude_recover=SERVO_OCCLUDE_RECOVER,
+                   occlude_fails=SERVO_OCCLUDE_FAILS,
+                   retreat_step=SERVO_RETREAT_STEP,
+                   retreat_max=SERVO_RETREAT_MAX)
     if not sv.observe():
         return False
-    ok, _, _, _ = sv.approach(standoff=APPROACH_Z, viewer=viewer, estop=estop,
+    ok, _, _, _ = sv.approach(standoff=SERVO_STANDOFF, viewer=viewer,
+                              estop=estop,
                               aborted=stopped, coarse=False,
-                              max_iters=SERVO_MAX_ITERS)
+                              max_iters=SERVO_MAX_ITERS,
+                              check_occlusion=SERVO_OCCLUSION_RECOVERY,
+                              recover=SERVO_OCCLUSION_RECOVERY)
     if not ok or stopped():
         return False
 

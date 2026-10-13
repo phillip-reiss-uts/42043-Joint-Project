@@ -151,6 +151,25 @@ SERVO_MAX_ITERS = 8000
 # observing less often costs almost nothing and lets the sim run.
 SERVO_PERCEIVE_EVERY = 160
 
+# Occlusion recovery. On the way down the jaws clip the object, the cluster's
+# span shrinks, and the fitted centre drifts into the part still visible -- the
+# servo then drives faithfully to a biased target and grasps off centre. Watch
+# the span against the fullest view seen this stage; on a drop, back straight up
+# until the view is whole again, then commit the grasp open loop from the
+# fullest-view estimate instead of servoing into the occlusion.
+SERVO_OCCLUSION_RECOVERY = True
+SERVO_OCCLUDE_RATIO = 0.95      # span below this fraction of the best seen
+SERVO_OCCLUDE_RECOVER = 0.97    # span must climb back above this to commit
+SERVO_OCCLUDE_FAILS = 2         # or this many consecutive lost observations
+SERVO_RETREAT_STEP = 0.02       # metres per backup step
+SERVO_RETREAT_MAX = 15          # cap on backup steps
+# Hover standoff for the closed-loop leg. Measured: at 100 mm above the grasp the
+# jaws bias the fitted centre by ~0.55x any lateral gripper offset, in the same
+# direction, so the estimate feeds back into the gripper and walks off centre.
+# At 200 mm the bias is independent of offset (fully visible), so acquire and
+# hold there and commit from that estimate.
+SERVO_STANDOFF = 0.20
+
 # Search offsets around the nominal gripper xy, tried in order.
 SEARCH_OFFSETS = (
     (0.0, 0.0),        # nominal, retried after any arm settling

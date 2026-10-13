@@ -7,7 +7,7 @@ import numpy as np
 
 from src.config import (
     ARM_DOF, TIP_OFFSET, R_DOWN, TABLE_HEIGHT, OBJECT_HEIGHT,
-    GRIP_OPEN, GRIP_CLOSED, SYNC_STEPS,
+    GRIP_OPEN, GRIP_CLOSED, SYNC_STEPS, RAPID, FEED,
 )
 from src.perception import perceive_all, rotation_with_yaw
 from src.overlay import push
@@ -25,7 +25,9 @@ class PBVSServo:
     def __init__(self, model, data, arm, camera, cam_id,
                  kp=6.0, ko=6.0, damp=1e-2, dq_max=0.02,
                  perceive_every=15, tol_p=3.0e-3, tol_o=3.0e-2,
-                 smooth=1.0, v_max=float('inf'), v_descent=None):
+                 smooth=1.0, v_max=float('inf'), v_descent=None,
+                 occlude_ratio=0.95, occlude_recover=0.97, occlude_fails=2,
+                 retreat_step=0.02, retreat_max=15):
         self.model = model
         self.data = data
         self.arm = arm
@@ -59,6 +61,27 @@ class PBVSServo:
         self.last_dets = 0
         self.obs_ok = 0              # successful re-observations
         self.obs_try = 0             # attempts
+
+        # Occlusion handling. The jaws clip the object on the way down, which
+        # shrinks the measured span and pulls the fitted centre into the part
+        # still visible. Track the fullest view and compare against it.
+        self.occlude_ratio = float(occlude_ratio)
+        self.occlude_recover = float(occlude_recover)
+        self.occlude_fails = int(occlude_fails)
+        self.retreat_step = float(retreat_step)
+        self.retreat_max = int(retreat_max)
+
+        self.span = None             # last measured (2,) xy extent
+        self.span_ratio = 1.0        # vs the fullest view this stage
+        self.best_span = 0.0         # largest span seen this stage
+        self.best_p = None           # estimate taken at that fullest view
+        self.best_yaw = None
+        self.stage_obs = 0           # successful observations this stage
+        self.fail_run = 0            # consecutive failed observations
+        self.occluded = False        # occlusion onset seen on the descent
+        self.recovered = False       # retreat + open-loop commit succeeded
+        self.ref_p = None            # last unbiased estimate (fullest view)
+        self.ref_yaw = None
 
         # set while the loop runs, so observe() can push to the overlay
         self.viewer = None
@@ -99,11 +122,25 @@ class PBVSServo:
             self.yaw_est = float((self.yaw_est
                                   + a * _wrap90(new_yaw - self.yaw_est)) % 90.0)
         self.obs_ok += 1
+        self.stage_obs += 1
         span = getattr(best, 'span', None)
+        if span is not None and np.all(np.isfinite(span)):
+            self.span = np.array(span, float)
+            # the cube's AABB is near-isotropic, so the mean is a stable scalar
+            span_norm = float(0.5 * (self.span[0] + self.span[1]))
+            if span_norm > self.best_span:
+                # fullest view so far: keep the estimate taken from it, because
+                # it is the one the open-loop commit should fall back on
+                self.best_span = span_norm
+                self.best_p = np.array(self.p_est, float)
+                self.best_yaw = float(self.yaw_est)
+            self.span_ratio = (span_norm / self.best_span
+                               if self.best_span > 0.0 else 1.0)
         push(self.viewer, 'perception',
              'dets %d  re-obs %d/%d' % (len(dets), self.obs_ok, self.obs_try),
-             'span %.4f %.4f' % (span[0], span[1]) if span is not None
-             else 'span -')
+             'span %.4f %.4f  %3.0f%% of best'
+             % (self.span[0], self.span[1], 100.0 * self.span_ratio)
+             if self.span is not None else 'span -')
         push(self.viewer, 'estimate',
              'est %6.3f %6.3f %6.3f' % tuple(self.p_est),
              'yaw %5.1f deg' % self.yaw_est)
@@ -161,11 +198,20 @@ class PBVSServo:
 
     # LOOP
     def servo(self, z_offset, max_iters=1500, viewer=None, estop=None,
-              aborted=None, trace=None, v_max=None):
+              aborted=None, trace=None, v_max=None, check_occlusion=False):
         # Servo to the grasp pose at z_offset. Returns (converged, iters, err).
         data, model = self.data, self.model
         self.viewer = viewer
         self._control('open')
+
+        # each stage re-establishes its own fullest-view reference
+        self.best_span = 0.0
+        self.best_p = None
+        self.best_yaw = None
+        self.span_ratio = 1.0
+        self.stage_obs = 0
+        self.fail_run = 0
+        self.occluded = False
 
         if self.p_est is None and not self.observe():
             return False, 0, float('inf')
@@ -183,6 +229,24 @@ class PBVSServo:
                 fresh = self.observe(near=self.p_est)
                 # the overlay colours the frustum/trail by which regime we are in
                 self._control('closed' if fresh else 'held')
+                self.fail_run = 0 if fresh else self.fail_run + 1
+                if check_occlusion and self.stage_obs >= 2:
+                    # Two ways the jaws give themselves away: the measured span
+                    # drops because the top face is being clipped, or the object
+                    # disappears from view altogether. Either means the estimate
+                    # is about to be the one we must not trust.
+                    if (self.fail_run >= self.occlude_fails
+                            or self.span_ratio < self.occlude_ratio):
+                        self.occluded = True
+                        self._control('held')
+                        push(viewer, 'occlusion',
+                             'OCCLUSION at iter %d: %s'
+                             % (k, 'view lost %d obs' % self.fail_run
+                                if self.fail_run >= self.occlude_fails
+                                else 'span %3.0f%% of best'
+                                     % (100.0 * self.span_ratio)),
+                             'stopping and backing off')
+                        return False, k, err_norm
 
             p_des, R_des = self.desired_pose(z_offset)
             err_p, err_o = self.error(p_des, R_des)
@@ -239,8 +303,59 @@ class PBVSServo:
         return False, max_iters, err_norm
 
 
+    def retreat(self, viewer=None, estop=None, aborted=None):
+        # Back straight up in steps until the object is whole in view again.
+        # Each step is a planned move, so the retreat itself is open loop; only
+        # the verdict comes from the camera. Returns (clear, steps).
+        data = self.data
+        p_cur, R_cur = self.current_pose()
+        anchor = self.best_p if self.best_p is not None else self.p_est
+        for j in range(1, self.retreat_max + 1):
+            if aborted is not None and aborted():
+                return False, j - 1
+            target = p_cur + np.array([0.0, 0.0, self.retreat_step * j])
+            q = self.arm.solve_ik(target, data.qpos[:ARM_DOF], R_target=R_cur)
+            self.arm.move(q, GRIP_OPEN, rate=RAPID, viewer=viewer, estop=estop,
+                          stop=aborted)
+            if aborted is not None and aborted():
+                return False, j
+            if (self.observe(near=anchor)
+                    and self.span_ratio >= self.occlude_recover):
+                push(viewer, 'occlusion',
+                     'retreated %.0f mm over %d steps'
+                     % (self.retreat_step * j * 1e3, j),
+                     'span back to %3.0f%% of best' % (100.0 * self.span_ratio))
+                return True, j
+        push(viewer, 'occlusion',
+             'retreat exhausted %d steps' % self.retreat_max, 'still clipped')
+        return False, self.retreat_max
+
+    def commit_open_loop(self, viewer=None, estop=None, aborted=None):
+        # Drive to the grasp pose from the last unbiased estimate with no further
+        # correction, so the jaws cannot re-bias the target on the way in.
+        ref = self.ref_p if self.ref_p is not None else self.best_p
+        if ref is None:
+            return False, 0
+        self.p_est = np.array(ref, float)
+        self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
+                             else self.best_yaw)
+        p_des, R_des = self.desired_pose(0.0)
+        q = self.arm.solve_ik(p_des, self.data.qpos[:ARM_DOF], R_target=R_des)
+        ov = getattr(self.viewer, 'overlay', None)
+        if ov is not None:
+            ov.set_target(p_des, R_des)
+        push(viewer, 'occlusion',
+             'open-loop commit to %6.3f %6.3f' % (self.best_p[0], self.best_p[1]),
+             'from the fullest view, span %.4f' % self.best_span)
+        self.arm.move(q, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop,
+                      stop=aborted)
+        if aborted is not None and aborted():
+            return False, 0
+        return True, 1
+
     def approach(self, standoff=0.10, viewer=None, estop=None, aborted=None,
-                 trace=None, coarse=True, max_iters=1500):
+                 trace=None, coarse=True, max_iters=1500, recover=True,
+                 check_occlusion=True):
         # Coarse move to the hover pose, then closed-loop hover and descent.
         if self.p_est is None and not self.observe():
             return False, 0, float('inf'), 0
@@ -251,10 +366,32 @@ class PBVSServo:
                                  v_max=self.v_max)
         if not ok1:
             return False, n1, e1, 0
+        # Reference estimate for the open-loop commit. Taken here, while the
+        # object is still whole in view: closer in, the jaws bias the fitted
+        # centre and the estimate feeds back into the gripper position, so this
+        # is the last unbiased view on the way down.
+        self.observe(near=self.p_est)
+        self.ref_p = np.array(self.p_est, float)
+        self.ref_yaw = float(self.yaw_est)
         ok2, n2, e2 = self.servo(0.0, max_iters=max_iters, viewer=viewer,
                                  estop=estop, aborted=aborted, trace=trace,
-                                 v_max=self.v_descent)
-        return ok2, n1 + n2, e2, n1
+                                 v_max=self.v_descent,
+                                 check_occlusion=check_occlusion)
+        if ok2:
+            return True, n1 + n2, e2, n1
+        if not (recover and self.occluded):
+            return False, n1 + n2, e2, n1
+        # the jaws clipped the object on the way down: back off until the view
+        # is whole, then commit the grasp open loop from that estimate
+        ok_r, n_r = self.retreat(viewer=viewer, estop=estop, aborted=aborted)
+        if not ok_r:
+            return False, n1 + n2 + n_r, e2, n1
+        ok_c, n_c = self.commit_open_loop(viewer=viewer, estop=estop,
+                                          aborted=aborted)
+        if ok_c:
+            self.recovered = True
+            return True, n1 + n2 + n_r, 0.0, n1
+        return False, n1 + n2 + n_r + n_c, e2, n1
 
 
 # DEMO

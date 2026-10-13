@@ -428,7 +428,7 @@ class Overlay:
 
         tl = block(['mode', 'task', 'robot'])
         tr = block(['gripper', 'servo'])
-        bl = block(['loop', 'perception', 'estimate', 'observer'])
+        bl = block(['loop', 'occlusion', 'perception', 'estimate', 'observer'])
         self.viewer.set_texts([
             (FONT.mjFONTSCALE_150, GRID.mjGRID_TOPLEFT, tl[0], tl[1]),
             (FONT.mjFONTSCALE_150, GRID.mjGRID_TOPRIGHT, tr[0], tr[1]),
