@@ -20,6 +20,7 @@ from src.config import (
     SERVO_V_TRANSIT, SERVO_V_DESCENT, SERVO_MAX_ITERS, SERVO_PERCEIVE_EVERY,
     SERVO_OCCLUSION_RECOVERY, SERVO_OCCLUDE_RATIO, SERVO_OCCLUDE_RECOVER,
     SERVO_OCCLUDE_FAILS, SERVO_RETREAT_STEP, SERVO_RETREAT_MAX, SERVO_STANDOFF,
+    SERVO_RETREAT_V,
     REVOLVE_DEG, REVOLVE_SPEED, SYNC_STEPS,
     SEARCH_OFFSETS, SEARCH_SPEED,
     # LEFTOVER: POOL_SIZE is passed in by main.py; this module never reads it.
@@ -552,7 +553,8 @@ def pick_one(model, data, arm, reg, i, drop_xy, camera=None, cam_id=-1,
                    occlude_recover=SERVO_OCCLUDE_RECOVER,
                    occlude_fails=SERVO_OCCLUDE_FAILS,
                    retreat_step=SERVO_RETREAT_STEP,
-                   retreat_max=SERVO_RETREAT_MAX)
+                   retreat_max=SERVO_RETREAT_MAX,
+                   retreat_v=SERVO_RETREAT_V)
     if not sv.observe():
         return False
     ok, _, _, _ = sv.approach(standoff=SERVO_STANDOFF, viewer=viewer,

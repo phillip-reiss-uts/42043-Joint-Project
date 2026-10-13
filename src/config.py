@@ -163,6 +163,11 @@ SERVO_OCCLUDE_RECOVER = 0.97    # span must climb back above this to commit
 SERVO_OCCLUDE_FAILS = 2         # or this many consecutive lost observations
 SERVO_RETREAT_STEP = 0.02       # metres per backup step
 SERVO_RETREAT_MAX = 15          # cap on backup steps
+# Cartesian speed for the backup and the open-loop commit, m/s. arm.move paces
+# on joint distance with a rad/s rate, so SERVO_RETREAT_V is converted through
+# the joint distance each move needs; at the RAPID rate the backup ran ~80 mm/s
+# against the servo's 15 mm/s descent.
+SERVO_RETREAT_V = 0.015
 # Hover standoff for the closed-loop leg. Measured: at 100 mm above the grasp the
 # jaws bias the fitted centre by ~0.55x any lateral gripper offset, in the same
 # direction, so the estimate feeds back into the gripper and walks off centre.

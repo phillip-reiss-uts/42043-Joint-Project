@@ -27,7 +27,7 @@ class PBVSServo:
                  perceive_every=15, tol_p=3.0e-3, tol_o=3.0e-2,
                  smooth=1.0, v_max=float('inf'), v_descent=None,
                  occlude_ratio=0.95, occlude_recover=0.97, occlude_fails=2,
-                 retreat_step=0.02, retreat_max=15):
+                 retreat_step=0.02, retreat_max=15, retreat_v=None):
         self.model = model
         self.data = data
         self.arm = arm
@@ -50,6 +50,10 @@ class PBVSServo:
         self.v_max = float(v_max)
         self.v_descent = (float(v_max) if v_descent is None
                           else float(v_descent))
+        # Cartesian speed for the backup and the open-loop commit, so they move
+        # like the servo rather than at a planned-move rate.
+        self.retreat_v = (self.v_descent if retreat_v is None
+                          else float(retreat_v))
 
         self.base_id = arm.base_id
         self.jacp = np.zeros((3, model.nv))
@@ -303,11 +307,30 @@ class PBVSServo:
         return False, max_iters, err_norm
 
 
-    def retreat(self, viewer=None, estop=None, aborted=None):
+    def _paced_move(self, q, d_cart, v_cart, viewer=None, estop=None,
+                    aborted=None):
+        # arm.move paces on joint distance with a rad/s rate:
+        #     steps = dist / rate / dt     (dist in joint rad)
+        # so the duration is dist/rate, and the average Cartesian speed is
+        # d_cart * rate / dist. Invert that to get the rate which yields the
+        # speed the servo itself was running at. Exact for the average; the
+        # move still eases in and out because arm.move always does.
+        q_start = np.array(self.data.qpos[:ARM_DOF], float)
+        dist = float(np.linalg.norm(np.asarray(q)[:ARM_DOF] - q_start))
+        rate = RAPID
+        if (v_cart is not None and np.isfinite(v_cart)
+                and dist > 1e-9 and d_cart > 1e-9):
+            rate = min(RAPID, dist * float(v_cart) / float(d_cart))
+        self.arm.move(q, GRIP_OPEN, rate=rate, viewer=viewer, estop=estop,
+                      stop=aborted)
+
+    def retreat(self, viewer=None, estop=None, aborted=None, v_cart=None):
         # Back straight up in steps until the object is whole in view again.
         # Each step is a planned move, so the retreat itself is open loop; only
         # the verdict comes from the camera. Returns (clear, steps).
         data = self.data
+        if v_cart is None:
+            v_cart = self.retreat_v
         p_cur, R_cur = self.current_pose()
         anchor = self.best_p if self.best_p is not None else self.p_est
         for j in range(1, self.retreat_max + 1):
@@ -315,8 +338,8 @@ class PBVSServo:
                 return False, j - 1
             target = p_cur + np.array([0.0, 0.0, self.retreat_step * j])
             q = self.arm.solve_ik(target, data.qpos[:ARM_DOF], R_target=R_cur)
-            self.arm.move(q, GRIP_OPEN, rate=RAPID, viewer=viewer, estop=estop,
-                          stop=aborted)
+            self._paced_move(q, self.retreat_step, v_cart, viewer=viewer,
+                             estop=estop, aborted=aborted)
             if aborted is not None and aborted():
                 return False, j
             if (self.observe(near=anchor)
@@ -347,8 +370,11 @@ class PBVSServo:
         push(viewer, 'occlusion',
              'open-loop commit to %6.3f %6.3f' % (self.best_p[0], self.best_p[1]),
              'from the fullest view, span %.4f' % self.best_span)
-        self.arm.move(q, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop,
-                      stop=aborted)
+        # same pacing again, so the open-loop descent matches the servo it replaces
+        d_cart = float(np.linalg.norm(p_des - np.array(self.data.xpos[self.base_id],
+                                                       float)))
+        self._paced_move(q, d_cart, self.retreat_v, viewer=viewer, estop=estop,
+                         aborted=aborted)
         if aborted is not None and aborted():
             return False, 0
         return True, 1
