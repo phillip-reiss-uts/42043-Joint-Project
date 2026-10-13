@@ -14,8 +14,8 @@ OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
 OBJECT_POS = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + OBJECT_SIZE[2]]
 
 # OBJECT POOL
-POOL_SIZE = 8
-INITIAL_OBJECTS = 4       # spawned when the scene is reset
+POOL_SIZE = 1
+INITIAL_OBJECTS = 0       # scene starts empty; P places the cube
 MIN_OBJECT_SEPARATION = 0.10   # centre-to-centre; keeps clusters from merging
 
 # chute: sunk bin at the table's right edge, nearest the robot

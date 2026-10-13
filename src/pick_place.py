@@ -203,6 +203,94 @@ def despawn_into_chute(model, data, reg, viewer=None):
                 viewer.sync()
     return changed
 
+
+# SINGLE-CUBE COMMANDS
+def place_cube(model, data, reg, rng, viewer=None, settle=True, index=0,
+               stop=None, estop=None):
+    # Put the cube on the table at a spawn position, whether it was parked,
+    # held or already on the table. Honours the hard-spawn mode through
+    # _choose_spawn_xy: HARD_SPAWN_MODE tries the measured awkward positions
+    # first and falls back to the easy band.
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
+    base_xy = np.array(data.xpos[base_id][:2], float)
+
+    for k in range(200):
+        cand = np.array(_choose_spawn_xy(rng, fallback=(k >= 100)))
+        if np.linalg.norm(cand - base_xy) < SPAWN_ARM_CLEARANCE:
+            continue
+        # clearance from other objects only -- the cube itself may be active
+        clash = False
+        for j in reg.active():
+            if j == index:
+                continue
+            if np.linalg.norm(reg.pose(data, j)[:2] - cand) < MIN_OBJECT_SEPARATION:
+                clash = True
+                break
+        if clash:
+            continue
+
+        yaw = rng.uniform(0.0, np.pi / 2.0) if RANDOMIZE_YAW else 0.0
+        reg.teleport(data, index,
+                     [cand[0], cand[1], TABLE_HEIGHT + SPAWN_CLEARANCE],
+                     quat=(np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)))
+        reg.state[index] = 'active'
+        reg.freeze(data, index)
+        mujoco.mj_forward(model, data)
+
+        if settle:
+            q_hold = data.qpos[:ARM_DOF].copy()
+            for s in range(2000):
+                if stop is not None and stop():
+                    break
+                data.ctrl[:ARM_DOF] = q_hold
+                data.ctrl[model.nu - 1] = GRIP_OPEN
+                mujoco.mj_step(model, data)
+                while estop is not None and estop():
+                    data.ctrl[:ARM_DOF] = q_hold
+                    data.ctrl[model.nu - 1] = GRIP_OPEN
+                    mujoco.mj_step(model, data)
+                    if viewer is not None:
+                        viewer.sync()
+                if viewer is not None and s % SYNC_STEPS == 0:
+                    viewer.sync()
+        return index
+
+    return None
+
+
+def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
+                  stop=None):
+    # Controlled release: carry the held cube to a clear spot on the table,
+    # lower it and open the jaws. Used by the S-stop command.
+    i = 0
+    pos = reg.pose(data, i)
+    if pos[2] < TABLE_HEIGHT + OBJECT_HEIGHT:
+        return False                       # not holding anything
+
+    for k in range(200):
+        cand = np.array(_choose_spawn_xy(rng, fallback=(k >= 100)))
+        R = rotation_with_yaw(float(rng.uniform(0.0, np.pi / 2.0)), R_DOWN)
+        q_high = arm.solve_ik([cand[0], cand[1], TABLE_HEIGHT + LIFT_Z],
+                              data.qpos[:ARM_DOF], R_target=R)
+        q_low = arm.solve_ik([cand[0], cand[1], TABLE_HEIGHT + OBJECT_HEIGHT],
+                             q_high, R_target=R)
+        arm.move(q_high, GRIP_CLOSED, rate=RAPID, viewer=viewer, estop=estop,
+                 stop=stop)
+        if stop is not None and stop():
+            return False
+        arm.move(q_low, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
+                 stop=stop)
+        arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stop)
+        q_hold = data.qpos[:ARM_DOF].copy()
+        for s in range(600):
+            data.ctrl[:ARM_DOF] = q_hold
+            data.ctrl[model.nu - 1] = GRIP_OPEN
+            mujoco.mj_step(model, data)
+            if viewer is not None and s % SYNC_STEPS == 0:
+                viewer.sync()
+        return True
+    return False
+
 # SCENE SETUP
 def place_object(model, data, rng, home_id, free_joint_id, body_id, viewer=None):
     # Reset the scene, put the object somewhere, and let it settle.
