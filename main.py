@@ -23,6 +23,9 @@ from src.arm import Arm
 from src.pick_place import (ObjectRegistry, reset_scene, clear_table,
                             place_cube, put_cube_down)
 
+# live viewer overlays
+from src.overlay import Overlay
+
 
 def _log(msg):
     # Optional diagnostics; gated by config.VERBOSE.
@@ -64,7 +67,10 @@ def main():
 
     rng = np.random.default_rng()
 
-    camera = RGBDCamera(model, cam_name, width=640, height=480)
+    # 320x240 sensor: ~2x the position error of 640x480 (1.5 mm vs 0.75 mm
+    # mean, still far inside grasp tolerance) but ~5x cheaper per frame, which
+    # keeps the perception stall inside the servo loop below the visible range.
+    camera = RGBDCamera(model, cam_name, width=320, height=240)
     _log(f'[INFO] intrinsics K:\n{camera.K}')
 
     # COMMANDS
@@ -104,6 +110,12 @@ def main():
         viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         viewer.cam.fixedcamid = cam_id
 
+        # Live overlays. Wraps viewer.sync, so every sync anywhere in the code
+        # draws the overlay first -- no plumbing through the call chain.
+        overlay = Overlay(viewer, model, data, camera, cam_id, arm.base_id)
+        overlay.set_info('mode', 'WAIT', 'scene empty')
+        arm.viewer = viewer
+
         reg = ObjectRegistry(model, POOL_SIZE)
         reset_scene(model, data, reg, rng, viewer=None)
 
@@ -128,6 +140,7 @@ def main():
 
         def say(msg):
             print('[STATE] %s' % msg)
+            overlay.set_info('mode', msg, 'paused' if paused[0] else '')
 
         def at_home():
             return float(np.linalg.norm(data.qpos[:ARM_DOF] - home_q)) < 1e-2
@@ -178,6 +191,8 @@ def main():
                     say('SPAWN  (6)')
                     idx = place_cube(model, data, reg, rng, viewer=viewer,
                                      stop=lambda: cmd['reset'], estop=estop)
+                    overlay.set_info('task', 'spawned obj %s' % idx,
+                                     'on the table')
                     say('WAIT  (cube placed on the table, index %s)' % idx)
                 # 7 starts a search
                 if take('start'):
@@ -193,6 +208,7 @@ def main():
 
             # SEARCH
             say('SEARCH  (7)')
+            overlay.set_info('task', 'searching', 'clear_table')
 
             if USE_OBSERVER:
                 # imported here so scipy is not loaded when the observer is off

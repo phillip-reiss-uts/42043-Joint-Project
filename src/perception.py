@@ -20,6 +20,7 @@ class Detection:
     yaw: float              # degrees modulo 90; 0.0 if undetectable
     span: np.ndarray = None # (2,) xy extent of the cluster, if computed
     score: float = 0.0      # quality score; higher = cleaner, denser cloud
+    hull: np.ndarray = None # (M,3) top-face convex hull, the yaw's own data
 
     @property
     def ok(self):
@@ -28,39 +29,41 @@ class Detection:
 
 # GEOMETRY
 def _hull2d(P):
-    # Convex hull of (N,2) points, monotone chain.
-    P = np.unique(np.round(P, 9), axis=0)
+    # Convex hull of (N,2) points, via Qhull (C speed). The old monotone chain
+    # was pure Python and cost ~47 ms per call. scipy is imported lazily so the
+    # observer's deferred-loading arrangement is preserved.
+    from scipy.spatial import ConvexHull, QhullError
+    P = np.asarray(P, dtype=np.float64)
     if len(P) < 3:
         return P
-    P = P[np.lexsort((P[:, 1], P[:, 0]))]
-
-    def cross(o, a, b):
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    def half(pts):
-        st = []
-        for p in pts:
-            while len(st) >= 2 and cross(st[-2], st[-1], p) <= 1e-12:
-                st.pop()
-            st.append(p)
-        return st
-
-    lo = half(P)
-    up = half(P[::-1])
-    return np.array(lo[:-1] + up[:-1])
+    try:
+        hull = ConvexHull(P)
+    except QhullError:
+        # degenerate (collinear) cloud: no rectangle fit downstream, same as
+        # the old chain returning fewer than 3 points
+        return np.zeros((0, 2))
+    return hull.points[hull.vertices]
 
 
-def fitted_centre(obj_pts, band=0.004):
-    # Centre of the minimum-area rectangle of the object's top face.
+def _top_band(obj_pts, band):
+    # Points within +-band of the cluster's median z, and their 2D hull.
+    # Returns (band_points, hull_xy, z_of_band).
+    if obj_pts is None or len(obj_pts) < 50:
+        return None, None, None
     z_med = np.median(obj_pts[:, 2])
     top = obj_pts[np.abs(obj_pts[:, 2] - z_med) < band]
     if len(top) < 30:
-        return None
-
+        return top, None, z_med
     H = _hull2d(top[:, :2])
     if len(H) < 3:
-        return None
+        return top, None, z_med
+    return top, H, float(np.median(top[:, 2]))
 
+
+def _calipers(H):
+    # Minimum-area rectangle of a 2D hull. Returns (centre_xy, yaw_deg,
+    # half_extents) or None. The centre and the yaw come from the SAME edge,
+    # which is the whole point of doing this once.
     best = None
     for i in range(len(H)):
         e = H[(i + 1) % len(H)] - H[i]
@@ -70,44 +73,38 @@ def fitted_centre(obj_pts, band=0.004):
         u = e / n
         v = np.array([-u[1], u[0]])
         pu, pv = H @ u, H @ v
-        area = (pu.max() - pu.min()) * (pv.max() - pv.min())
+        w = pu.max() - pu.min()
+        h = pv.max() - pv.min()
+        area = w * h
         if best is None or area < best[0]:
             cu = 0.5 * (pu.max() + pu.min())
             cv = 0.5 * (pv.max() + pv.min())
-            best = (area, u * cu + v * cv)
+            best = (area, u * cu + v * cv,
+                    float(np.degrees(np.arctan2(u[1], u[0])) % 90.0),
+                    np.array([w / 2.0, h / 2.0]))
+    return None if best is None else best[1:]
 
-    return best[1] if best else None
+
+def fitted_centre(obj_pts, band=0.004):
+    # Centre of the minimum-area rectangle of the object's top face.
+    _, H, _ = _top_band(obj_pts, band)
+    if H is None:
+        return None
+    rect = _calipers(H)
+    return None if rect is None else rect[0]
 
 
 def detect_yaw(obj_pts, band=0.004):
     # Orientation of a box-like object, degrees modulo 90.
     if obj_pts is None or len(obj_pts) < 50:
         return None, 0, 0
-
-    z_med = np.median(obj_pts[:, 2])
-    top = obj_pts[np.abs(obj_pts[:, 2] - z_med) < band]
-    if len(top) < 30:
-        return None, len(top), 0
-
-    H = _hull2d(top[:, :2])
-    if len(H) < 3:
+    top, H, _ = _top_band(obj_pts, band)
+    if H is None:
+        return None, 0 if top is None else len(top), 0
+    rect = _calipers(H)
+    if rect is None:
         return None, len(top), len(H)
-
-    best_area, best_angle = None, None
-    for i in range(len(H)):
-        e = H[(i + 1) % len(H)] - H[i]
-        n = np.linalg.norm(e)
-        if n < 1e-12:
-            continue
-        u = e / n
-        v = np.array([-u[1], u[0]])
-        pu, pv = H @ u, H @ v
-        area = (pu.max() - pu.min()) * (pv.max() - pv.min())
-        if best_area is None or area < best_area:
-            best_area = area
-            best_angle = float(np.degrees(np.arctan2(u[1], u[0])) % 90.0)
-
-    return best_angle, len(top), len(H)
+    return rect[1], len(top), len(H)
 
 
 def rotation_with_yaw(yaw_deg, R_down):
@@ -135,16 +132,11 @@ def find_camera(model):
 # SENSING
 def _filter_points(model, data, camera, cam_id):
     # Shared point filter: world points above the surface, in range, finite.
-    rgb, depth = camera.capture(data)
-    points = camera.deproject(depth, data)
-
-    cam_pos = data.cam_xpos[cam_id]
-    near = np.linalg.norm(points - cam_pos, axis=-1)
-    keep = (np.isfinite(points).all(axis=-1)
-            & (near > SELF_FILTER)
-            & (near < DEPTH_MAX)
-            & (points[..., 2] > TABLE_HEIGHT + SURFACE_BAND))
-    return points[keep]
+    # The keep-mask runs in image space, so only the surviving pixels are ever
+    # lifted to 3D (see RGBDCamera.surface_points).
+    depth = camera.capture_depth(data)
+    return camera.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
+                                 TABLE_HEIGHT + SURFACE_BAND)
 
 
 def _span_ok(span):
@@ -162,35 +154,28 @@ def score_cluster(span, n_points):
 
 
 def cluster_objects(points, voxel=0.02):
-    # Split a point cloud into connected components.
+    # Split a point cloud into connected components. Voxelise, then label with
+    # scipy.ndimage in C. 6-connectivity matches the old face-neighbour flood
+    # fill exactly, so the components are unchanged.
     if points is None or len(points) == 0:
         return []
 
+    from scipy import ndimage
+
     keys = np.floor(points[:, :3] / voxel).astype(np.int64)
-    voxels = {}
-    for i, k in enumerate(keys):
-        voxels.setdefault(tuple(k), []).append(i)
+    keys = keys - keys.min(axis=0)
+    grid = np.zeros(keys.max(axis=0) + 1, dtype=np.uint8)
+    grid[keys[:, 0], keys[:, 1], keys[:, 2]] = 1
 
-    clusters = []
-    seen = set()
-    for v in voxels:
-        if v in seen:
-            continue
-        # flood fill
-        stack = [v]
-        seen.add(v)
-        idx = []
-        while stack:
-            c = stack.pop()
-            idx.extend(voxels[c])
-            for d in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0),
-                      (0, 0, 1), (0, 0, -1)):
-                nb = (c[0] + d[0], c[1] + d[1], c[2] + d[2])
-                if nb in voxels and nb not in seen:
-                    seen.add(nb)
-                    stack.append(nb)
-        clusters.append(points[idx])
+    struct = np.zeros((3, 3, 3), dtype=np.uint8)
+    struct[1, 1, 1] = 1
+    struct[0, 1, 1] = struct[2, 1, 1] = 1
+    struct[1, 0, 1] = struct[1, 2, 1] = 1
+    struct[1, 1, 0] = struct[1, 1, 2] = 1
 
+    labels, n = ndimage.label(grid, structure=struct)
+    ids = labels[keys[:, 0], keys[:, 1], keys[:, 2]]
+    clusters = [points[ids == c] for c in range(1, n + 1)]
     clusters.sort(key=len, reverse=True)
     return clusters
 
@@ -209,18 +194,30 @@ def perceive_all(model, data, camera, cam_id):
         if not _span_ok(span):
             continue
 
-        centre_xy = fitted_centre(pts)
-        if centre_xy is None:
+        # One band-and-hull pass feeds the centre, the yaw and the stored hull,
+        # so the drawn hull is the one the yaw was actually fitted to.
+        _, H, z_band = _top_band(pts, 0.004)
+        rect = _calipers(H) if H is not None else None
+
+        if rect is not None:
+            centre_xy = rect[0]
+            yaw = rect[1]
+        else:
             centre_xy = 0.5 * (pts[:, :2].min(axis=0) + pts[:, :2].max(axis=0))
+            yaw = 0.0
         centre = np.array([centre_xy[0], centre_xy[1],
                            TABLE_HEIGHT + OBJECT_HEIGHT / 2.0])
 
-        yaw, _, _ = detect_yaw(pts)
+        hull = None
+        if H is not None:
+            hull = np.column_stack([H, np.full(len(H), z_band)])
+
         dets.append(Detection(
             centre, len(pts), pts,
             yaw if yaw is not None else 0.0,
             span=span,
             score=score_cluster(span, len(pts)),
+            hull=hull,
         ))
 
     dets.sort(key=lambda d: d.score, reverse=True)

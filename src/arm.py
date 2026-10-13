@@ -8,6 +8,7 @@ from src.config import (
     RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS,
     SYNC_STEPS,
 )
+from src.overlay import push
 
 
 class Arm:
@@ -21,6 +22,9 @@ class Arm:
         self.observer = None
         self.controller = None
         self.encoder = None
+
+        # set by main so observe() can push estimator error to the overlay
+        self.viewer = None
 
     # STATE FEEDBACK
     def attach_observer(self, observer, controller=None, encoder=None):
@@ -43,6 +47,11 @@ class Arm:
         u = np.array(self.data.ctrl[:ARM_DOF], float)
         self.observer.predict(u)
         self.observer.update(self.encoder.read(self.data))
+        push(self.viewer, 'observer',
+             'obs err %.5f' % float(np.linalg.norm(
+                 self.observer.xhat[:ARM_DOF] - self.data.qpos[:ARM_DOF])),
+             'v err %.5f' % float(np.linalg.norm(
+                 self.observer.xhat[ARM_DOF:] - self.data.qvel[:ARM_DOF])))
 
     # IK
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,

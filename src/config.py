@@ -1,5 +1,5 @@
 # src/config.py
-# Single source of truth for scene and task constants.
+"""Single source of truth for scene and task constants."""
 
 import numpy as np
 
@@ -13,9 +13,9 @@ OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
 OBJECT_POS = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + OBJECT_SIZE[2]]
 
-# OBJECT POOL
+# object pool 
 POOL_SIZE = 1
-INITIAL_OBJECTS = 0       # scene starts empty; P places the cube
+INITIAL_OBJECTS = 0       # spawned when the scene is reset
 MIN_OBJECT_SEPARATION = 0.10   # centre-to-centre; keeps clusters from merging
 
 # chute: sunk bin at the table's right edge, nearest the robot
@@ -135,6 +135,21 @@ PLACE_OFFSET_X = PLACE_OFFSET_Y = 0.0
 REVOLVE_DEG = tuple(range(15, 260, 15))
 REVOLVE_SPEED = RAPID     # RAPID is safe here; the gripper is high, not near the object
 SEARCH_SPEED = RAPID     # looks are not contact moves; the gripper is high
+
+# PBVS commanded-twist caps, m/s. The servo law asks for kp*err directly, which
+# is ~1.9 m/s at the start of an approach; unbounded that drives the gripper into
+# the object and the table. Transit is the hover leg, descent the final approach.
+SERVO_V_TRANSIT = 0.050
+SERVO_V_DESCENT = 0.015
+# Iteration budget per servo stage. At the caps above the hover leg alone needs
+# ~3100 steps, so the default 1500 would time out and abort the pick.
+SERVO_MAX_ITERS = 8000
+# Iterations between servo re-observations. Each perceive_all blocks the loop
+# for ~65 ms while a physics step costs 0.05 ms, so at the class default of 15
+# the loop stalls almost continuously and the motion advances in 0.7 mm bursts.
+# The estimate only moves ~0.2 mm per observation and the object is static, so
+# observing less often costs almost nothing and lets the sim run.
+SERVO_PERCEIVE_EVERY = 160
 
 # Search offsets around the nominal gripper xy, tried in order.
 SEARCH_OFFSETS = (

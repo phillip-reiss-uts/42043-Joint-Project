@@ -10,15 +10,22 @@ from src.config import (
     GRIP_OPEN, GRIP_CLOSED, SYNC_STEPS,
 )
 from src.perception import perceive_all, rotation_with_yaw
+from src.overlay import push
 
 
 # SERVOING
+def _wrap90(d):
+    # Shortest signed difference between two yaw readings that live modulo 90.
+    return (np.asarray(d) + 45.0) % 90.0 - 45.0
+
+
 class PBVSServo:
     # Drives the gripper to a pose derived from the current view of an object.
 
     def __init__(self, model, data, arm, camera, cam_id,
                  kp=6.0, ko=6.0, damp=1e-2, dq_max=0.02,
-                 perceive_every=15, tol_p=3.0e-3, tol_o=3.0e-2):
+                 perceive_every=15, tol_p=3.0e-3, tol_o=3.0e-2,
+                 smooth=1.0, v_max=float('inf'), v_descent=None):
         self.model = model
         self.data = data
         self.arm = arm
@@ -32,6 +39,15 @@ class PBVSServo:
         self.perceive_every = perceive_every
         self.tol_p = tol_p
         self.tol_o = tol_o
+        # Blend factor applied to a new observation: 1.0 replaces the estimate
+        # outright (a step change every perceive_every iterations, which the
+        # arm answers with a lunge), lower values ease the target across.
+        self.smooth = float(np.clip(smooth, 0.0, 1.0))
+        # Commanded-twist caps (m/s) for the hover transit and the final
+        # descent. inf reproduces the unbounded law.
+        self.v_max = float(v_max)
+        self.v_descent = (float(v_max) if v_descent is None
+                          else float(v_descent))
 
         self.base_id = arm.base_id
         self.jacp = np.zeros((3, model.nv))
@@ -44,21 +60,53 @@ class PBVSServo:
         self.obs_ok = 0              # successful re-observations
         self.obs_try = 0             # attempts
 
+        # set while the loop runs, so observe() can push to the overlay
+        self.viewer = None
+
+    def _control(self, state):
+        # Tell the overlay which regime the loop is in, for colour coding.
+        ov = getattr(self.viewer, 'overlay', None)
+        if ov is not None:
+            ov.set_control(state)
+
     # PERCEPTION
     def observe(self, near=None):
         # Re-observe the object. Keeps the estimate nearest the previous one.
         self.obs_try += 1
         dets = perceive_all(self.model, self.data, self.camera, self.cam_id)
         self.last_dets = len(dets)
+        ov = getattr(self.viewer, 'overlay', None)
+        if ov is not None:
+            ov.set_detections(dets)
         if not dets:
+            push(self.viewer, 'perception',
+                 'dets 0  re-obs %d/%d' % (self.obs_ok, self.obs_try),
+                 'view blocked')
             return False
         if near is None:
             best = dets[0]
         else:
             best = min(dets, key=lambda d: np.linalg.norm(d.centre[:2] - near[:2]))
-        self.p_est = np.array(best.centre, float)
-        self.yaw_est = float(best.yaw)
+        new_est = np.array(best.centre, float)
+        new_yaw = float(best.yaw)
+        if self.p_est is None or self.smooth >= 1.0:
+            self.p_est = new_est
+            self.yaw_est = new_yaw
+        else:
+            a = self.smooth
+            self.p_est = self.p_est + a * (new_est - self.p_est)
+            # yaw lives modulo 90, so blend along the shorter arc
+            self.yaw_est = float((self.yaw_est
+                                  + a * _wrap90(new_yaw - self.yaw_est)) % 90.0)
         self.obs_ok += 1
+        span = getattr(best, 'span', None)
+        push(self.viewer, 'perception',
+             'dets %d  re-obs %d/%d' % (len(dets), self.obs_ok, self.obs_try),
+             'span %.4f %.4f' % (span[0], span[1]) if span is not None
+             else 'span -')
+        push(self.viewer, 'estimate',
+             'est %6.3f %6.3f %6.3f' % tuple(self.p_est),
+             'yaw %5.1f deg' % self.yaw_est)
         return True
 
     # GEOMETRY
@@ -86,12 +134,21 @@ class PBVSServo:
         return err_p, err_o
 
     # LAW
-    def joint_step(self, err_p, err_o):
+    def joint_step(self, err_p, err_o, v_max=None):
         # One damped-least-squares joint increment for this pose error.
         mujoco.mj_jacBody(self.model, self.data, self.jacp, self.jacr,
                           self.base_id)
         J = np.vstack([self.jacp[:, :ARM_DOF], self.jacr[:, :ARM_DOF]])
         v = np.concatenate([self.kp * err_p, self.ko * err_o])   # m/s, rad/s
+        # Cap the commanded twist. The law asks for kp*err outright, which is
+        # metre-per-second scale at the start of an approach, and dq_max does
+        # not catch it. Scaling the whole 6-vector preserves the motion
+        # direction and slows rotation with it.
+        n = float(np.linalg.norm(v[:3]))
+        if n > 1e-12:
+            limit = self.v_max if v_max is None else v_max
+            if np.isfinite(limit) and n > limit:
+                v = v * (limit / n)
         dq = J.T @ np.linalg.solve(J @ J.T + self.damp * np.eye(6), v)
         dq = dq * self.model.opt.timestep
         return np.clip(dq, -self.dq_max, self.dq_max)
@@ -104,9 +161,11 @@ class PBVSServo:
 
     # LOOP
     def servo(self, z_offset, max_iters=1500, viewer=None, estop=None,
-              aborted=None, trace=None):
+              aborted=None, trace=None, v_max=None):
         # Servo to the grasp pose at z_offset. Returns (converged, iters, err).
         data, model = self.data, self.model
+        self.viewer = viewer
+        self._control('open')
 
         if self.p_est is None and not self.observe():
             return False, 0, float('inf')
@@ -116,24 +175,50 @@ class PBVSServo:
 
         for k in range(max_iters):
             if aborted is not None and aborted():
+                self._control('open')
                 return False, k, err_norm
 
             if k % self.perceive_every == 0:
                 # re-observe; hold the last estimate if the view is blocked
-                self.observe(near=self.p_est)
+                fresh = self.observe(near=self.p_est)
+                # the overlay colours the frustum/trail by which regime we are in
+                self._control('closed' if fresh else 'held')
 
             p_des, R_des = self.desired_pose(z_offset)
             err_p, err_o = self.error(p_des, R_des)
             err_norm = float(np.linalg.norm(err_p))
             err_rot = float(np.linalg.norm(err_o))
 
+            ov = getattr(viewer, 'overlay', None)
+            if ov is not None:
+                ov.set_target(p_des, R_des)
+            push(viewer, 'servo',
+                 'z_off %.2f  iter %d/%d' % (z_offset, k, max_iters),
+                 'err %.5f m  %.5f rad' % (err_norm, err_rot))
+
             if trace is not None:
-                trace.append((k, err_norm, err_rot))
+                # Full record, so the loop can be replayed frame by frame.
+                p_cur_t, _ = self.current_pose()
+                trace.append({
+                    'k': k,
+                    'err_p': err_norm,
+                    'err_o': err_rot,
+                    'z_offset': z_offset,
+                    'p_des': np.array(p_des, float),
+                    'R_des': np.array(R_des, float),
+                    'p_cur': np.array(p_cur_t, float),
+                    'p_est': np.array(self.p_est, float),
+                    'yaw': float(self.yaw_est),
+                    'cam_pos': np.array(data.cam_xpos[self.cam_id], float),
+                    'cam_mat': np.array(data.cam_xmat[self.cam_id],
+                                        float).reshape(3, 3),
+                })
 
             if err_norm < self.tol_p and err_rot < self.tol_o:
+                self._control('open')
                 return True, k, err_norm
 
-            dq = self.joint_step(err_p, err_o)
+            dq = self.joint_step(err_p, err_o, v_max=v_max)
             q_cmd = q_cmd + dq
             data.ctrl[:ARM_DOF] = q_cmd
             data.ctrl[model.nu - 1] = GRIP_OPEN
@@ -150,22 +235,25 @@ class PBVSServo:
             if viewer is not None and k % SYNC_STEPS == 0:
                 viewer.sync()
 
+        self._control('open')
         return False, max_iters, err_norm
 
-    # FULL APPROACH
+
     def approach(self, standoff=0.10, viewer=None, estop=None, aborted=None,
-                 trace=None, coarse=True):
+                 trace=None, coarse=True, max_iters=1500):
         # Coarse move to the hover pose, then closed-loop hover and descent.
         if self.p_est is None and not self.observe():
             return False, 0, float('inf'), 0
         if coarse:
             self.preposition(standoff, viewer=viewer)
-        ok1, n1, e1 = self.servo(standoff, viewer=viewer, estop=estop,
-                                 aborted=aborted, trace=trace)
+        ok1, n1, e1 = self.servo(standoff, max_iters=max_iters, viewer=viewer,
+                                 estop=estop, aborted=aborted, trace=trace,
+                                 v_max=self.v_max)
         if not ok1:
             return False, n1, e1, 0
-        ok2, n2, e2 = self.servo(0.0, viewer=viewer, estop=estop,
-                                 aborted=aborted, trace=trace)
+        ok2, n2, e2 = self.servo(0.0, max_iters=max_iters, viewer=viewer,
+                                 estop=estop, aborted=aborted, trace=trace,
+                                 v_max=self.v_descent)
         return ok2, n1 + n2, e2, n1
 
 
@@ -264,9 +352,9 @@ def main():
     print('part 1 -- closed-loop approach to a static object')
     print('  object %d seen at %s' % (idx, np.round(servo.p_est, 4)))
     print('  %-14s %-14s %s' % ('iteration', 'pos err (m)', 'rot err (rad)'))
-    for k, ep, eo in trace:
-        if k in (0, 1, 2, 5, 10, 20, 40, 60, 80, 120):
-            print('  %-14d %-14.5f %.5f' % (k, ep, eo))
+    for e in trace:
+        if e['k'] in (0, 1, 2, 5, 10, 20, 40, 60, 80, 120):
+            print('  %-14d %-14.5f %.5f' % (e['k'], e['err_p'], e['err_o']))
     print('  converged in %d iterations, final position error %.5f m'
           % (iters, err))
     print('  (hover stage took %d of those, descent the rest)' % hover_iters)

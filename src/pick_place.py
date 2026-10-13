@@ -17,6 +17,7 @@ from src.config import (
     TIP_OFFSET, APPROACH_Z, FINAL_Z, LIFT_Z,
     PLACE_DX, PLACE_DY, PLACE_OFFSET_X, PLACE_OFFSET_Y,
     PLACE_CLEARANCE, STEPS_CLOSE, STEPS_RELEASE, DROP_HOLD_STEPS,
+    SERVO_V_TRANSIT, SERVO_V_DESCENT, SERVO_MAX_ITERS, SERVO_PERCEIVE_EVERY,
     REVOLVE_DEG, REVOLVE_SPEED, SYNC_STEPS,
     SEARCH_OFFSETS, SEARCH_SPEED,
     # LEFTOVER: POOL_SIZE is passed in by main.py; this module never reads it.
@@ -27,6 +28,8 @@ from src.config import (
 )
 
 from src.perception import perceive, perceive_all, rotation_with_yaw
+from src.overlay import push
+from src.servo import PBVSServo
 
 
 @dataclass
@@ -529,35 +532,35 @@ def pick_and_place(model, data, arm, camera, cam_id, rng,
     return result
 
 # Clear table
-def pick_one(model, data, arm, reg, i, drop_xy, yaw, viewer=None, aborted=None,
-             estop=None, spawn_hook=None):
+def pick_one(model, data, arm, reg, i, drop_xy, camera=None, cam_id=-1,
+             viewer=None, aborted=None, estop=None, spawn_hook=None):
     # Pick pooled object i and drop it at drop_xy.
     def stopped():
         return aborted is not None and aborted()
 
-    body_pos = reg.pose(data, i)
-    grasp_z = body_pos[2] + TIP_OFFSET
-
-    R = rotation_with_yaw(yaw, R_DOWN)
-    q_approach = arm.solve_ik([body_pos[0], body_pos[1], grasp_z + APPROACH_Z],
-                              data.qpos[:ARM_DOF], R_target=R)
-    q_final = arm.solve_ik([body_pos[0], body_pos[1], grasp_z + FINAL_Z],
-                           q_approach, R_target=R)
-    q_grasp = arm.solve_ik([body_pos[0], body_pos[1], grasp_z],
-                           q_final, R_target=R)
-    q_lift = arm.solve_ik([body_pos[0], body_pos[1], grasp_z + LIFT_Z],
-                          q_grasp, R_target=R)
-
-    arm.move(q_approach, GRIP_OPEN, rate=RAPID, viewer=viewer, estop=estop,
-             spawn_hook=spawn_hook, stop=stopped)
-    if stopped():
+    # Closed-loop approach: the servo drives the WHOLE transit, re-observing and
+    # re-deriving its target every perceive_every iterations. coarse=False means
+    # no open-loop preposition, so vision corrects the entire approach rather
+    # than only the final descent. Everything after the grasp stays open loop,
+    # which the overlay shows as the trail turning red.
+    sv = PBVSServo(model, data, arm, camera, cam_id, smooth=0.3,
+                   perceive_every=SERVO_PERCEIVE_EVERY,
+                   v_max=SERVO_V_TRANSIT, v_descent=SERVO_V_DESCENT)
+    if not sv.observe():
         return False
-    arm.move(q_final, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop,
-             spawn_hook=spawn_hook, stop=stopped)
-    arm.move(q_grasp, GRIP_OPEN, rate=FEED, viewer=viewer, estop=estop,
-             spawn_hook=spawn_hook, stop=stopped)
-    if stopped():
+    ok, _, _, _ = sv.approach(standoff=APPROACH_Z, viewer=viewer, estop=estop,
+                              aborted=stopped, coarse=False,
+                              max_iters=SERVO_MAX_ITERS)
+    if not ok or stopped():
         return False
+
+    # lift from where the gripper actually ended up, with the servo's own yaw
+    # estimate, so no stored target is carried past the closed-loop phase
+    R = rotation_with_yaw(sv.yaw_est, R_DOWN)
+    q_lift = arm.solve_ik(np.array(data.xpos[arm.base_id], float)
+                          + np.array([0.0, 0.0, LIFT_Z]),
+                          data.qpos[:ARM_DOF], R_target=R)
+
     arm.close_gripper(STEPS_CLOSE, viewer, estop=estop, spawn_hook=spawn_hook,
                       stop=stopped)
     if stopped():
@@ -627,7 +630,21 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
         if stopped():
             return
 
-        dets = perceive_all(model, data, camera, cam_id)
+        def see():
+            # perceive + publish to the overlay, so the annotated camera view
+            # shows the same clusters the task is acting on
+            found = perceive_all(model, data, camera, cam_id)
+            ov = getattr(viewer, 'overlay', None)
+            if ov is not None:
+                ov.set_detections(found)
+            span = getattr(found[0], 'span', None) if found else None
+            push(viewer, 'perception',
+                 'dets %d' % len(found),
+                 'span %.4f %.4f' % (span[0], span[1]) if span is not None
+                 else 'span -')
+            return found
+
+        dets = see()
         despawned = despawn_into_chute(model, data, reg, viewer=viewer)
         if despawned:
             print(f'[TASK] despawned {despawned}')
@@ -655,7 +672,7 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
                          estop=estop, stop=stopped)
                 if stopped():
                     return
-                dets = perceive_all(model, data, camera, cam_id)
+                dets = see()
                 if dets:
                     found = True
                     break
@@ -674,7 +691,7 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
                              estop=estop, stop=stopped)
                     if stopped():
                         return
-                    dets = perceive_all(model, data, camera, cam_id)
+                    dets = see()
                     if dets:
                         found = True
                         break
@@ -693,7 +710,8 @@ def clear_table(model, data, arm, camera, cam_id, rng, reg,
 
         drop_xy = (rng.uniform(chute_cx - DROP_RADIUS, chute_cx + DROP_RADIUS),
                    rng.uniform(chute_cy - DROP_RADIUS, chute_cy + DROP_RADIUS))
-        if pick_one(model, data, arm, reg, chosen, drop_xy, best.yaw,
+        if pick_one(model, data, arm, reg, chosen, drop_xy,
+                    camera=camera, cam_id=cam_id,
                     viewer=viewer, aborted=aborted, estop=estop,
                     spawn_hook=spawn_hook):
             # let it fall, then despawn whatever reached the bin.

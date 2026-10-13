@@ -39,6 +39,13 @@ class RGBDCamera:
         return K
 
     # Capture
+    def capture_depth(self, data):
+        # Depth pass only. The point pipeline never uses the RGB frame, and the
+        # extra render costs ~8 ms inside the servo loop.
+        self.renderer.enable_depth_rendering()
+        self.renderer.update_scene(data, camera=self.camera_name)
+        return self.renderer.render()
+
     def capture(self, data):
         # Render the current view from this camera.
         # RGB pass
@@ -95,3 +102,46 @@ class RGBDCamera:
         points = world.reshape(H, W, 3)
 
         return points
+
+    # Deprojection, masked in image space
+    def surface_points(self, depth, data, near_min, near_max, z_min):
+        # Same points as deproject() followed by the usual keep-mask, but the
+        # mask is evaluated on (H,W) arrays and only the survivors are lifted to
+        # 3D. Building the full cloud costs ~28 ms and the masks over it ~26 ms,
+        # to retain ~1.6% of 307k pixels.
+        mujoco.mj_forward(self.model, data)
+
+        H, W = depth.shape
+        fx = self.K[0, 0]
+        fy = self.K[1, 1]
+        cx = self.K[0, 2]
+        cy = self.K[1, 2]
+
+        z = np.asarray(depth, dtype=np.float64)
+        # 1-D ray slopes, broadcast against depth only where a full (H,W) plane
+        # is genuinely needed. meshgrid here costs several 2.4 MB temporaries.
+        ax = -(np.arange(W, dtype=np.float64) - cx) / fx
+        ay = -(np.arange(H, dtype=np.float64) - cy) / fy
+
+        R = data.cam_xmat[self.cam_id].reshape(3, 3)
+        t = data.cam_xpos[self.cam_id]
+
+        # |p_cam| = z * |(ax, ay, -1)|, and R is orthonormal so this is also the
+        # distance from the camera in world coordinates
+        near = np.sqrt(ax[None, :] ** 2 + ay[:, None] ** 2 + 1.0) * z
+        # world z is linear in depth, so no 3D cloud is needed for the height test
+        wz = ((R[2, 0] * ax)[None, :] + (R[2, 1] * ay)[:, None]
+              - R[2, 2]) * z + t[2]
+
+        keep = (np.isfinite(z) & (z > 0.0) & (near > near_min)
+                & (near < near_max) & (wz > z_min))
+        if not keep.any():
+            return np.zeros((0, 3))
+
+        # rows are v, cols are u
+        vk, uk = np.nonzero(keep)
+        zk = z[vk, uk]
+        p_cam = np.stack([-(uk - cx) * zk / fx,
+                          -(vk - cy) * zk / fy,
+                          -zk], axis=-1)
+        return p_cam @ R.T + t
