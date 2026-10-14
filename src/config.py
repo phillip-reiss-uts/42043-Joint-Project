@@ -153,7 +153,7 @@ SERVO_MAX_ITERS = 8000
 # the loop stalls almost continuously and the motion advances in 0.7 mm bursts.
 # The estimate only moves ~0.2 mm per observation and the object is static, so
 # observing less often costs almost nothing and lets the sim run.
-SERVO_PERCEIVE_EVERY = 160
+SERVO_PERCEIVE_EVERY = 100
 
 # Occlusion recovery. On the way down the jaws clip the object, the cluster's
 # span shrinks, and the fitted centre drifts into the part still visible -- the
@@ -240,6 +240,21 @@ SERVO_WATCH_DESCENT = True
 # unmistakable before it fires.
 SERVO_MOVE_TOL = 0.015
 SERVO_COMMIT_TRIES = 5        # abandon-and-retrack cycles before giving up
+
+# ---- grasp verification ----
+# Read the jaws back after closing, instead of assuming a completed approach
+# means a completed grasp. These are the gripper's own registers -- finger
+# position and actuator force, the same pair a real 2F-85 reports over Modbus --
+# so nothing here depends on knowing where the object is.
+GRASP_DRIVER_JOINTS = ('gripper/right_driver_joint', 'gripper/left_driver_joint')
+# Measured on this model: closing on nothing drives the driver joints to 0.77
+# (range 0..0.8) with the actuator force at -0.13 as the linkage bottoms out.
+# Closing on the 30 mm cube stalls them at 0.25 with the force saturated at
+# +5.0 and the finger velocity at ~0.
+GRASP_CLOSED_Q = 0.60         # above this the jaws plainly closed on nothing
+GRASP_FORCE_MIN = 1.0         # force needed to call it gripped, not just touched
+GRASP_VEL_TOL = 0.02          # rad/s; below this the fingers count as stalled
+GRASP_LIFT_RECHECK = 0.04     # m; lift clear and re-read after a failed check
 # Yaw blend gain, separate from the position blend. The top face is square, so
 # the calipers can label the same orientation as yaw or yaw+90. With the raw
 # reading the label flipped every look, commanding a ~90 deg wrist swing and

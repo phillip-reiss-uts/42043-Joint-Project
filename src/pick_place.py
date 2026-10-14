@@ -24,6 +24,7 @@ from src.config import (
     SERVO_RETREAT_V,
     REVOLVE_DEG, REVOLVE_SPEED, SYNC_STEPS,
     SEARCH_OFFSETS, SEARCH_SPEED,
+    GRASP_LIFT_RECHECK,
     MAX_PASSES,
     # LEFTOVER: POOL_SIZE is passed in by main.py; this module never reads it.
     CHUTE_X, CHUTE_Y,
@@ -607,6 +608,40 @@ def pick_one(model, data, arm, reg, i, drop_xy, camera=None, cam_id=-1,
                       stop=stopped)
     if stopped():
         return False
+
+    # Ask the jaws whether they got anything. Without this the result is
+    # inferred from the servo converging, which reports success after grasping
+    # empty air -- the arm reaches its committed pose either way.
+    g = arm.grasp_state()
+    print(f'[GRASP] {g["state"]}: finger {g["q"]:.3f}  force {g["force"]:+.2f}  '
+          f'vel {g["vel"]:+.4f}')
+    push(viewer, 'gripper', 'grasp %s' % g['state'],
+         'q %.3f  f %+.2f' % (g['q'], g['force']))
+    if not g['held']:
+        # Lift clear and read again. A first reading can be taken while the
+        # fingers are still travelling, and if the cube was merely resting
+        # between the jaws a lift shakes it out -- so a positive second reading
+        # is the one worth trusting.
+        q_recheck = arm.solve_ik(np.array(data.xpos[arm.base_id], float)
+                                 + np.array([0.0, 0.0, GRASP_LIFT_RECHECK]),
+                                 data.qpos[:ARM_DOF], R_target=R)
+        arm.move(q_recheck, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
+                 spawn_hook=spawn_hook, stop=stopped)
+        if stopped():
+            return False
+        g = arm.grasp_state()
+        print(f'[GRASP] recheck after lift: {g["state"]}: finger {g["q"]:.3f}  '
+              f'force {g["force"]:+.2f}  vel {g["vel"]:+.4f}')
+        push(viewer, 'gripper', 'grasp recheck %s' % g['state'],
+             'q %.3f  f %+.2f' % (g['q'], g['force']))
+        if not g['held']:
+            # Nothing in the jaws. Put it down cleanly and let the caller retry
+            # rather than carrying air to the chute and calling it a success.
+            arm.open_gripper(STEPS_RELEASE, viewer, estop=estop,
+                             spawn_hook=spawn_hook, stop=stopped)
+            print('[GRASP] verified empty -- abandoning this pick')
+            return False
+
     arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
              spawn_hook=spawn_hook, stop=stopped)
     if reg.pose(data, i)[2] < TABLE_HEIGHT + OBJECT_HEIGHT / 2.0:

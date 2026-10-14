@@ -7,6 +7,7 @@ from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, R_DOWN,
     RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS,
     SYNC_STEPS,
+    GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
 )
 from src.overlay import push
 
@@ -32,6 +33,16 @@ class Arm:
         # Owned here rather than per-pick, because anything shorter lived let the
         # object freeze solid between attempts.
         self.mover = None
+
+        # Finger driver joints, for reading the jaw opening back. A real
+        # 2F-85 reports the same thing over Modbus as its position register.
+        self.finger_q = []
+        self.finger_v = []
+        for nm in GRASP_DRIVER_JOINTS:
+            j = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, nm)
+            if j >= 0:
+                self.finger_q.append(int(model.jnt_qposadr[j]))
+                self.finger_v.append(int(model.jnt_dofadr[j]))
 
     # STATE FEEDBACK
     def attach_observer(self, observer, controller=None, encoder=None):
@@ -237,6 +248,35 @@ class Arm:
                     spawn_hook()
                 if viewer is not None:
                     viewer.sync()
+
+    def grasp_state(self):
+        # Are the jaws actually holding something? Reads only the gripper's own
+        # position and force -- the same two registers a 2F-85 exposes over
+        # Modbus -- so nothing here depends on knowing where the object is.
+        #
+        # Measured on this model: closing on nothing drives the driver joints to
+        # 0.77 with the actuator force at -0.13, the linkage bottoming out.
+        # Closing on the 30 mm cube stalls them at 0.25 with the force saturated
+        # at +5.0. Three signals agree, so the verdict is taken from all of them
+        # rather than trusting the position alone, which cannot separate
+        # "gripped the cube" from "stopped against the table".
+        if not self.finger_q:
+            return {'state': 'unknown', 'held': False, 'q': float('nan'),
+                    'force': float('nan'), 'vel': float('nan')}
+        q = float(np.mean([self.data.qpos[a] for a in self.finger_q]))
+        v = float(np.mean([self.data.qvel[a] for a in self.finger_v]))
+        f = float(self.data.actuator_force[self.grip_act])
+
+        if q > GRASP_CLOSED_Q:
+            state = 'empty'                 # ran to the stop, nothing between
+        elif abs(v) > GRASP_VEL_TOL:
+            state = 'moving'                # still travelling, read too early
+        elif f < GRASP_FORCE_MIN:
+            state = 'touching'              # blocked, but not gripping
+        else:
+            state = 'held'
+        return {'state': state, 'held': state == 'held', 'q': q,
+                'force': f, 'vel': v}
 
     def hold(self, grip):
         # Command the current pose and grip without advancing a ramp.
