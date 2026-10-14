@@ -1,4 +1,4 @@
-# Vision-Guided Pick (UR5e + 2F-85 + D435i)
+﻿# Vision-Guided Pick (UR5e + 2F-85 + D435i)
 
 MuJoCo simulation for a vision-guided pick task on a UR5e arm with a
 wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
@@ -13,29 +13,46 @@ wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
 
 ## Usage
 
- - `E key` — Pause / Resume running pick and place sequence.
- - `P key` — Place a new object in a random location. Limit of 8 per scene.
- - `R key` — Resets scene. Places four object at random on table and begins pick and place.
- 
+ - `6` — spawn the cube on the table (respects the hard-mode spawn flags).
+ - `7` — start / stop the search.
+ - `8` — pause / resume. The robot holds position and resumes where it left off.
+ - `9` — reset the scene.
+ - `.` — cycle the object's motion band: off / slow 15 / medium 30 / fast 45 mm/s.
 
+Keys are 6-9 and `.` because the MuJoCo viewer binds every letter a-z to one of
+its 26 render flags and the digits 0-5 to geom groups, so nothing else is free.
 
 ## Layout
 
-- `main.py` — entry point, orchestrates the pipeline
-- `src/arm.py` — IK solver code for arm steering
-- `src/camera.py` — wrapper for RealSense D435i wrist camera, handles capture and deprojection 
-- `src/config.py` — Global flags and variables
-- `src/floor.py` — tested but currently unused. Filters and fits floor plane.
-- `src/model_loader.py` — composes UR5e + gripper + wrist camera + floor
-- `src/perception.py` — object perception functions
-- `src/pick_place.py` — creates scene, sequences robot moves.
-- `requirements.txt` — dependencies
+- `main.py` — entry point: state machine, command keys, scene setup.
+- `run_tests.py` — headless trial harness; writes `summary.csv` and four graphs.
+- `src/arm.py` — IK, trajectory execution, gripper, and the grasp readback.
+- `src/calibration.py` — camera intrinsic calibration from rendered marker views.
+- `src/camera.py` — RealSense D435i wrist camera: capture and deprojection.
+- `src/config.py` — global flags and constants.
+- `src/controller.py` — state-space joint controller and encoder.
+- `src/model_loader.py` — composes UR5e + 2F-85 + wrist camera + table.
+- `src/observer.py` — observer for the unmeasured joint states.
+- `src/overlay.py` — live viewer overlays (trail, frustum, detections, camera view).
+- `src/perception.py` — clustering, convex hull, calipers, object detection.
+- `src/pick_place.py` — scene, spawn/despawn, one pick, table clearing.
+- `src/servo.py` — PBVS servo, occlusion recovery, open-loop grasp commit.
+- `src/state_space.py` — linearisation, controllability/observability, LQR design.
+- `src/target_motion.py` — moving-target driver and the speed bands.
+- `src/tracking.py` — constant-velocity Kalman filter on the vision estimate.
+- `requirements.txt` — dependencies.
 
 ## Status
-- Robot will pick objects from table and place them in a chute.
-- The robot will seach for objects that are partially hidden.
-- The search routine will fail on full hidden objects.
+
+- The robot picks objects from the table and places them in a chute.
+- The table surface is filtered by Z height, and the robot searches for objects
+  that are partly hidden. A fully hidden object is still not found.
+- The object can be commanded to move while the robot is servoing, to show the
+  tracking holding up. The robot keeps servoing while it moves, falls back to
+  the search routine if it leaves the view entirely, and only commits to the
+  grasp once it has watched the object hold still for 3 s.
+- The grasp is verified from the gripper's own position and force rather than
+  assumed from the servo completing, with a lift-and-recheck when it reads empty.
 - Move speeds and gripper strength are configurable.
-- The table surface is filtered by Z height.
 - User controls are responsive and reliable.
 - Behaviour is deterministic and repeatable.

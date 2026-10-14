@@ -8,7 +8,8 @@ from scipy import ndimage
 from scipy.optimize import least_squares
 
 from src.config import (
-    CALIB_MARKERS, CALIB_SPACING, CALIB_BOARD_THICK, CALIB_MARKER_R,
+    # LEFTOVER: CALIB_BOARD_THICK was imported but never read.
+    CALIB_MARKERS, CALIB_SPACING, CALIB_MARKER_R,
 )
 
 

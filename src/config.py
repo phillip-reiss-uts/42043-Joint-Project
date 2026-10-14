@@ -79,7 +79,9 @@ CALIB_BOARD_MARGIN = 0.02   # slab overhang beyond the outer markers
 USE_OBSERVER = True      # run the observer and close the loop on its estimate
 FB_KQ = 3.0              # outer-loop position gain (dimensionless), PD fallback
 FB_TD = 0.05             # outer-loop velocity gain (seconds), PD fallback
-ENCODER_NOISY = True     # feed the observer a noisy encoder reading
+# LEFTOVER: ENCODER_NOISY is referenced nowhere; the observer always uses the
+# clean encoder reading.
+# ENCODER_NOISY = True
 USE_LQR = True           # design the outer-loop gains from the model (LQR)
                          # rather than using FB_KQ/FB_TD
 LQR_Q_POS = 1.0          # state cost on position error (rad^2)
@@ -189,7 +191,9 @@ OBJ_MOVE_BANDS = (
     ('medium', 0.030),
     ('fast',   0.045),
 )
-OBJ_MOVE_BAND = 0            # band the session starts on
+# LEFTOVER: the live band lives in target_motion._state, which is what the .
+# key cycles. This constant was never read.
+# OBJ_MOVE_BAND = 0
 OBJ_MOVE_TURN_S = 1.2        # seconds between random re-aims
 # Proximity halt, measured in 3D from the gripper base. Now DISABLED (0.0).
 # It was set just outside the hover distance so the target stopped as the arm
@@ -267,6 +271,15 @@ SERVO_YAW_SMOOTH = 0.35
 # and lurching in the other. Pacing also re-anchors after a perception stall
 # rather than sprinting to catch up.
 VIEWER_REAL_TIME = True
+
+# Live point-cloud panel in the viewer, drawn beside the camera image: the
+# points the depth pipeline kept, projected back into the camera plane and
+# coloured by range. It needs its own depth render, so it refreshes on its own
+# slower cadence -- the viewer syncs every 8 steps during a servo, and matching
+# that would add a depth pass 3x more often than perception itself runs.
+OVERLAY_CLOUD = True
+OVERLAY_CLOUD_EVERY = 30      # viewer syncs between cloud refreshes
+
 
 # Upper bound on clear_table passes. A pick can legitimately fail (the object
 # was never visible, the servo gave up); without this the task loop re-homes and

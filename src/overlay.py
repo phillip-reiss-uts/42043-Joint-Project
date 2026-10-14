@@ -15,7 +15,10 @@ import mujoco
 
 # DISABLED: ARM_DOF was imported but never used.
 # from src.config import ARM_DOF
-from src.config import VIEWER_REAL_TIME
+from src.config import (
+    VIEWER_REAL_TIME, OVERLAY_CLOUD, OVERLAY_CLOUD_EVERY, SELF_FILTER,
+    DEPTH_MAX, TABLE_HEIGHT, SURFACE_BAND,
+)
 
 # colour of the frustum and the trail by control regime, so the moment the
 # servo stops and the arm starts driving to a saved target is visible:
@@ -75,7 +78,8 @@ class Overlay:
     def __init__(self, viewer, model, data, camera, cam_id, arm_base_id,
                  trail_max=2600, trail_every=2, trail_draw_max=300,
                  image_every=6, frustum_depth=0.16, draw_frustum=True,
-                 real_time=VIEWER_REAL_TIME):
+                 real_time=VIEWER_REAL_TIME, cloud=OVERLAY_CLOUD,
+                 cloud_every=OVERLAY_CLOUD_EVERY, cloud_max=20000):
         self.viewer = viewer
         self.model = model
         self.data = data
@@ -88,6 +92,14 @@ class Overlay:
         self.image_every = image_every
         self.frustum_depth = frustum_depth
         self.draw_frustum = draw_frustum
+        # Live point cloud, projected back into the camera image plane and
+        # coloured by depth. Refreshed far less often than the RGB panel: it
+        # needs its own depth render, which is the expensive part of the
+        # pipeline, and the viewer syncs every 8 steps during a servo.
+        self.cloud = bool(cloud) and camera is not None
+        self.cloud_every = max(1, int(cloud_every))
+        self.cloud_max = int(cloud_max)
+        self._two_panels = self.cloud
 
         # pushed by the task / servo / perception paths
         self.detections = []
@@ -97,6 +109,9 @@ class Overlay:
         self._trail = []
         self._n = 0
         self._img = None
+        self._cloud_img = None
+        self._panel_rgb = None
+        self._panel_cloud = None
         self._dead = set()            # sections disabled after an error
         self.control = 'open'         # 'closed' | 'held' | 'open'
 
@@ -259,6 +274,9 @@ class Overlay:
             self._section(self._draw_camera, scn)
         self._section(self._set_texts)
         self._section(self._set_image)
+        self._section(self._set_cloud)
+        # one call, so the two panels cannot disagree about the viewport
+        self._section(self._push_images)
 
     def _sample(self):
         self._n += 1
@@ -400,32 +418,138 @@ class Overlay:
         return img
 
     def _set_image(self):
+        self._panel_rgb = None
         if self.camera is None or self.image_every <= 0:
             return
         if self._n % self.image_every == 0 or self._img is None:
-            # RGB pass only: the overlay has no use for depth, and this avoids
-            # doubling the render cost and disturbing the depth render state.
+            # RGB pass only: the RGB panel has no use for depth, and this avoids
+            # doubling its render cost. _set_cloud runs its own depth pass.
             ren = self.camera.renderer
             ren.disable_depth_rendering()
             ren.update_scene(self.data, camera=self.camera.camera_name)
             self._img = np.array(ren.render(), copy=True)   # raw, unannotated
         if self._img is None:
             return
-        vp = self.viewer.viewport
         # The rect and the array must agree exactly, so derive the rect from the
         # image aspect rather than guessing, then resample to fit.
         ih, iw = self._img.shape[:2]
-        w = max(80, vp.width // 3)
-        h = max(60, int(round(w * ih / float(iw))))
-        if h > vp.height // 3:
-            h = max(60, vp.height // 3)
-            w = max(80, int(round(h * iw / float(ih))))
+        got = self._panel_rect('rgb')
+        if got is None:
+            return
+        rect, w, h = got
         ys = np.clip((np.arange(h) * ih) // h, 0, ih - 1)
         xs = np.clip((np.arange(w) * iw) // w, 0, iw - 1)
         small = np.ascontiguousarray(self._img[np.ix_(ys, xs)])
         small = self._annotate(small, sx=w / float(iw), sy=h / float(ih))
-        rect = mujoco.MjrRect(vp.width - w - 8, 8, w, h)
-        self.viewer.set_images([(rect, small)])
+        self._panel_rgb = (rect, small)
+
+    # POINT CLOUD PANEL
+    @staticmethod
+    def _depth_ramp(t):
+        # near = blue, far = red. Written out rather than pulled from matplotlib,
+        # which the viewer has no other reason to import.
+        t = np.clip(np.asarray(t, float), 0.0, 1.0)
+        r = np.clip(1.5 - np.abs(4.0 * t - 3.0), 0.0, 1.0)
+        g = np.clip(1.5 - np.abs(4.0 * t - 2.0), 0.0, 1.0)
+        b = np.clip(1.5 - np.abs(4.0 * t - 1.0), 0.0, 1.0)
+        return np.stack([r, g, b], axis=-1) * 255.0
+
+    def _set_cloud(self):
+        # The live object point cloud, drawn as the camera sees it: every point
+        # the depth pipeline kept, projected back into the image plane and
+        # coloured by range. This is the one view that shows the sensor's own
+        # data rather than only what perception concluded from it.
+        if not self.cloud or self.camera is None:
+            return
+        self._panel_cloud = None
+        if self._cloud_img is None or self._n % self.cloud_every == 0:
+            depth = self.camera.capture_depth(self.data)
+            # z_min=0 keeps the table as well, so the cloud is shown in context
+            # and the height filter that removes it is visible as a colour
+            # change. surface_points restores nothing, so leave depth rendering
+            # as it finds it -- _set_image disables it before its own render.
+            pts = self.camera.surface_points(
+                depth, self.data, SELF_FILTER, DEPTH_MAX, 0.0)
+            self._cloud_img = self._splat(pts)
+
+        img = self._cloud_img
+        if img is None:
+            return
+        uvl = self._panel_rect('cloud')
+        if uvl is None:
+            return
+        rect, w, h = uvl
+        ih, iw = img.shape[:2]
+        ys = np.clip((np.arange(h) * ih) // h, 0, ih - 1)
+        xs = np.clip((np.arange(w) * iw) // w, 0, iw - 1)
+        self._panel_cloud = (rect, np.ascontiguousarray(img[np.ix_(ys, xs)]))
+
+    def _splat(self, pts):
+        # Scatter world points into a camera-resolution image, coloured by range.
+        H, W = int(self.camera.height), int(self.camera.width)
+        img = np.zeros((H, W, 3), np.float64)
+        if pts is None or len(pts) == 0:
+            return img.astype(np.uint8)
+
+        if len(pts) > self.cloud_max:
+            pts = pts[::max(1, len(pts) // self.cloud_max)]
+
+        cam_pos = np.array(self.data.cam_xpos[self.cam_id], float)
+        cam_mat = np.array(self.data.cam_xmat[self.cam_id],
+                           float).reshape(3, 3)
+        pc = (pts - cam_pos) @ cam_mat          # camera frame
+        z = -pc[:, 2]
+        ok = z > 1e-6
+        if not ok.any():
+            return img.astype(np.uint8)
+        pc, z = pc[ok], z[ok]
+
+        u = np.rint(self.camera.K[0, 2] - pc[:, 0] * self.camera.K[0, 0] / z)
+        v = np.rint(self.camera.K[1, 2] - pc[:, 1] * self.camera.K[1, 1] / z)
+        u = u.astype(np.int64)
+        v = v.astype(np.int64)
+        inside = (u >= 0) & (u < W) & (v >= 0) & (v < H)
+        u, v, z = u[inside], v[inside], z[inside]
+        if len(z) == 0:
+            return img.astype(np.uint8)
+
+        # The table gets a flat neutral grey: it is context, and it outnumbers
+        # the object roughly 40:1, so letting it drive the colour map left the
+        # whole panel a uniform dark red. The object then gets the full ramp
+        # over its own depth range, with the ends clipped so a single stray
+        # point cannot flatten the spread.
+        world = pts[ok][inside]
+        is_table = world[:, 2] <= TABLE_HEIGHT + SURFACE_BAND
+        img[v[is_table], u[is_table]] = (70.0, 70.0, 70.0)
+        zo = z[~is_table]
+        if len(zo):
+            lo, hi = np.percentile(zo, 5.0), np.percentile(zo, 95.0)
+            img[v[~is_table], u[~is_table]] = self._depth_ramp(
+                (zo - lo) / max(float(hi - lo), 1e-6))
+        return img.astype(np.uint8)
+
+    def _panel_rect(self, slot='rgb'):
+        # The camera image sits at the right edge; the cloud sits immediately to
+        # its left when shown. Each slot needs its own origin -- sharing one
+        # origin put both panels on top of each other.
+        vp = self.viewer.viewport
+        w = max(80, vp.width // 3)
+        h = max(60, int(round(w * self.camera.height
+                              / float(self.camera.width))))
+        if h > vp.height // 3:
+            h = max(60, vp.height // 3)
+            w = max(80, int(round(h * self.camera.width
+                                  / float(self.camera.height))))
+        if slot == 'cloud' and self._two_panels:
+            left = vp.width - (2 * w + 16)
+        else:
+            left = vp.width - w - 8
+        return mujoco.MjrRect(left, 8, w, h), w, h
+
+    def _push_images(self):
+        panels = [p for p in (self._panel_rgb, self._panel_cloud) if p]
+        if panels:
+            self.viewer.set_images(panels)
 
     # TEXT
     def _auto_lines(self):
