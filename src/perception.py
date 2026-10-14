@@ -85,28 +85,29 @@ def _calipers(H):
     return None if best is None else best[1:]
 
 
-def fitted_centre(obj_pts, band=0.004):
-    # Centre of the minimum-area rectangle of the object's top face.
-    _, H, _ = _top_band(obj_pts, band)
-    if H is None:
-        return None
-    rect = _calipers(H)
-    return None if rect is None else rect[0]
-
-
-def detect_yaw(obj_pts, band=0.004):
-    # Orientation of a box-like object, degrees modulo 90.
-    if obj_pts is None or len(obj_pts) < 50:
-        return None, 0, 0
-    top, H, _ = _top_band(obj_pts, band)
-    if H is None:
-        return None, 0 if top is None else len(top), 0
-    rect = _calipers(H)
-    if rect is None:
-        return None, len(top), len(H)
-    return rect[1], len(top), len(H)
-
-
+# --- DISABLED: fitted_centre / detect_yaw. Superseded by _top_band + _calipers, which perceive_all now calls directly so the centre, the yaw and the drawn hull all come from one pass. Kept for reference. ---
+# def fitted_centre(obj_pts, band=0.004):
+#     # Centre of the minimum-area rectangle of the object's top face.
+#     _, H, _ = _top_band(obj_pts, band)
+#     if H is None:
+#         return None
+#     rect = _calipers(H)
+#     return None if rect is None else rect[0]
+#
+#
+# def detect_yaw(obj_pts, band=0.004):
+#     # Orientation of a box-like object, degrees modulo 90.
+#     if obj_pts is None or len(obj_pts) < 50:
+#         return None, 0, 0
+#     top, H, _ = _top_band(obj_pts, band)
+#     if H is None:
+#         return None, 0 if top is None else len(top), 0
+#     rect = _calipers(H)
+#     if rect is None:
+#         return None, len(top), len(H)
+#     return rect[1], len(top), len(H)
+#
+#
 def rotation_with_yaw(yaw_deg, R_down):
     # R_down rotated about world z, so the approach stays down and the jaw turns.
     c, s = np.cos(np.radians(yaw_deg)), np.sin(np.radians(yaw_deg))

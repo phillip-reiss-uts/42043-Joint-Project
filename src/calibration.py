@@ -23,17 +23,18 @@ def board_marker_local():
     return np.array(pts, float)
 
 
-def board_marker_world(body_pos, body_mat, z_local=None):
-    # World positions of the markers for a given board pose.
-    if z_local is None:
-        z_local = 0.5 * CALIB_BOARD_THICK
-    loc = board_marker_local()
-    n = loc.shape[0]
-    pts = np.column_stack([loc, np.full(n, z_local)])
-    return pts @ body_mat.T + body_pos
-
-
-# DETECTION
+# --- DISABLED: board_marker_world, never referenced. ---
+# def board_marker_world(body_pos, body_mat, z_local=None):
+#     # World positions of the markers for a given board pose.
+#     if z_local is None:
+#         z_local = 0.5 * CALIB_BOARD_THICK
+#     loc = board_marker_local()
+#     n = loc.shape[0]
+#     pts = np.column_stack([loc, np.full(n, z_local)])
+#     return pts @ body_mat.T + body_pos
+#
+#
+# # DETECTION
 def detect_markers(rgb, depth, z_hint, min_area=4, max_area=400,
                    thresh=200, depth_tol=0.05):
     # Find marker blob centroids in a rendered frame.

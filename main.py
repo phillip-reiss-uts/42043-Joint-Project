@@ -26,6 +26,10 @@ from src.pick_place import (ObjectRegistry, reset_scene, clear_table,
 # live viewer overlays
 from src.overlay import Overlay
 
+# object motion bands for the robustness demonstration
+from src import target_motion
+from src.target_motion import TargetMover
+
 
 def _log(msg):
     # Optional diagnostics; gated by config.VERBOSE.
@@ -74,10 +78,13 @@ def main():
     _log(f'[INFO] intrinsics K:\n{camera.K}')
 
     # COMMANDS
-    # Keys 6-9 only: the viewer maps a-z onto its 26 render flags (S toggles
+    # Keys 6-9 plus '.': the viewer maps a-z onto its 26 render flags (S toggles
     # shadows, E constraints, P contact-split, R reflection) and 0-5 onto geom
     # groups, so no letter or low digit is available to us.
     cmd = {'start': False, 'pause': False, 'place': False, 'reset': False}
+    ui = {'overlay': None}
+    # session-level mover, so the target glides in WAIT as well as in a search
+    demo = {'mover': None, 'idx': None}
 
     def on_key(keycode):
         if keycode == ord('6'):
@@ -88,6 +95,15 @@ def main():
             cmd['pause'] = True
         elif keycode == ord('9'):
             cmd['reset'] = True
+        elif keycode == ord('.'):
+            # cycle the object's motion band: off -> slow -> medium -> fast
+            name, speed = target_motion.cycle_band()
+            print('[MOVE] object motion band: %-6s (%.0f mm/s)'
+                  % (name, speed * 1e3))
+            ov = ui['overlay']
+            if ov is not None:
+                ov.set_info('move', 'obj motion %s' % name,
+                            '%.0f mm/s' % (speed * 1e3))
 
     def take(name):
         # Consume a flag: True once per press.
@@ -114,6 +130,10 @@ def main():
         # draws the overlay first -- no plumbing through the call chain.
         overlay = Overlay(viewer, model, data, camera, cam_id, arm.base_id)
         overlay.set_info('mode', 'WAIT', 'scene empty')
+        name, speed = target_motion.current_band()
+        overlay.set_info('move', 'obj motion %s' % name,
+                         '%.0f mm/s' % (speed * 1e3))
+        ui['overlay'] = overlay
         arm.viewer = viewer
 
         reg = ObjectRegistry(model, POOL_SIZE)
@@ -201,8 +221,31 @@ def main():
                             '(press 6 first)')
                     else:
                         mode[0] = SEARCH
-                arm.hold(GRIP_OPEN)
-                mujoco.mj_step(model, data)
+                # Keep the moving-target demo visible. The mover also runs
+                # inside the servo loop during a search, but if it only ran
+                # there then toggling the band in WAIT would look like nothing
+                # happened -- the object would sit still until a search began.
+                act = reg.active()
+                if act:
+                    if demo['idx'] != act[0]:
+                        demo['mover'] = TargetMover(model, data, reg, act[0])
+                        demo['idx'] = act[0]
+                    arm.mover = demo['mover']
+                else:
+                    demo['mover'] = None
+                    demo['idx'] = None
+                    arm.mover = None
+
+                # Step the same number of times per render as the motion loops
+                # do. At one step per frame the sim runs ~0.2x real time, so the
+                # object crawls here and then appears to lurch forward the
+                # moment a search starts.
+                for _ in range(SYNC_STEPS):
+                    if demo['mover'] is not None:
+                        demo['mover'].step(
+                            data, np.array(data.xpos[arm.base_id], float))
+                    arm.hold(GRIP_OPEN)
+                    mujoco.mj_step(model, data)
                 viewer.sync()
                 continue
 

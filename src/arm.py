@@ -26,6 +26,13 @@ class Arm:
         # set by main so observe() can push estimator error to the overlay
         self.viewer = None
 
+        # Optional moving-target driver (see target_motion.py). Every planned
+        # move steps it, so the object keeps gliding during re-homing, searching
+        # and lowering -- not only while a servo loop happens to be running.
+        # Owned here rather than per-pick, because anything shorter lived let the
+        # object freeze solid between attempts.
+        self.mover = None
+
     # STATE FEEDBACK
     def attach_observer(self, observer, controller=None, encoder=None):
         # Close the loop on an estimated state.
@@ -70,7 +77,11 @@ class Arm:
 
         for _ in range(iters):
             d.qpos[:ARM_DOF] = q_arm
-            mujoco.mj_forward(model, d)
+            # Only the kinematics and comPos stages are needed for xpos/xmat and
+            # for mj_jacBody. The full mj_forward costs ~5x more per iteration
+            # and this runs up to 600 times per solve.
+            mujoco.mj_kinematics(model, d)
+            mujoco.mj_comPos(model, d)
 
             err_p = target - np.array(d.xpos[base_id])
             R = np.array(d.xmat[base_id]).reshape(3, 3)
@@ -113,7 +124,7 @@ class Arm:
         return tilt
 
     def move(self, q_target, grip, rate=RAPID, viewer=None, ease='quintic',
-             estop=None, spawn_hook=None, stop=None):
+             estop=None, spawn_hook=None, stop=None, step_hook=None):
         # Move to q_target, pausing in place whenever estop() is true.
         data, model = self.data, self.model
         q_start = data.qpos[:ARM_DOF].copy()
@@ -145,6 +156,12 @@ class Arm:
             else:
                 ctrl_arm = q_ref
             self._q_ref_prev = q_ref
+
+            # before the step, so whatever the hook sets applies to this step
+            if self.mover is not None:
+                self.mover.step(data, np.array(data.xpos[self.base_id], float))
+            if step_hook is not None:
+                step_hook()
 
             data.ctrl[:ARM_DOF] = ctrl_arm
             data.ctrl[self.grip_act] = grip

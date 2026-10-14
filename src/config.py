@@ -139,7 +139,11 @@ SEARCH_SPEED = RAPID     # looks are not contact moves; the gripper is high
 # PBVS commanded-twist caps, m/s. The servo law asks for kp*err directly, which
 # is ~1.9 m/s at the start of an approach; unbounded that drives the gripper into
 # the object and the table. Transit is the hover leg, descent the final approach.
-SERVO_V_TRANSIT = 0.050
+# Transit must exceed the fastest object band, or the arm can never close the
+# gap on a moving target -- at 0.05 m/s it merely matched the medium band and
+# tracked nothing. It runs in free space, well above the object, so it is safe
+# to be brisk; only the descent needs to be gentle.
+SERVO_V_TRANSIT = 0.150
 SERVO_V_DESCENT = 0.015
 # Iteration budget per servo stage. At the caps above the hover leg alone needs
 # ~3100 steps, so the default 1500 would time out and abort the pick.
@@ -174,6 +178,85 @@ SERVO_RETREAT_V = 0.015
 # At 200 mm the bias is independent of offset (fully visible), so acquire and
 # hold there and commit from that estimate.
 SERVO_STANDOFF = 0.20
+
+# ---- moving target (robustness demonstration) ----
+# The object glides on the table while the arm servos, so the servo has to
+# chase. Bands are toggled live with the '.' key; index 0 is off. All bands sit
+# below SERVO_V_TRANSIT so the arm can actually close the gap.
+OBJ_MOVE_BANDS = (
+    ('off',    0.000),
+    ('slow',   0.015),
+    ('medium', 0.030),
+    ('fast',   0.045),
+)
+OBJ_MOVE_BAND = 0            # band the session starts on
+OBJ_MOVE_TURN_S = 1.2        # seconds between random re-aims
+# Proximity halt, measured in 3D from the gripper base. Now DISABLED (0.0).
+# It was set just outside the hover distance so the target stopped as the arm
+# arrived, but that cut the chase down to the transit and made the whole
+# approach about two seconds long. The robot now keeps servoing while the object
+# moves and waits for it to hold still instead, so nothing forces the halt.
+# Set to e.g. 0.35 to bring the old behaviour back.
+OBJ_MOVE_STOP_DIST = 0.0
+
+# ---- vision Kalman filter ----
+# Smooths the intermittent vision stream, bridges the stretches where the
+# object is invisible, and supplies a velocity for the lead term.
+SERVO_USE_KF = True
+KF_SIGMA_MEAS = 1.5e-3       # measurement noise, m (320x240 is ~1.5 mm)
+KF_SIGMA_ACC = 0.60          # manoeuvre noise, m/s^2 (band changes + re-aims)
+KF_GATE = 3.0                # innovation gate, sigmas; 0 disables
+# Aim ahead of the estimate by this long to cancel the servo's own lag. Only
+# has an effect once the filter sees a velocity, so a still object is unaffected.
+SERVO_LEAD_S = 0.15
+
+# ---- tracking a moving target ----
+# The robot servos for as long as the object keeps moving, re-acquires it with
+# the search routine when it leaves the view, and commits to the open-loop
+# pickup only once it has watched the object hold still. Committing on stillness
+# rather than on proximity is what lets the chase run as long as it needs to,
+# and it removes the servoed descent into the jaws' own shadow entirely -- the
+# grasp is driven open loop from the hover, where the view is still whole.
+SERVO_TRACK_MOVING = True
+SERVO_STILL_TIME = 3.0        # s of observed stillness before committing
+SERVO_STILL_TOL = 0.008       # m; filtered position may drift this much and
+                              # still count as stationary. 8 mm over 3 s is an
+                              # effective speed gate of ~2.7 mm/s, well clear of
+                              # the filter's sub-millimetre position noise.
+SERVO_STILL_SPEED = 0.006     # m/s; used only to label the target in the overlay
+SERVO_TRACK_TOL = 0.020       # m; must also be this close before committing
+SERVO_TRACK_TOL_ROT = 0.15    # rad
+SERVO_TRACK_ITERS = 60000     # iteration cap on the chase (~2 min of sim)
+SERVO_LOST_LIMIT = 5          # consecutive failed looks before searching
+SERVO_SEARCH_LIMIT = 2        # give up after this many fruitless searches
+# Watch the target through the open-loop descent, using the camera only. If it
+# starts moving again, abandon the descent and go back to tracking: driving to
+# where the object used to be is not a grasp.
+SERVO_WATCH_DESCENT = True
+# Filtered position drift from the commit reference that counts as moving.
+# 15 mm is ~10x the sub-2 mm estimate noise at the hover and far above the ~1 mm
+# depth bias on a straight descent, so the robot's own approach does not trip
+# it. At the slowest band that is one second of travel, so the motion is
+# unmistakable before it fires.
+SERVO_MOVE_TOL = 0.015
+SERVO_COMMIT_TRIES = 5        # abandon-and-retrack cycles before giving up
+# Yaw blend gain, separate from the position blend. The top face is square, so
+# the calipers can label the same orientation as yaw or yaw+90. With the raw
+# reading the label flipped every look, commanding a ~90 deg wrist swing and
+# leaving err_rot stuck at 0.59 rad -- above every commit gate.
+SERVO_YAW_SMOOTH = 0.35
+
+# Hold the simulation to wall-clock real time in the viewer. Without this the
+# step loops free-run at whatever the renderer allows -- ~0.2x real time while
+# waiting, ~2-3x during a servo -- so the same motion looks glacial in one phase
+# and lurching in the other. Pacing also re-anchors after a perception stall
+# rather than sprinting to catch up.
+VIEWER_REAL_TIME = True
+
+# Upper bound on clear_table passes. A pick can legitimately fail (the object
+# was never visible, the servo gave up); without this the task loop re-homes and
+# retries forever.
+MAX_PASSES = 12
 
 # Search offsets around the nominal gripper xy, tried in order.
 SEARCH_OFFSETS = (

@@ -8,10 +8,14 @@
 # Arm.move, the servo loop, the hold loops -- draws the overlay first. No
 # plumbing through the call chain, and overlays appear wherever sync happens.
 
+import time
+
 import numpy as np
 import mujoco
 
-from src.config import ARM_DOF
+# DISABLED: ARM_DOF was imported but never used.
+# from src.config import ARM_DOF
+from src.config import VIEWER_REAL_TIME
 
 # colour of the frustum and the trail by control regime, so the moment the
 # servo stops and the arm starts driving to a saved target is visible:
@@ -70,7 +74,8 @@ class Overlay:
 
     def __init__(self, viewer, model, data, camera, cam_id, arm_base_id,
                  trail_max=2600, trail_every=2, trail_draw_max=300,
-                 image_every=6, frustum_depth=0.16, draw_frustum=True):
+                 image_every=6, frustum_depth=0.16, draw_frustum=True,
+                 real_time=VIEWER_REAL_TIME):
         self.viewer = viewer
         self.model = model
         self.data = data
@@ -97,6 +102,14 @@ class Overlay:
 
         self.fovy = float(model.cam_fovy[cam_id])
         self.aspect = float(camera.width) / float(camera.height)
+
+        # Real-time pacing. The step loops run as fast as the renderer allows,
+        # which is ~0.2x real time while waiting and ~2-3x during a servo, so
+        # the two phases look nothing alike. Anchor simulation time to wall
+        # time and sleep off any lead.
+        self.real_time = bool(real_time)
+        self._wall0 = None
+        self._sim0 = 0.0
 
         # the hook
         self._orig_sync = viewer.sync
@@ -125,6 +138,24 @@ class Overlay:
         self.target = None
 
     # HOOK
+    def _pace(self):
+        # Hold the simulation to real time. If it has fallen a long way behind
+        # -- a perception stall is ~8 ms against ~0.4 ms of stepping -- re-anchor
+        # instead of sprinting to catch up, because the sprint is what reads as
+        # the motion lurching after every re-observation.
+        if not self.real_time:
+            return
+        t = float(self.data.time)
+        now = time.perf_counter()
+        if self._wall0 is None:
+            self._wall0, self._sim0 = now, t
+            return
+        lag = (self._wall0 + (t - self._sim0)) - now
+        if lag > 0.0:
+            time.sleep(min(lag, 0.05))
+        elif lag < -0.05:
+            self._wall0, self._sim0 = now, t
+
     def _sync(self, *args, **kwargs):
         try:
             self.draw()
@@ -138,6 +169,7 @@ class Overlay:
             if key not in self._dead:
                 self._dead.add(key)
                 print('[OVERLAY] draw failed (%s: %s)' % (key, exc))
+        self._pace()
         self._orig_sync(*args, **kwargs)
 
     def _section(self, fn, *args):
@@ -426,7 +458,7 @@ class Overlay:
                     right.append(str(info[k][1]) if len(info[k]) > 1 else '')
             return ('\n'.join(left), '\n'.join(right))
 
-        tl = block(['mode', 'task', 'robot'])
+        tl = block(['mode', 'task', 'move', 'robot'])
         tr = block(['gripper', 'servo'])
         bl = block(['loop', 'occlusion', 'perception', 'estimate', 'observer'])
         self.viewer.set_texts([
