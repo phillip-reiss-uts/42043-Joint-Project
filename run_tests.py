@@ -32,12 +32,16 @@ from src.arm import Arm
 from src.servo import PBVSServo
 from src.pick_place import (ObjectRegistry, reset_scene, place_cube,
                             search_for_object)
+from src.perception import rotation_with_yaw
 from src import target_motion as TM
 from src.config import (
     POOL_SIZE, SERVO_STANDOFF, SERVO_MAX_ITERS, SERVO_V_TRANSIT,
     SERVO_V_DESCENT, SERVO_PERCEIVE_EVERY, SERVO_OCCLUDE_RATIO,
     SERVO_OCCLUDE_RECOVER, SERVO_OCCLUDE_FAILS, SERVO_RETREAT_STEP,
     SERVO_RETREAT_MAX, SERVO_RETREAT_V, OBJ_MOVE_STOP_DIST,
+    GRIP_CLOSED, R_DOWN, LIFT_Z, STEPS_CLOSE, STEPS_RELEASE,
+    GRASP_LIFT_RECHECK, GRASP_CLOSED_Q, GRASP_FORCE_MIN,
+    TABLE_HEIGHT, OBJECT_HEIGHT, FEED, ARM_DOF,
 )
 
 
@@ -108,6 +112,8 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     # robot only commits once it has watched the target hold still, so without
     # a stop the trial can never complete -- it just chases to the track cap.
     move_s = 0.0 if args is None else getattr(args, 'move_s', 0.0)
+    sabotage_mm = (0.0 if args is None
+                   else float(getattr(args, 'sabotage', 0.0)))
     t_start = float(data.time)
     _orig_step = mover.step
 
@@ -127,15 +133,58 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
 
     sv.observe()
     t0 = time.perf_counter()
-    ok, iters, err, hover = sv.approach(
+    ok_approach, iters, err, hover = sv.approach(
         standoff=SERVO_STANDOFF, viewer=rec, coarse=False,
         max_iters=SERVO_MAX_ITERS, check_occlusion=True, recover=True,
         mover=mover, search=reacquire)
-    wall = time.perf_counter() - t0
+    wall_approach = time.perf_counter() - t0
 
+    # Geometry at the moment the approach finished, before the jaws move.
     mujoco.mj_forward(model, data)
     p_end = np.array(reg.pose(data, idx), float)
     grip = np.array(data.xpos[arm.base_id], float)
+    gap_mm = float(np.linalg.norm(grip[:2] - p_end[:2]) * 1e3)
+
+    # Close and verify, exactly as pick_one does. Scoring `ok` off the approach
+    # alone reports success whenever the servo converges, which it does just as
+    # happily over empty table.
+    g = {'state': 'not attempted', 'held': False, 'q': float('nan'),
+         'force': float('nan'), 'vel': float('nan')}
+    rechecked = False
+    lifted_ok = False
+    if ok_approach:
+        R = rotation_with_yaw(sv.yaw_est, R_DOWN)
+        q_lift = arm.solve_ik(grip + np.array([0.0, 0.0, LIFT_Z]),
+                              data.qpos[:ARM_DOF], R_target=R)
+        if sabotage_mm:
+            # Deliberate miss, so the harness exercises the failure path rather
+            # than only ever confirming a pass. The cube steps aside at the
+            # instant the jaws close; the arm drives to the pose it had already
+            # committed to and shuts on empty table. Nothing tells the robot
+            # this happened -- the whole point is that only the jaws can tell.
+            p_sab = np.array(reg.pose(data, idx), float)
+            reg.teleport(data, idx,
+                         [p_sab[0] + sabotage_mm * 1e-3, p_sab[1], p_sab[2]],
+                         quat=(1.0, 0.0, 0.0, 0.0))
+            mujoco.mj_forward(model, data)
+        arm.close_gripper(STEPS_CLOSE, rec)
+        g = arm.grasp_state()
+        if not g['held']:
+            # lift clear and read again, as the task does
+            rechecked = True
+            q_re = arm.solve_ik(grip + np.array([0.0, 0.0, GRASP_LIFT_RECHECK]),
+                                data.qpos[:ARM_DOF], R_target=R)
+            arm.move(q_re, GRIP_CLOSED, rate=FEED, viewer=rec)
+            g = arm.grasp_state()
+        if g['held']:
+            arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=rec)
+            lifted_ok = bool(reg.pose(data, idx)[2]
+                             > TABLE_HEIGHT + OBJECT_HEIGHT / 2.0)
+        else:
+            arm.open_gripper(STEPS_RELEASE, rec)
+    wall = time.perf_counter() - t0
+
+    ok = bool(ok_approach and g['held'] and lifted_ok)
     s = rec.series()
 
     est_err = np.linalg.norm(s['est'][:, :2] - s['truth'][:, :2], axis=1)
@@ -144,8 +193,14 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
 
     return dict(
         seed=seed, band=TM.band_names()[band], kf=bool(use_kf),
-        ok=bool(ok), iters=int(iters), wall_s=wall,
-        grasp_gap_mm=float(np.linalg.norm(grip[:2] - p_end[:2]) * 1e3),
+        ok=ok, sabotage_mm=float(sabotage_mm),
+        approach_ok=bool(ok_approach), grasp_state=g['state'],
+        grasp_held=bool(g['held']), rechecked=bool(rechecked),
+        lifted=bool(lifted_ok),
+        grasp_q=float(g['q']), grasp_force=float(g['force']),
+        grasp_vel=float(g['vel']),
+        iters=int(iters), wall_s=wall, wall_approach_s=wall_approach,
+        grasp_gap_mm=gap_mm,
         obj_shift_mm=float(np.linalg.norm(p_end[:2] - p0[:2]) * 1e3),
         obj_path_mm=float(mover.moved * 1e3),
         obj_turns=int(mover.turned),
@@ -228,7 +283,7 @@ def plot_error(runs, outdir):
 
 
 def plot_summary(runs, outdir):
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    fig, axes = plt.subplots(1, 5, figsize=(21, 4))
     labels = ['%s/%s\ns%d' % (r['band'], 'kf' if r['kf'] else 'raw', r['seed'])
               for r in runs]
     x = np.arange(len(runs))
@@ -249,6 +304,22 @@ def plot_summary(runs, outdir):
     axes[2].set_title('Vision error: filtered vs raw')
     axes[2].legend(fontsize=8)
 
+    # grasp verdict from the gripper's own registers: anything at or above the
+    # dashed line closed on empty jaws
+    axes[3].bar(x, [r['grasp_q'] for r in runs], color='tab:purple')
+    axes[3].axhline(GRASP_CLOSED_Q, color='r', ls='--', lw=1.2,
+                    label='closed on nothing')
+    axes[3].set_ylabel('finger position at close')
+    axes[3].set_title('Grasp check: jaw opening')
+    axes[3].legend(fontsize=8)
+
+    axes[4].bar(x, [r['grasp_force'] for r in runs], color='tab:red')
+    axes[4].axhline(GRASP_FORCE_MIN, color='k', ls='--', lw=1.2,
+                    label='grip threshold')
+    axes[4].set_ylabel('actuator force')
+    axes[4].set_title('Grasp check: grip force')
+    axes[4].legend(fontsize=8)
+
     for a in axes:
         a.set_xticks(x)
         a.set_xticklabels(labels, fontsize=7, rotation=30, ha='right')
@@ -267,6 +338,10 @@ def main():
     ap.add_argument('--move-s', type=float, default=8.0,
                     help='seconds to let the object walk before stopping it;'
                          ' 0 leaves it moving forever (trial cannot complete)')
+    ap.add_argument('--sabotage', type=float, default=0.0,
+                    help='mm to displace the cube sideways at the instant the jaws\n'
+                         'close, forcing a deliberate miss so the failure path\n'
+                         'is exercised. e.g. --sabotage 60')
     ap.add_argument('--outdir', default='test_output')
     args = ap.parse_args()
 
@@ -282,29 +357,41 @@ def main():
     runs = []
     print()
     print('=' * 96)
-    print('  HEADLESS SERVO HARNESS   band=%s  kf=%s  trials=%d'
-          % (names[band], args.kf, args.trials))
+    print('  HEADLESS SERVO HARNESS   band=%s  kf=%s  trials=%d%s'
+          % (names[band], args.kf, args.trials,
+             '   SABOTAGE %.0f mm at close' % args.sabotage
+             if args.sabotage else ''))
     print('=' * 96)
-    print('  %-5s %-7s %-4s %-5s %-9s %-10s %-9s %-9s %-9s %s'
-          % ('seed', 'band', 'kf', 'ok', 'gap mm', 'obj mm', 'est mean',
-             'raw mean', 'occ/rec', 'kf upd/rej'))
+    print('  %-5s %-7s %-4s %-5s %-8s %-9s %-9s %-8s %-8s %-8s %-11s %s'
+          % ('seed', 'band', 'kf', 'grasp', 'approach', 'gap mm', 'jaw q',
+             'force', 'obj mm', 'est err', 'occ/rec', 'kf upd/rej'))
     for kf in kfs:
         for i in range(args.trials):
             r = run_trial(model, camera, cam_id, args.seed0 + i, band, kf,
                           args=args)
             runs.append(r)
-            print('  %-5d %-7s %-4s %-5s %-9.2f %-10.1f %-9.2f %-9.2f %-9s %d/%d'
-                  % (r['seed'], r['band'], 'on' if r['kf'] else 'off', r['ok'],
-                     r['grasp_gap_mm'], r['obj_path_mm'], r['est_err_mean_mm'],
-                     r['raw_err_mean_mm'],
+            print('  %-5d %-7s %-4s %-5s %-8s %-9.2f %-9.3f %-8.2f %-8.1f '
+                  '%-8.2f %-11s %d/%d'
+                  % (r['seed'], r['band'], 'on' if r['kf'] else 'off',
+                     'ok' if r['ok'] else r['grasp_state'][:5],
+                     'ok' if r['approach_ok'] else 'FAILED',
+                     r['grasp_gap_mm'], r['grasp_q'], r['grasp_force'],
+                     r['obj_path_mm'], r['est_err_mean_mm'],
                      '%s/%s' % (r['occluded'], r['recovered']),
                      r['kf_updates'], r['kf_rejects']))
         print()
 
     gaps = [r['grasp_gap_mm'] for r in runs]
-    print('  grasp gap: mean %.2f  max %.2f mm   (n=%d)'
+    print('  grasp gap : mean %.2f  max %.2f mm   (n=%d)'
           % (np.mean(gaps), np.max(gaps), len(gaps)))
-    print('  success  : %d/%d' % (sum(1 for r in runs if r['ok']), len(runs)))
+    print('  approach  : %d/%d complete'
+          % (sum(1 for r in runs if r['approach_ok']), len(runs)))
+    print('  grasp held: %d/%d verified by the jaws'
+          % (sum(1 for r in runs if r['grasp_held']), len(runs)))
+    print('  success   : %d/%d picked and lifted (approach AND grasp AND lift)'
+          % (sum(1 for r in runs if r['ok']), len(runs)))
+    print('  rechecks  : %d trial(s) needed a lift-and-recheck'
+          % sum(1 for r in runs if r['rechecked']))
 
     # summary csv
     fields = [k for k in runs[0] if k != 'series']
