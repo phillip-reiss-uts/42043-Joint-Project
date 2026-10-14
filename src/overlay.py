@@ -411,10 +411,15 @@ class Overlay:
             if q is not None:
                 self._px_cross(img, q, PIX_RED)
 
-        if self.target is not None:
-            q = proj(self.target[0])
-            if q is not None:
-                self._px_cross(img, q, PIX_GREEN, r=11)
+        # DISABLED: the target cross. The target is the gripper-base pose and
+        # the camera is bolted to that base 30 mm from the lens, so once the
+        # servo converges the target projects far outside the frame (measured
+        # v = 466 in a 240-tall image). It was only ever a transient mark during
+        # the approach, which read as a stray green cross.
+        # if self.target is not None:
+        #     q = proj(self.target[0])
+        #     if q is not None:
+        #         self._px_cross(img, q, PIX_GREEN, r=11)
         return img
 
     def _set_image(self):

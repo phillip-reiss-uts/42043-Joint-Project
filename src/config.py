@@ -173,7 +173,7 @@ SERVO_RETREAT_MAX = 15          # cap on backup steps
 # on joint distance with a rad/s rate, so SERVO_RETREAT_V is converted through
 # the joint distance each move needs; at the RAPID rate the backup ran ~80 mm/s
 # against the servo's 15 mm/s descent.
-SERVO_RETREAT_V = 0.015
+SERVO_RETREAT_V = 0.03
 # Hover standoff for the closed-loop leg. Measured: at 100 mm above the grasp the
 # jaws bias the fitted centre by ~0.55x any lateral gripper offset, in the same
 # direction, so the estimate feeds back into the gripper and walks off centre.
