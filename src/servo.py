@@ -1,12 +1,10 @@
 # Position-Based Visual Servoing for the grasp approach.
 #
-# HARDWARE BOUNDARY: this module is robot-side. It observes the world only
-# through src.world.ObjectWorld, receiving TargetView records, and it never
-# imports the object pool or the cube driver. It previously imported
-# src.pick_place (inside a demo block) and read object ground truth for a lift
-# check; both are gone.
+# HARDWARE BOUNDARY: this module is robot-side and contains no `import mujoco`.
+# It observes the world only through src.world.ObjectWorld (TargetView records),
+# gets geometry from arm.kin (src/kinematics.py) and steps through arm.backend
+# (src/robot_backend.py). It never imports the object pool or the cube driver.
 
-import mujoco
 import numpy as np
 
 from src.config import (
@@ -159,6 +157,15 @@ class PBVSServo:
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_control(state)
+
+    def _trace_camera(self):
+        # Camera pose for the servo trace, if the world can supply one.
+        pose = getattr(self.world, 'camera_pose', None)
+        if pose is None:
+            return {}
+        p, R = pose()
+        return {'cam_pos': np.array(p, float),
+                'cam_mat': np.array(R, float).reshape(3, 3)}
 
     def _step_world(self):
         # Give the world one physics tick. Named so the intent is explicit: the
@@ -472,9 +479,12 @@ class PBVSServo:
                     'p_cur': np.array(p_cur_t, float),
                     'p_est': np.array(self.p_est, float),
                     'yaw': float(self.yaw_est),
-                    'cam_pos': np.array(data.cam_xpos[self.cam_id], float),
-                    'cam_mat': np.array(data.cam_xmat[self.cam_id],
-                                        float).reshape(3, 3),
+                    # Camera pose for the trace. Taken from the world when it
+                    # can supply one (SimObjectWorld has camera_pose();
+                    # RealObjectWorld computes it from FK and the mount
+                    # offset). Optional: a world without a camera simply omits
+                    # these fields rather than breaking the loop.
+                    **self._trace_camera(),
                 })
 
             if track and stationary_s:
@@ -495,10 +505,11 @@ class PBVSServo:
 
             dq = self.joint_step(err_p, err_o, v_max=v_max)
             q_cmd = q_cmd + dq
-            data.ctrl[:ARM_DOF] = q_cmd
-            data.ctrl[model.nu - 1] = GRIP_OPEN
+            # Command + tick through the arm's backend, the same path Arm.move
+            # uses. The servo no longer needs to know what a control cycle is.
+            self.arm.backend.command(q_cmd, GRIP_OPEN)
 
-            # Advance the world by exactly one physics step, alongside mj_step.
+            # Advance the world by exactly one physics step, alongside the tick.
             # This must happen per physics step, NOT per render sync: the
             # servo steps physics every iteration but only syncs every
             # SYNC_STEPS, so driving the object from the sync would move it at
@@ -506,12 +517,11 @@ class PBVSServo:
             # robot loop only gives it the tick.
             self._step_world()
 
-            mujoco.mj_step(model, data)
+            self.arm.backend.step()
 
             while estop is not None and estop():
-                data.ctrl[:ARM_DOF] = q_cmd
-                data.ctrl[model.nu - 1] = GRIP_OPEN
-                mujoco.mj_step(model, data)
+                self.arm.backend.command(q_cmd, GRIP_OPEN)
+                self.arm.backend.step()
                 if viewer is not None:
                     viewer.sync()
 

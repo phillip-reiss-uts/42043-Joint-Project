@@ -1,0 +1,129 @@
+<mujoco model="ur3e">
+  <compiler angle="radian" meshdir="assets/"/>
+
+  <asset>
+    <mesh name="base" content_type="model/stl" file="base.stl"/>
+    <mesh name="shoulder" content_type="model/stl" file="shoulder.stl"/>
+    <mesh name="upperarm" content_type="model/stl" file="upperarm.stl"/>
+    <mesh name="forearm" content_type="model/stl" file="forearm.stl"/>
+    <mesh name="wrist1" content_type="model/stl" file="wrist1.stl"/>
+    <mesh name="wrist2" content_type="model/stl" file="wrist2.stl"/>
+    <mesh name="wrist3" content_type="model/stl" file="wrist3.stl"/>
+  </asset>
+
+  <worldbody>
+    <geom pos="0 0 0" quat="-1 0 0 0" type="mesh" mesh="base" contype="0" conaffinity="0"/>
+    <body name="shoulder_link" pos="0 0 0.15185" quat="0 0 0 1">
+      <inertial pos="0 0 -0.02" quat="0.98213 -0.183722 -0.00298023 0.0407136" mass="1.98" diaginertia="0.00276682 0.00263413 0.00207745"/>
+      <joint name="shoulder_pan_joint" range="-6.28319 6.28319" actuatorfrcrange="-54 54" armature="0.1"/>
+      <geom quat="0 0 0 1" type="mesh" mesh="shoulder" contype="0" conaffinity="0"/>
+      <body name="upper_arm_link" quat="0.707107 0.707107 0 0">
+        <inertial pos="-0.11355 0 0.1157" quat="0.511542 0.487878 0.493562 0.506653" mass="3.4445" diaginertia="0.0460286 0.0449496 0.00420725"/>
+        <joint name="shoulder_lift_joint" range="-6.28319 6.28319" actuatorfrcrange="-54 54" armature="0.1"/>
+        <geom pos="0 0 0.12" quat="0.5 0.5 -0.5 -0.5" type="mesh" mesh="upperarm" contype="0" conaffinity="0"/>
+        <body name="forearm_link" pos="-0.24355 0 0">
+          <inertial pos="-0.1632 0 0.0238" quat="0.498616 0.501367 0.496974 0.503022" mass="1.437" diaginertia="0.0113396 0.0110896 0.00105099"/>
+          <joint name="elbow_joint" range="-3.14159 3.14159" actuatorfrcrange="-28 28" armature="0.1"/>
+          <geom pos="0 0 0.027" quat="0.5 0.5 -0.5 -0.5" type="mesh" mesh="forearm" contype="0" conaffinity="0"/>
+          <body name="wrist_1_link" pos="-0.2132 0 0.13105">
+            <inertial pos="0 -0.01 0" quat="0.564636 0.825331 -0.00318606 -0.00226137" mass="0.871" diaginertia="0.000817416 0.000708389 0.000525695"/>
+            <joint name="wrist_1_joint" range="-6.28319 6.28319" actuatorfrcrange="-9 9" armature="0.1"/>
+            <geom pos="0 0 -0.104" quat="0.707107 0.707107 0 0" type="mesh" mesh="wrist1" contype="0" conaffinity="0"/>
+            <body name="wrist_2_link" pos="0 -0.08535 -1.75056e-11" quat="0.707107 0.707107 0 0">
+              <inertial pos="0 0.01 0" quat="0.752127 0.658871 -0.0102443 0.009436" mass="0.805" diaginertia="0.000605916 0.000587282 0.000379501"/>
+              <joint name="wrist_2_joint" range="-6.28319 6.28319" actuatorfrcrange="-9 9" armature="0.1"/>
+              <geom pos="0 0 -0.08535" quat="1 0 0 0" type="mesh" mesh="wrist2" contype="0" conaffinity="0"/>
+              <body name="wrist_3_link" pos="0 0.0921 -1.889e-11" quat="0.707107 -0.707107 0 0">
+                <inertial pos="0 0 -0.02" quat="-0.0596463 0.703375 0.0549048 0.706181" mass="0.261" diaginertia="0.000137102 0.000108615 0.000107983"/>
+                <!-- range added: the source MJCF omitted it for wrist_3, which
+                     makes MuJoCo treat the joint as unbounded in the URDF sense
+                     but with an empty/zero ctrl range, and the project drives
+                     this joint. Matches the other five wrist joints and the
+                     UR3e spec (+/- 2*pi). -->
+                <joint name="wrist_3_joint" range="-6.28319 6.28319" actuatorfrcrange="-9 9" armature="0.1"/>
+                <geom pos="0 0 -0.0921" quat="0.707107 0.707107 0 0" type="mesh" mesh="wrist3" contype="0" conaffinity="0"/>
+                <!-- Attachment frame for the EEF, matching the UR5e menagerie
+                     convention: its z-axis is the tool axis, so R_DOWN in
+                     src/config.py points the gripper straight down.
+
+                     This is the ROS-Industrial 'tool0' frame, not 'flange'.
+                     From ur3e_official.urdf:
+                         wrist_3-flange  rpy=(0, -pi/2, -pi/2)
+                         flange-tool0    rpy=(pi/2, 0, pi/2)
+                     composed, tool0 is IDENTITY relative to wrist_3_link.
+                     Using 'flange' instead would put the tool axis sideways
+                     (z -> [0,1,0] at the home pose) and every grasp would
+                     approach from the wrong direction. -->
+                <site name="attachment_site" pos="0 0 0" quat="1 0 0 0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- Home pose.
+       The UR5e menagerie model ships this keyframe and the whole project
+       depends on it: reset, hard_reset and the search routine all return to
+       'home'. The UR3e MJCF did not include one, so it is added here.
+
+       Re-derived for the UR3e workcell, not copied from the UR5e. The pose
+       hovers the tool over the centre of the re-tuned table (TABLE_CENTRE in
+       src/config.py) with the tool axis pointing straight down, which is what
+       the home camera needs: it is mounted on the flange, so the home pose
+       determines what the camera can see at the start of a search.
+
+       Solved with the project's own solve_ik against models/ur3e/ur3e.xml for
+       target (0.275, 0.035, TABLE_HEIGHT + 0.40) and R_target = R_DOWN.
+       Verified: FK reaches the target with 0.0000 position and orientation
+       error, and the home camera then detects a cube anywhere in the spawn
+       region to within ~1.3 mm.
+
+       Why not reuse the UR5e pose: with the UR5e joint values the UR3e's tool
+       came out at diag(-1,1,-1) instead of R_DOWN (the wrist_3_link frame is
+       rotated 180 deg relative to the UR5e's), and the camera sat at
+       [-0.131, 0.348, 0.319] -- 0.3 m from the new table, seeing nothing.
+
+       Resulting tool position: [0.275, 0.035, 0.420] m in the world frame. -->
+  <keyframe>
+    <key name="home" qpos="-0.366 -1.619 0.976 -0.928 -1.571 -0.366"/>
+  </keyframe>
+
+  <!-- ARM POSITION SERVOS
+       The vendored UR3e MJCF is pure kinematics: it has no arm actuators, so
+       the compiled model had nu=1 (the gripper only). The whole control stack
+       assumes position servos: Arm.move writes q_ref into data.ctrl,
+       state_space.servo_gains() reads Kp/Kv from the actuator table, and the
+       linearisation builds A_cl from them.
+
+       Start from the UR5e menagerie definition (gainprm[0]=Kp, biasprm[2]=-Kv,
+       standard position servo), then stiffened for the UR3e:
+
+           UR5e:            Kp=2000/500, Kv=400/100   (Kp/Kv = 5 rad/s)
+           UR3e used here:  Kp=4000/1000, Kv=800/200  (same 5 rad/s ratio)
+
+       Time constant is unchanged, so the observer's prediction and the LQR
+       design still see the same slow pole. The absolute gain is doubled
+       because a position servo sags by tau/Kp under gravity: at the grasp pose
+       the UR3e sees ~11.5 and ~9.3 N.m on joints 1-2, which at Kp=2000 is a
+       0.006 rad static error. That is small in radians but it is ~2 cm at the
+       tool, and the open-loop commit has no way to correct it -- the jaws
+       closed 15-17 mm high and read 'empty'.
+
+       Measured residual after a grasp-pose move, joint 2 (rad):
+           Kp=2000 (UR5e):   -0.0197
+           Kp=4000:          -0.0003     <- used here
+           Kp=8000:          +0.0685     (over-stiff, rings)
+
+       forcerange is scaled to the UR3e's own actuatorfrcrange from its joints
+       (54 / 54 / 28 / 9 / 9 / 9 N.m), not the UR5e's larger values. -->
+  <actuator>
+    <position name="ur3e_shoulder_pan"  joint="shoulder_pan_joint"  kp="4000" kv="800" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-54 54"/>
+    <position name="ur3e_shoulder_lift" joint="shoulder_lift_joint" kp="4000" kv="800" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-54 54"/>
+    <position name="ur3e_elbow"         joint="elbow_joint"         kp="4000" kv="800" ctrllimited="true" ctrlrange="-3.1415 3.1415" forcerange="-28 28"/>
+    <position name="ur3e_wrist_1"       joint="wrist_1_joint"       kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-9 9"/>
+    <position name="ur3e_wrist_2"       joint="wrist_2_joint"       kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-9 9"/>
+    <position name="ur3e_wrist_3"       joint="wrist_3_joint"       kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-9 9"/>
+  </actuator>
+</mujoco>

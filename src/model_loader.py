@@ -1,5 +1,11 @@
+import os
+
 import mujoco
 import mujoco_menagerie as mm
+
+# Local model directory: <project>/models/<name>/<name>.xml
+_MODELS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
 
 from src.config import (
     CAM_QUAT, CAM_POS, MESH_QUAT, MESH_POS,
@@ -15,12 +21,31 @@ from src.config import (
 )
 
 
+def _load_arm_spec(arm_model):
+    # Resolve the arm spec from either a local MJCF path or mujoco_menagerie.
+    #
+    # The real robot is a UR3e. menagerie does not ship one, so the official
+    # UR3e MJCF is vendored at models/ur3e/ur3e.xml and selected by a name that
+    # is not a menagerie entry (see ROBOT_ARM in config.py). Anything else is
+    # looked up in menagerie as before.
+    local = os.path.join(_MODELS_DIR, arm_model, arm_model + '.xml')
+    if os.path.isfile(local):
+        print(f"[INFO] arm model: local MJCF {local}")
+        return mujoco.MjSpec.from_file(local)
+    try:
+        return mm.get(arm_model).spec(arm_model.split('_')[-1])
+    except Exception as e:
+        raise RuntimeError(
+            f"arm model '{arm_model}' not found locally at {local} and not "
+            f"available in mujoco_menagerie: {e}")
+
+
 def load_robot_model(with_calibration_board=False, arm_model=None,
                      gripper_model=None, camera_model=None):
     # Compose <arm> + <gripper> + <wrist camera> + table + chute + object pool.
     #
-    # The arm defaults to ROBOT_ARM (UR3e for the hardware transfer). The UR5e
-    # simulation this was developed against is still available:
+    # The arm defaults to ROBOT_ARM. The UR5e simulation this was developed
+    # against is still available:
     #     load_robot_model(arm_model='universal_robots_ur5e')
     # Nothing downstream depends on which arm is chosen: joint count comes from
     # the compiled model, and no module hardcodes UR5e geometry.
@@ -28,7 +53,7 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     gripper_model = gripper_model or ROBOT_GRIPPER
     camera_model = camera_model or ROBOT_CAMERA
     try:
-        arm = mm.get(arm_model).spec(arm_model.split('_')[-1])
+        arm = _load_arm_spec(arm_model)
         gripper = mm.get(gripper_model).spec(gripper_model.split('_')[-1])
         camera = mm.get(camera_model).spec(camera_model.split('_')[-1])
     except Exception as e:

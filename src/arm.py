@@ -9,15 +9,18 @@
 # module no longer imports the overlay: on hardware there is no viewer, and the
 # trajectory executor must compile without one. `main.py` passes viewer.sync.
 #
-# KINEMATICS: FK and the Jacobian come from a `Kinematics` provider (see
-# src/kinematics.py), not from a direct MuJoCo call. That is the same seam as
-# ObjectWorld: on a real UR3e the provider asks the controller instead, and this
-# module does not change. `model`/`data` are still held because the trajectory
-# executor steps the simulation; that is the remaining simulator tie, and it is
-# the "who owns the clock" question the real driver layer has to answer.
-# tests/test_layering.py allows `mujoco` here only for that reason.
+# TWO SEAMS, NO MUJOCO
+# --------------------
+# This module contains no `import mujoco`. Everything simulator-specific is
+# behind a provider:
+#
+#   src/kinematics.py     FK, Jacobian, M(q), g(q)   -- geometry
+#   src/robot_backend.py  stepping, joint I/O, gripper readback -- the clock
+#
+# On a real UR3e both providers talk to the controller instead, and this module
+# does not change. `model`/`data` are still passed in because the default
+# MujocoBackend needs them to construct; nothing here dereferences them.
 
-import mujoco
 import numpy as np
 
 from src.config import (
@@ -27,14 +30,22 @@ from src.config import (
     GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
 )
 from src.kinematics import Kinematics, MujocoKinematics
+from src.robot_backend import MujocoBackend, RobotBackend
 
 
 class Arm:
-    def __init__(self, model, data, kinematics=None):
+    def __init__(self, model, data, kinematics=None, backend=None):
         self.model = model
         self.data = data
-        self.base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
-        self.grip_act = model.nu - 1          # fingers_actuator
+        # Robot I/O (stepping, joint read/write, gripper readback). Injected so
+        # this module does not encode "the gripper is the last actuator" or
+        # "a control cycle is mj_step"; both are simulation facts.
+        self.backend = backend or MujocoBackend(model, data, ARM_DOF)
+        self.base_id = self.backend.tool_body_id
+        self.grip_act = getattr(self.backend, 'grip_actuator', model.nu - 1)
+
+        # Last commanded joint vector, for the observer's predict step.
+        self._last_cmd = self.backend.joint_positions()
 
         # Robot geometry (FK, Jacobian, mass/gravity). Injected so the control
         # layer does not reach into the simulator directly; defaults to the
@@ -53,13 +64,14 @@ class Arm:
 
         # Finger driver joints, for reading the jaw opening back. A real
         # 2F-85 reports the same thing over Modbus as its position register.
+        # The backend resolves the addresses, since they are a model detail.
         self.finger_q = []
         self.finger_v = []
         for nm in GRASP_DRIVER_JOINTS:
-            j = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, nm)
-            if j >= 0:
-                self.finger_q.append(int(model.jnt_qposadr[j]))
-                self.finger_v.append(int(model.jnt_dofadr[j]))
+            adr = self.backend.joint_addresses(nm)
+            if adr is not None:
+                self.finger_q.append(adr[0])
+                self.finger_v.append(adr[1])
 
     # STATE FEEDBACK
     def attach_observer(self, observer, controller=None, encoder=None):
@@ -79,7 +91,7 @@ class Arm:
         # Advance the observer one step using the command currently in ctrl.
         if self.observer is None:
             return
-        u = np.array(self.data.ctrl[:ARM_DOF], float)
+        u = np.array(self._last_cmd, float)
         self.observer.predict(u)
         self.observer.update(self.encoder.read(self.data))
         # Push to the overlay if one is attached, via duck typing rather than a
@@ -89,9 +101,21 @@ class Arm:
             ov.set_info(
                 'observer',
                 'obs err %.5f' % float(np.linalg.norm(
-                    self.observer.xhat[:ARM_DOF] - self.data.qpos[:ARM_DOF])),
+                    self.observer.xhat[:ARM_DOF]
+                    - self.backend.joint_positions())),
                 'v err %.5f' % float(np.linalg.norm(
-                    self.observer.xhat[ARM_DOF:] - self.data.qvel[:ARM_DOF])))
+                    self.observer.xhat[ARM_DOF:]
+                    - self.backend.joint_velocities())))
+
+    def _command_step(self, q_cmd, grip):
+        # One control cycle: command, then advance. The two are separate so a
+        # hardware backend can hold a command across a cycle, and so the arm
+        # never has to know whether ticking blocks (controller) or not (sim).
+        self._last_cmd = np.array(q_cmd, float)
+        self.backend.command(q_cmd, grip)
+        self.backend.step()
+        if self.observer is not None:
+            self.observer.update(self.encoder.read(self.data))
 
     # IK
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,
@@ -136,16 +160,10 @@ class Arm:
 
     def verify_ik(self):
         # Self-test: drive IK to a known target and report position + orientation.
-        # Uses the injected kinematics, so the check exercises the same provider
-        # the solver does.
-        d = mujoco.MjData(self.model)
-        mujoco.mj_resetDataKeyframe(
-            self.model, d,
-            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, 'home'))
-        mujoco.mj_forward(self.model, d)
-
+        # Uses the injected kinematics and backend, so the check exercises the
+        # same providers the solver does -- no direct MuJoCo state.
         target = np.array([-0.30, 0.45, 0.30])
-        q = self.solve_ik(target, d.qpos.copy())
+        q = self.solve_ik(target, self.backend.joint_positions())
 
         p, R = self.kin.pose(q[:ARM_DOF])
         pos_err = np.linalg.norm(p - target)
@@ -201,11 +219,7 @@ class Arm:
             if step_hook is not None:
                 step_hook()
 
-            data.ctrl[:ARM_DOF] = ctrl_arm
-            data.ctrl[self.grip_act] = grip
-            mujoco.mj_step(model, data)
-            if self.observer is not None:
-                self.observer.update(self.encoder.read(data))
+            self._command_step(ctrl_arm, grip)
             if on_step is not None and i % sync_every == 0:
                 on_step()
 
@@ -213,14 +227,10 @@ class Arm:
             while estop is not None and estop():
                 if stop is not None and stop():
                     return
-                data.ctrl[:ARM_DOF] = ctrl_arm
-                data.ctrl[self.grip_act] = grip
                 if self.observer is not None:
                     # keep tracking while frozen so a resume is not stale
                     self.observer.predict(ctrl_arm)
-                mujoco.mj_step(model, data)
-                if self.observer is not None:
-                    self.observer.update(self.encoder.read(data))
+                self._command_step(ctrl_arm, grip)
                 if on_step is not None:
                     on_step()
 
@@ -249,26 +259,18 @@ class Arm:
                 return
             a = (i + 1) / steps
             grip = g_from + a * (g_to - g_from)
-            data.ctrl[:ARM_DOF] = q_hold
-            data.ctrl[self.grip_act] = grip
             if self.observer is not None:
                 self.observer.predict(q_hold)
-            mujoco.mj_step(model, data)
-            if self.observer is not None:
-                self.observer.update(self.encoder.read(data))
+            self._command_step(q_hold, grip)
             if on_step is not None and i % SYNC_STEPS == 0:
                 on_step()
 
             while estop is not None and estop():
                 if stop is not None and stop():
                     return
-                data.ctrl[:ARM_DOF] = q_hold
-                data.ctrl[self.grip_act] = grip
                 if self.observer is not None:
                     self.observer.predict(q_hold)
-                mujoco.mj_step(model, data)
-                if self.observer is not None:
-                    self.observer.update(self.encoder.read(data))
+                self._command_step(q_hold, grip)
                 if on_step is not None:
                     on_step()
 
@@ -288,7 +290,9 @@ class Arm:
                     'force': float('nan'), 'vel': float('nan')}
         q = float(np.mean([self.data.qpos[a] for a in self.finger_q]))
         v = float(np.mean([self.data.qvel[a] for a in self.finger_v]))
-        f = float(self.data.actuator_force[self.grip_act])
+        # Force comes from the backend: on a 2F-85 this is the Modbus torque
+        # register rather than a MuJoCo actuator array.
+        f = float(self.backend.gripper_state()['force'])
 
         if q > GRASP_CLOSED_Q:
             state = 'empty'                 # ran to the stop, nothing between
@@ -303,15 +307,11 @@ class Arm:
 
     def hold(self, grip):
         # Command the current pose and grip without advancing a ramp.
-        data = self.data
-        data.ctrl[:ARM_DOF] = data.qpos[:ARM_DOF]
-        data.ctrl[self.grip_act] = grip
+        self.backend.command(self.backend.joint_positions(), grip)
 
     def settle(self, steps, grip=GRIP_OPEN):
         # Step in place with the current pose commanded, letting the scene rest.
-        data, model = self.data, self.model
-        q = data.qpos[:ARM_DOF].copy()
+        q = self.backend.joint_positions()
         for _ in range(steps):
-            data.ctrl[:ARM_DOF] = q
-            data.ctrl[self.grip_act] = grip
-            mujoco.mj_step(model, data)
+            self.backend.command(q, grip)
+            self.backend.step()

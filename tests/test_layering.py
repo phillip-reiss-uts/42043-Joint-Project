@@ -104,9 +104,9 @@ def check_imports():
             if mod in FORBIDDEN:
                 failures.append(
                     '  %s imports %s  -- %s' % (name, mod, FORBIDDEN[mod]))
-            # mujoco is needed by the servo/observer, so only task.py is held
-            # to the no-physics-engine rule.
-            if name == 'task.py' and mod in FORBIDDEN_TOPLEVEL:
+            # task.py, arm.py and servo.py are fully mujoco-free: geometry comes
+            # from src/kinematics.py and the clock from src/robot_backend.py.
+            if name in ('task.py', 'arm.py', 'servo.py') and mod in FORBIDDEN_TOPLEVEL:
                 failures.append(
                     '  %s imports %s  -- %s'
                     % (name, mod, FORBIDDEN_TOPLEVEL[mod]))
@@ -196,6 +196,37 @@ def check_world_tick_rate():
     return failures
 
 
+def check_no_mujoco_imports():
+    # The tightest robot modules must import no simulator at all: their geometry
+    # comes from src/kinematics.py and their clock from src/robot_backend.py.
+    #
+    # Only TOP-LEVEL imports are failures. A function-body import is still a
+    # coupling, but it is the deliberate shape of the legacy compatibility
+    # shims (e.g. state_space._default_kin), where the provider is built lazily
+    # so the module has no simulator dependency at import time.
+    failures = []
+    for name in ('task.py', 'arm.py', 'servo.py', 'controller.py',
+                 'tracking.py', 'state_space.py', 'kinematics.py',
+                 'robot_backend.py', 'arm_dynamics.py'):
+        path = os.path.join(SRC, name)
+        with open(path) as fh:
+            tree = ast.parse(fh.read(), path)
+        for node in tree.body:            # module level only
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.name.split('.')[0] in ('mujoco',):
+                        failures.append(
+                            '  %s:%d imports %s at module level; use '
+                            'Kinematics/RobotBackend'
+                            % (name, node.lineno, a.name))
+            elif isinstance(node, ast.ImportFrom):
+                if (node.module or '').split('.')[0] == 'mujoco':
+                    failures.append(
+                        '  %s:%d imports from %s at module level'
+                        % (name, node.lineno, node.module))
+    return failures
+
+
 def main():
     groups = [
         ('robot -> world imports', check_imports()),
@@ -203,6 +234,8 @@ def main():
         ('hardware signature constraints', check_hardware_signatures()),
         ('world tick rate vs physics steps', check_world_tick_rate()),
         ('kinematics seam (no direct MuJoCo geometry)', check_kinematics_seam()),
+        ('no mujoco imports in the tight robot modules',
+         check_no_mujoco_imports()),
     ]
 
     print()

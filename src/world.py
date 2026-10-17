@@ -128,6 +128,17 @@ class SimObjectWorld(ObjectWorld):
         R = np.array(self.data.xmat[self.base_id], float).reshape(3, 3)
         return p, R
 
+    def camera_pose(self):
+        # Camera pose in the world frame, for the servo trace. Not part of
+        # ObjectWorld: the robot does not need to know where the camera is, only
+        # where the tool is. This exists so debugging output can show the
+        # frustum without the servo reaching into the simulator.
+        import mujoco
+        mujoco.mj_forward(self.model, self.data)
+        p = np.array(self.data.cam_xpos[self.cam_id], float)
+        R = np.array(self.data.cam_xmat[self.cam_id], float).reshape(3, 3)
+        return p, R
+
     # DEMONSTRATION DRIVER (simulation only)
     def step_mover(self):
         # Advance the cube's glide by one physics step. Called from the physics

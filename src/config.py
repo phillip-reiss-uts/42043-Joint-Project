@@ -3,11 +3,25 @@
 
 import numpy as np
 
-# workcell 
+# workcell
+#
+# GEOMETRY IS TUNED FOR THE UR3e (~500 mm reach), not the UR5e this project
+# started on (~850 mm). The UR3e's reachable region for a down-pointing tool at
+# table height was measured by sweeping IK against models/ur3e/ur3e.xml: it is
+# a wedge centred near (0.24, 0.06) in the base frame, widest around x=0.25-0.35.
+# The table below is the largest rectangle verified to be fully reachable:
+#     x in [0.14, 0.41], y in [-0.26, 0.33]   (36/36 sampled points OK)
+# The old UR5e values (centre [-0.134, 0.492], half [0.35, 0.35]) put most of
+# the spawn region 0.4-0.5 m from the UR3e base -- out of reach, so the servo
+# never saw the object.
+#
+# If you switch back to the UR5e, restore:
+#     TABLE_CENTRE = [-0.134, 0.492]   TABLE_HALF = [0.35, 0.35]
+#     CHUTE_X = (0.216, 0.566)         CHUTE_Y = (0.142, 0.492)
 TABLE_HEIGHT = 0.02
 TABLE_THICK = 0.02
-TABLE_CENTRE = [-0.134, 0.492]
-TABLE_HALF = [0.35, 0.35]
+TABLE_CENTRE = [0.275, 0.035]
+TABLE_HALF = [0.135, 0.295]
 
 OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
@@ -18,11 +32,13 @@ POOL_SIZE = 1
 INITIAL_OBJECTS = 0       # spawned when the scene is reset
 MIN_OBJECT_SEPARATION = 0.10   # centre-to-centre; keeps clusters from merging
 
-# chute: sunk bin at the table's right edge, nearest the robot
-CHUTE_X = (0.216, 0.566)        # x extent; left edge touches the table edge
-CHUTE_Y = (0.142, 0.492)        # y extent; 1/4 of the table's area
+# chute: sunk bin at the table's outer edge, nearest the robot's reach limit.
+# Sized as a strip along the far edge of the re-tuned table; the drop point is
+# kept inside the reachable rectangle so the arm can actually get there.
+CHUTE_X = (0.30, 0.41)          # x extent; left edge inside the table
+CHUTE_Y = (-0.26, 0.33)         # y extent; runs the table's full depth
 CHUTE_FLOOR_Z = 0.02 - 0.35     # floor 35 cm below the tabletop
-CHUTE_WALL_THICK = 0.03         # wall thickness, half-extent in x/y
+CHUTE_WALL_THICK = 0.02         # wall thickness, half-extent in x/y
 CHUTE_WALL_HEIGHT = 0.35        # walls rise to tabletop height
 
 # pool parking pose: far below the scene; objects are frozen here until spawned
@@ -38,17 +54,18 @@ MESH_POS = CAM_POS
 #
 # HARDWARE TARGET: real UR3e + RealSense D435i + Robotiq 2F-85.
 #
-# CAUTION: the currently installed mujoco_menagerie ships only UR5e and UR10e
-# (checked: 'universal_robots_ur3e' is not a known robot). So the UR3e cannot
-# be simulated here yet -- either vendor the UR3e MJCF into models/ and point
-# ROBOT_ARM at it, or upgrade mujoco_menagerie. Until then the default stays
-# UR5e so the simulation runs, and the UR3e is selected explicitly.
+# The UR3e is now simulated directly. mujoco_menagerie still ships no UR3e, so
+# the official UR3e MJCF is vendored at models/ur3e/ur3e.xml (sourced from the
+# UR3_RG2_rosbridge teaching platform, which carries the manufacturer's link
+# inertials). model_loader resolves a name under models/ first and only then
+# falls back to menagerie, so 'ur3e' selects the local file.
 #
-# This is a simulation-only limitation. Nothing in the robot code depends on
-# which arm is loaded: joint count comes from the compiled model, and the
-# kinematics are read at runtime. Switching to the real UR3e therefore does not
-# require touching arm.py, servo.py, controller.py or observer.py.
-ROBOT_ARM = 'universal_robots_ur5e'      # TODO: 'universal_robots_ur3e' once available
+# The UR5e the project was originally developed against is still available:
+#     ROBOT_ARM = 'universal_robots_ur5e'
+# Expect the tuned workspace constants (spawn ranges, table/chute geometry,
+# standoff) to need re-fitting if you switch arms: the UR3e has ~500 mm reach
+# against the UR5e's ~850 mm.
+ROBOT_ARM = 'ur3e'                       # models/ur3e/ur3e.xml
 ROBOT_GRIPPER = 'robotiq_2f85'           # Robotiq 2F-85 (the "2D-85" in the
                                          # brief is a typo; 2F-85 is the model)
 ROBOT_CAMERA = 'realsense_d435i'         # assumed wrist-mounted D435i
@@ -107,9 +124,26 @@ LQR_Q_VEL = 1.0e-4       # state cost on velocity error (rad/s)^2
 LQR_R = 5.0e-2           # command cost (rad^2); sets the overall gain level
 # Q_vel is the bandwidth knob; R alone barely moves the dominant pole.
 
-# grasp / place 
+# grasp / place
+#
+# TIP_OFFSET places the gripper/base when grasping: servo.desired_pose sets
+#     p_des.z = object_centre_z + TIP_OFFSET + z_offset
+# so this is where the tool is commanded relative to the object centre.
+#
+# NOTE ON THE FORMULA. It is NOT simply "distance from gripper/base to the pad".
+# Measuring that (0.1401 m on both builds) and using base_to_tip - H/2 gives
+# 0.1101, which was tried and made grasps WORSE: the servo then drives closer
+# before the tracking gate fires, leaving under 50 mm for the open-loop commit,
+# which truncates and closes the jaws short of the cube. Measured commit offsets
+# from the target: 0.042 / 0.011 / 0.054 m at 0.1101, versus -0.002 / -0.005 /
+# 0.034 m at the original 0.1274. The original value is retained.
+#
+# The 0.1094 term is an early empirical figure. It is left as-is rather than
+# "corrected" because the surrounding behaviour (track-then-commit) is tuned
+# against it, and changing it silently changes where the servo stops.
 GRASP_HEIGHT_FRAC = 0.2
 TIP_OFFSET = 0.1094 - (GRASP_HEIGHT_FRAC - 0.5) * OBJECT_HEIGHT
+BASE_TO_TIP = 0.1401          # measured, gripper/base -> lowest pad (reference)
 APPROACH_Z = 0.10
 FINAL_Z = 0.03
 LIFT_Z = 0.15
@@ -125,27 +159,45 @@ RANDOMIZE_SPAWN = True
 RANDOMIZE_YAW = True     # spin the object about z
 SPAWN_CLEARANCE = 0.05  # spawn height above the surface
 SPAWN_MARGIN = 0.06      # keep this clear of the table edge
-SPAWN_Y_MIN = 0.45       # measured: below this the object leaves the camera footprint
+# UR5e-era footprint floor. The UR5e's home camera sat ~0.49 m above the table
+# and could not see below y = 0.45. The re-tuned UR3e workcell is centred at
+# y = 0.035, so this floor would invert the spawn range entirely. Disabled
+# (None) for the UR3e; the reachable rectangle already bounds the region and
+# tests/test_hardware.py checks the camera can see the samples it produces.
+# Restore 0.45 if switching back to the UR5e table.
+SPAWN_Y_MIN = None
 SPAWN_ARM_CLEARANCE = 0.12   # instant drops keep this clear of gripper/base (xy)
 
 SPAWN_X_RANGE = (TABLE_CENTRE[0] - TABLE_HALF[0] + SPAWN_MARGIN + OBJECT_SIZE[0],
                  TABLE_CENTRE[0] + TABLE_HALF[0] - SPAWN_MARGIN - OBJECT_SIZE[0])
-SPAWN_Y_RANGE = (max(TABLE_CENTRE[1] - TABLE_HALF[1] + SPAWN_MARGIN + OBJECT_SIZE[1],
-                     SPAWN_Y_MIN),
+_y_lo = TABLE_CENTRE[1] - TABLE_HALF[1] + SPAWN_MARGIN + OBJECT_SIZE[1]
+SPAWN_Y_RANGE = ((_y_lo if SPAWN_Y_MIN is None else max(_y_lo, SPAWN_Y_MIN)),
                  TABLE_CENTRE[1] + TABLE_HALF[1] - SPAWN_MARGIN - OBJECT_SIZE[1])
 
 # Deliberately awkward spawns for exercising the perception-recovery path.
+#
+# Re-expressed for the UR3e workcell. The original UR5e coordinates
+# ((-0.219,0.411), (0.030,0.400), (-0.200,0.350), (-0.320,0.700)) are outside
+# the UR3e's reach entirely, so they exercised "cannot reach" rather than
+# "cannot see". These sit inside the re-tuned reachable rectangle and are hard
+# for the stated reason: near the inside reach limit, at the edges of the
+# camera footprint, and in the corner where the wrist approaches a singularity.
+# The exact point counts differ from the UR5e measurements; re-measure with
+# HARD_SPAWN_MODE = True if the numbers matter for a report.
 HARD_SPAWNS = (
-    (-0.219, 0.411),     # occluded by gripper: ~540 pts, 27 mm xy error
-    (0.030, 0.400),      # occluded by gripper: ~1020 pts, 20 mm xy error
-    (-0.200, 0.350),     # outside the home-pose footprint: 0 pts found
-    (-0.320, 0.700),     # marginal footprint, just inside the far edge
+    (0.180, -0.140),     # near the inside reach limit, gripper partly occludes
+    (0.320, 0.240),      # far y edge, marginal camera footprint
+    (0.230, 0.000),      # close to the base, wrist near a singularity
+    (0.390, -0.150),     # outer x limit, close to the chute
 )
 HARD_SPAWN_MODE = False
 
-# Spawns in the strip the home camera cannot see at all (footprint is y >= 0.354).
+# Spawns in the strip the home camera cannot see at all.
+# The home camera sits above the gripper looking down, so the blind strip is the
+# region nearest the base, not the far edge. Bounds follow the re-tuned table.
 REALLY_HARD_MODE = False
-HARD_BLIND_Y = (TABLE_CENTRE[1] - TABLE_HALF[1] + OBJECT_SIZE[1], 0.30)
+HARD_BLIND_Y = (TABLE_CENTRE[1] - TABLE_HALF[1] + OBJECT_SIZE[1],
+                TABLE_CENTRE[1] - TABLE_HALF[1] + 0.10)
 
 
 # The object has a consitent 5.4 mm offset when placed, using an offset value does not affect this

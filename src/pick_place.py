@@ -476,8 +476,13 @@ def search_for_object(model, data, arm, perceive, viewer=None, estop=None,
 def _ik_reaches(model, arm, q, target, tol=1e-3):
     # Reject a search pose the IK could not actually reach, so the sweep does
     # not command a move that goes somewhere else entirely.
+    #
+    # `q` may be a full qpos vector or just the ARM_DOF joint values: solve_ik
+    # returns whatever length it was given as q_init, and callers vary.
+    # Assigning a 6-vector straight into qpos raised a broadcast error, so only
+    # the arm joints are set here and the rest keep their defaults.
     chk = mujoco.MjData(model)
-    chk.qpos[:] = q
+    chk.qpos[:ARM_DOF] = np.asarray(q, float)[:ARM_DOF]
     mujoco.mj_forward(model, chk)
     return float(np.linalg.norm(np.array(chk.xpos[arm.base_id])
                                 - np.array(target, float))) <= tol

@@ -22,13 +22,21 @@ This module is that interface. `MujocoKinematics` wraps today's calls so nothing
 changes numerically. A `URKinematics` implementation would wrap the real
 controller and the robot modules would not change.
 
-DESIGN NOTE ON MASS/GRAVITY
----------------------------
-`mass_gravity()` has no clean UR3e equivalent: the controller will not hand you
-an inertia matrix. It is part of the interface because the observer and the
-linearisation genuinely need it, but a real implementation has to either use a
-pinned model or a system-identified one. Marked clearly below so nobody assumes
-the port is free.
+MASS/GRAVITY AND SERVO GAINS
+----------------------------
+A UR3e controller will not hand you `M(q)`, `g(q)` or its servo stiffness. Both
+are therefore modelled rather than queried:
+
+  * `AnalyticKinematics` (below) computes M and g from published link data with
+    a recursive Newton-Euler formulation -- see src/arm_dynamics.py. It is
+    verified to machine precision against MuJoCo (`MujocoKinematics`), so it is
+    a drop-in replacement rather than an approximation.
+
+  * `servo_gains()` describes the position servo, which is what `A_cl` in the
+    linearisation is built from. MuJoCo's actuator gains are a simulation fact;
+    a hardware implementation must supply the controller's own stiffness, and
+    where that is unknown it should be identified from a step response. The
+    class below flags this rather than silently returning simulation numbers.
 """
 
 from abc import ABC, abstractmethod
@@ -161,3 +169,45 @@ class MujocoKinematics(Kinematics):
         Kp = np.array([m.actuator_gainprm[i][0] for i in range(self._n)])
         Kv = np.array([-m.actuator_biasprm[i][2] for i in range(self._n)])
         return Kp, Kv
+
+
+class AnalyticKinematics(Kinematics):
+    # Hardware-portable kinematics: FK and Jacobian from a frame chain, M(q) and
+    # g(q) from recursive Newton-Euler. No simulator involved.
+    #
+    # This is what a UR3e build would use. The dynamics come from published link
+    # data (UR URDF + payload), and `servo_gains` is supplied explicitly --
+    # there is deliberately no default, because the numbers must come from the
+    # real controller rather than from a simulator's actuator table.
+    #
+    # `frame_provider` must supply, for a given q:
+    #     pose(q)          -> (p, R) of the tool
+    #     jacobian(q)      -> 6x6
+    # and `dyn` is an ArmDynamics instance (src/arm_dynamics.py).
+
+    def __init__(self, frame_provider, dyn, servo_gains):
+        self._frames = frame_provider
+        self.dyn = dyn
+        self._gains = servo_gains
+        if servo_gains is None:
+            raise ValueError(
+                'AnalyticKinematics needs explicit servo gains: the real '
+                "controller's stiffness is not knowable from the model alone")
+
+    def pose(self, q):
+        return self._frames.pose(q)
+
+    def jacobian(self, q):
+        return self._frames.jacobian(q)
+
+    def mass_matrix(self, q):
+        return self.dyn.mass_matrix(np.asarray(q, float))
+
+    def gravity_torque(self, q):
+        return self.dyn.gravity_torque(np.asarray(q, float))
+
+    def mass_gravity(self, q):
+        return self.dyn.mass_gravity(np.asarray(q, float))
+
+    def servo_gains(self):
+        return self._gains
