@@ -34,7 +34,25 @@ CAM_POS = [0.05, 0.0, -0.03]
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
 MESH_POS = CAM_POS
 
-# arm / gripper
+# arm / gripper / camera identity
+#
+# HARDWARE TARGET: real UR3e + RealSense D435i + Robotiq 2F-85.
+#
+# CAUTION: the currently installed mujoco_menagerie ships only UR5e and UR10e
+# (checked: 'universal_robots_ur3e' is not a known robot). So the UR3e cannot
+# be simulated here yet -- either vendor the UR3e MJCF into models/ and point
+# ROBOT_ARM at it, or upgrade mujoco_menagerie. Until then the default stays
+# UR5e so the simulation runs, and the UR3e is selected explicitly.
+#
+# This is a simulation-only limitation. Nothing in the robot code depends on
+# which arm is loaded: joint count comes from the compiled model, and the
+# kinematics are read at runtime. Switching to the real UR3e therefore does not
+# require touching arm.py, servo.py, controller.py or observer.py.
+ROBOT_ARM = 'universal_robots_ur5e'      # TODO: 'universal_robots_ur3e' once available
+ROBOT_GRIPPER = 'robotiq_2f85'           # Robotiq 2F-85 (the "2D-85" in the
+                                         # brief is a typo; 2F-85 is the model)
+ROBOT_CAMERA = 'realsense_d435i'         # assumed wrist-mounted D435i
+
 ARM_DOF = 6
 GRIP_OPEN = 0.0
 GRIP_CLOSED = 255.0
@@ -195,13 +213,10 @@ OBJ_MOVE_BANDS = (
 # key cycles. This constant was never read.
 # OBJ_MOVE_BAND = 0
 OBJ_MOVE_TURN_S = 1.2        # seconds between random re-aims
-# Proximity halt, measured in 3D from the gripper base. Now DISABLED (0.0).
-# It was set just outside the hover distance so the target stopped as the arm
-# arrived, but that cut the chase down to the transit and made the whole
-# approach about two seconds long. The robot now keeps servoing while the object
-# moves and waits for it to hold still instead, so nothing forces the halt.
-# Set to e.g. 0.35 to bring the old behaviour back.
-OBJ_MOVE_STOP_DIST = 0.0
+# REMOVED: OBJ_MOVE_STOP_DIST (proximity halt). It made the cube's motion law
+# depend on the robot's position, which broke the robot/world separation, and
+# it was already disabled (0.0). The robot now waits for the object to hold
+# still instead of forcing it to stop, so the parameter has no meaning.
 
 # ---- vision Kalman filter ----
 # Smooths the intermittent vision stream, bridges the stretches where the

@@ -1,7 +1,52 @@
-﻿# Vision-Guided Pick (UR5e + 2F-85 + D435i)
+# Vision-Guided Pick (UR3e target + 2F-85 + D435i)
 
-MuJoCo simulation for a vision-guided pick task on a UR5e arm with a
+MuJoCo simulation for a vision-guided pick task on a UR-series arm with a
 wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
+
+## Target hardware
+
+The intended real platform is a **UR3e + RealSense D435i + Robotiq 2F-85**.
+The simulation currently loads a UR5e because the installed `mujoco_menagerie`
+does not ship a UR3e; see `ROBOT_ARM` in `src/config.py`. Nothing in the robot
+code depends on which arm is loaded, so switching is a one-line config change
+once a UR3e MJCF is available.
+
+## Architecture: the robot / world boundary
+
+Robot code must run on real hardware. The object side is a simulation
+demonstration. Those two concerns are separated by `src/world.py`:
+
+    robot side (hardware-portable)      world side (simulation)
+    ------------------------------      ----------------------
+    task.py       (WAIT/SEARCH FSM)     world.py       (boundary interface)
+    arm.py        (joints, gripper)     pick_place.py  (scene, spawn, pool)
+    servo.py      (PBVS)                target_motion.py (cube glide, sim only)
+    controller.py (PD / LQR)            camera.py      (RGB-D sensor)
+    observer.py   (EKF)                 model_loader.py (scene composition)
+    state_space.py (linearisation)      overlay.py     (viewer overlays)
+    tracking.py   (Kalman filter)       run_simulation.py (sim front-end)
+
+The robot reaches the world **only** through `ObjectWorld`, which exposes two
+read-only methods: `perceive()` returning `TargetView` records (camera-derived
+estimates — never ground truth), and `gripper_pose()` (the robot's own pose).
+There is deliberately no method for moving or spawning an object: the robot has
+no business commanding the object, and that capability is exactly how the two
+sides became coupled before.
+
+`tests/test_layering.py` enforces the rule mechanically. Run it after any
+change:
+
+    python tests/test_layering.py
+
+It fails if a robot module imports `target_motion`, `pick_place`,
+`model_loader`, `camera`, `calibration` or `overlay`, or touches object state.
+
+Note `task.py` is the strictest case: it contains no `mujoco` at all, so the
+task policy — when to search, what a pause means mid-motion, what an
+interrupted search implies — is expressed independently of any simulator.
+`arm.py`, `servo.py`, `observer.py` and `state_space.py` still use `mujoco` for
+kinematics (Jacobians, mass matrix) and will need those calls replaced by the
+real controller's FK when the second `ObjectWorld` is written.
 
 ## Setup
 
@@ -9,7 +54,26 @@ wrist-mounted RealSense D435i RGB-D camera and a Robotiq 2F-85 gripper.
 
 ## Run
 
-    python main.py
+    python main.py                # simulation (current default)
+    python main.py --sim          # simulation, explicit
+    python main.py --hardware     # real robot (not implemented yet)
+
+`main.py` is a minimal dispatcher: it chooses a front-end and nothing else.
+With no option it runs the simulation. Once the hardware front-end exists the
+sensible default becomes the real robot and simulation should require `--sim`;
+that is a one-line change in `main.py`'s `_parse`.
+
+The simulation front-end can also be run directly:
+
+    python run_simulation.py
+
+Demonstrations (each needs to compose the scene, so they live outside the
+robot modules):
+
+    python -m src.demo_servo        # PBVS vs open-loop planning
+    python -m src.demo_controller   # PD vs LQR outer loop
+    python -m src.demo_observer     # velocity estimation from encoders
+    python -m src.demo_state_space  # controllability / observability
 
 ## Usage
 
@@ -24,21 +88,31 @@ its 26 render flags and the digits 0-5 to geom groups, so nothing else is free.
 
 ## Layout
 
-- `main.py` — entry point: state machine, command keys, scene setup.
+- `main.py` — minimal entry point: dispatches to a front-end (`--sim` default,
+  `--hardware` reserved).
+- `run_simulation.py` — **simulation front-end**: passive viewer, keyboard,
+  scene reset, the moving cube. Imports mujoco freely; nothing here is for
+  hardware.
 - `run_tests.py` — headless trial harness; writes `summary.csv` and four graphs.
-- `src/arm.py` — IK, trajectory execution, gripper, and the grasp readback.
+- `tests/test_layering.py` — enforces the robot / world separation.
+- `src/world.py` — **the boundary**: `TargetView`, `ObjectWorld`,
+  `SimObjectWorld`.
+- `src/task.py` — WAIT/SEARCH state machine, pause and abort semantics. Pure
+  policy: no mujoco, no viewer, no scene.
+- `src/arm.py` — IK, trajectory execution, gripper, grasp readback. Knows
+  nothing about objects or the viewer.
 - `src/calibration.py` — camera intrinsic calibration from rendered marker views.
 - `src/camera.py` — RealSense D435i wrist camera: capture and deprojection.
 - `src/config.py` — global flags and constants.
-- `src/controller.py` — state-space joint controller and encoder.
-- `src/model_loader.py` — composes UR5e + 2F-85 + wrist camera + table.
+- `src/controller.py` — joint and LQR controllers, encoder model.
+- `src/model_loader.py` — composes arm + gripper + wrist camera + table.
 - `src/observer.py` — observer for the unmeasured joint states.
 - `src/overlay.py` — live viewer overlays (trail, frustum, detections, camera view).
 - `src/perception.py` — clustering, convex hull, calipers, object detection.
 - `src/pick_place.py` — scene, spawn/despawn, one pick, table clearing.
 - `src/servo.py` — PBVS servo, occlusion recovery, open-loop grasp commit.
 - `src/state_space.py` — linearisation, controllability/observability, LQR design.
-- `src/target_motion.py` — moving-target driver and the speed bands.
+- `src/target_motion.py` — moving-target driver and the speed bands (sim only).
 - `src/tracking.py` — constant-velocity Kalman filter on the vision estimate.
 - `requirements.txt` — dependencies.
 
@@ -56,3 +130,21 @@ its 26 render flags and the digits 0-5 to geom groups, so nothing else is free.
 - Move speeds and gripper strength are configurable.
 - User controls are responsive and reliable.
 - Behaviour is deterministic and repeatable.
+
+## Porting to hardware
+
+The seam is in place, but the port itself is not done. What remains is a second
+`ObjectWorld` implementation plus real drivers:
+
+- a `RealObjectWorld` backed by RealSense captures, replacing `perceive()`;
+- forward kinematics from the UR3e controller for `gripper_pose()`;
+- UR RTDE/URScript for joint moves. `Arm.move` currently integrates a joint
+  trajectory against MuJoCo's position servos; on hardware this becomes a
+  streamed move command. The pacing, easing, pause and abort logic around it
+  does not change;
+- Modbus reads for the 2F-85 registers that `Arm.grasp_state` already consumes.
+
+Task logic (`src/task.py`), the servo law and its occlusion recovery, the EKF,
+the LQR design and the grasp verification need no change. Replacing the
+kinematics calls in `arm.py`/`servo.py`/`observer.py` (Jacobians, mass matrix)
+with the real controller's FK is the remaining work inside the robot layer.

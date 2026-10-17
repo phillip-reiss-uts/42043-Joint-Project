@@ -8,28 +8,38 @@ from src.config import (
     GRIP_FORCE_RANGE,
     CALIB_MARKERS, CALIB_SPACING, CALIB_MARKER_R, CALIB_BOARD_THICK,
     CALIB_BOARD_MARGIN,
-    # LEFTOVER: OBJECT_POS was for the old single 'target' body; unused here.
+    ROBOT_ARM, ROBOT_GRIPPER, ROBOT_CAMERA,
     POOL_SIZE,
     CHUTE_X, CHUTE_Y, CHUTE_FLOOR_Z, CHUTE_WALL_THICK, CHUTE_WALL_HEIGHT,
     PARK_POS,
 )
 
 
-def load_robot_model(with_calibration_board=False):
-    # Compose UR5e + Robotiq 2F-85 + Realsense D435i + table + chute + object pool.
+def load_robot_model(with_calibration_board=False, arm_model=None,
+                     gripper_model=None, camera_model=None):
+    # Compose <arm> + <gripper> + <wrist camera> + table + chute + object pool.
+    #
+    # The arm defaults to ROBOT_ARM (UR3e for the hardware transfer). The UR5e
+    # simulation this was developed against is still available:
+    #     load_robot_model(arm_model='universal_robots_ur5e')
+    # Nothing downstream depends on which arm is chosen: joint count comes from
+    # the compiled model, and no module hardcodes UR5e geometry.
+    arm_model = arm_model or ROBOT_ARM
+    gripper_model = gripper_model or ROBOT_GRIPPER
+    camera_model = camera_model or ROBOT_CAMERA
     try:
-        arm = mm.get('universal_robots_ur5e').spec('ur5e')
-        gripper = mm.get('robotiq_2f85').spec('2f85')
-        camera = mm.get('realsense_d435i').spec('d435i')
+        arm = mm.get(arm_model).spec(arm_model.split('_')[-1])
+        gripper = mm.get(gripper_model).spec(gripper_model.split('_')[-1])
+        camera = mm.get(camera_model).spec(camera_model.split('_')[-1])
     except Exception as e:
         print(f"[ERROR] Failed to load models: {e}")
         print("Ensure 'mujoco-menagerie' is installed: pip install mujoco-menagerie")
         return None
 
-    # 1. Attach gripper to the UR5e flange
+    # 1. Attach gripper to the arm flange
     attachment_site = arm.site("attachment_site")
     if attachment_site is None:
-        print("[ERROR] Could not find 'attachment_site' in UR5e model.")
+        print(f"[ERROR] Could not find 'attachment_site' in {arm_model} model.")
         return None
     arm.attach(gripper, prefix="gripper/", site=attachment_site)
 

@@ -33,12 +33,13 @@ from src.servo import PBVSServo
 from src.pick_place import (ObjectRegistry, reset_scene, place_cube,
                             search_for_object)
 from src.perception import rotation_with_yaw
+from src.world import SimObjectWorld
 from src import target_motion as TM
 from src.config import (
     POOL_SIZE, SERVO_STANDOFF, SERVO_MAX_ITERS, SERVO_V_TRANSIT,
     SERVO_V_DESCENT, SERVO_PERCEIVE_EVERY, SERVO_OCCLUDE_RATIO,
     SERVO_OCCLUDE_RECOVER, SERVO_OCCLUDE_FAILS, SERVO_RETREAT_STEP,
-    SERVO_RETREAT_MAX, SERVO_RETREAT_V, OBJ_MOVE_STOP_DIST,
+    SERVO_RETREAT_MAX, SERVO_RETREAT_V,
     GRIP_CLOSED, R_DOWN, LIFT_Z, STEPS_CLOSE, STEPS_RELEASE,
     GRASP_LIFT_RECHECK, GRASP_CLOSED_Q, GRASP_FORCE_MIN,
     TABLE_HEIGHT, OBJECT_HEIGHT, FEED, ARM_DOF,
@@ -48,19 +49,24 @@ from src.config import (
 class Recorder:
     # Stands in for the viewer handle: samples state, draws nothing.
 
-    def __init__(self, model, data, arm, reg, index, servo):
+    def __init__(self, model, data, arm, reg, index, servo, world=None):
         self.model = model
         self.data = data
         self.arm = arm
         self.reg = reg
         self.index = index
         self.servo = servo
+        self.world = world
         self.overlay = None                  # so the servo's lookups no-op
         self.t, self.ee, self.obj, self.est, self.truth = [], [], [], [], []
         self.raw_est, self.span_ratio = [], []
 
     def sync(self):
         d = self.data
+        # NOTE: the mover is NOT stepped here. sync runs every SYNC_STEPS
+        # physics steps, so driving the object from it would move the cube at
+        # 1/SYNC_STEPS of its true speed. The world is ticked per physics step
+        # by the servo (PBVSServo._step_world) and by Arm's step_hook.
         self.t.append(float(d.time))
         self.ee.append(np.array(d.xpos[self.arm.base_id], float))
         p = self.reg.pose(d, self.index)
@@ -96,7 +102,10 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     idx = reg.active()[0]
     p0 = np.array(reg.pose(data, idx), float)
 
-    sv = PBVSServo(model, data, arm, camera, cam_id, smooth=1.0, use_kf=use_kf,
+    world = SimObjectWorld(model, data, camera, cam_id, reg)
+    mover = TM.TargetMover(model, data, reg, idx, rng=rng)
+    world.set_mover(mover)
+    sv = PBVSServo(model, data, arm, world, smooth=1.0, use_kf=use_kf,
                    perceive_every=SERVO_PERCEIVE_EVERY,
                    v_max=SERVO_V_TRANSIT, v_descent=SERVO_V_DESCENT,
                    occlude_ratio=SERVO_OCCLUDE_RATIO,
@@ -105,8 +114,7 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
                    retreat_step=SERVO_RETREAT_STEP,
                    retreat_max=SERVO_RETREAT_MAX,
                    retreat_v=SERVO_RETREAT_V)
-    rec = Recorder(model, data, arm, reg, idx, sv)
-    mover = TM.TargetMover(model, data, reg, idx, rng=rng)
+    rec = Recorder(model, data, arm, reg, idx, sv, world=world)
 
     # Emulate the operator: let the object walk for a while, then stop it. The
     # robot only commits once it has watched the target hold still, so without
@@ -117,10 +125,11 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     t_start = float(data.time)
     _orig_step = mover.step
 
-    def _step(d, grip):
+    def _step(d):
+        # Emulate the operator: shut the band off after move_s seconds.
         if move_s and d.time - t_start >= move_s:
             TM.set_band(0)
-        return _orig_step(d, grip)
+        return _orig_step(d)
 
     mover.step = _step
 
@@ -136,7 +145,7 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     ok_approach, iters, err, hover = sv.approach(
         standoff=SERVO_STANDOFF, viewer=rec, coarse=False,
         max_iters=SERVO_MAX_ITERS, check_occlusion=True, recover=True,
-        mover=mover, search=reacquire)
+        search=reacquire)
     wall_approach = time.perf_counter() - t0
 
     # Geometry at the moment the approach finished, before the jaws move.
@@ -204,7 +213,6 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
         obj_shift_mm=float(np.linalg.norm(p_end[:2] - p0[:2]) * 1e3),
         obj_path_mm=float(mover.moved * 1e3),
         obj_turns=int(mover.turned),
-        mover_stopped=bool(mover.stopped),
         occluded=bool(sv.occluded), recovered=bool(sv.recovered),
         kf_updates=int(sv.kf.updates) if sv.kf is not None else 0,
         kf_rejects=int(sv.kf.rejects) if sv.kf is not None else 0,
@@ -252,8 +260,6 @@ def plot_distance(runs, outdir):
         ax.plot(s['t'] - s['t'][0], d, lw=1.3,
                 label='%s kf=%s seed %d' % (r['band'], 'on' if r['kf'] else 'off',
                                             r['seed']))
-    ax.axhline(OBJ_MOVE_STOP_DIST, color='r', ls='--', lw=1.2,
-               label='object motion stops below this')
     ax.set_xlabel('sim time since approach start (s)')
     ax.set_ylabel('gripper to object distance (m)')
     ax.set_title('Approach profile: distance closure')

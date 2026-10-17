@@ -1,305 +1,64 @@
-# vision-guided pick with UR5e + 2F-85 + D435i.
-import numpy as np
-import mujoco
-import mujoco.viewer
+#!/usr/bin/env python3
+# Entry point. Dispatches to a front-end.
+#
+#   python main.py              -> simulation (current default)
+#   python main.py --sim        -> simulation, explicit
+#   python main.py --hardware   -> real robot (NOT IMPLEMENTED YET)
+#
+# This file is deliberately minimal: it decides WHICH front-end runs and does
+# nothing else. All simulation concerns live in run_simulation.py; all portable
+# task logic lives in src/task.py.
+#
+# NOTE ON THE DEFAULT
+# -------------------
+# The default is simulation for now so the project is runnable as-is. Once the
+# hardware front-end exists, the sensible default becomes the real robot and
+# simulation should require --sim. That is a one-line change in `_parse` below.
 
-# import camera
-from src.camera import RGBDCamera
-
-# import global config
-from src.config import *
-from src import config as cfg
-
-# import mode loader
-from src.model_loader import load_robot_model
-
-# import perception functions
-from src.perception import find_camera
-
-# import arm functions
-from src.arm import Arm
-
-# import tasks
-from src.pick_place import (ObjectRegistry, reset_scene, clear_table,
-                            place_cube, put_cube_down)
-
-# live viewer overlays
-from src.overlay import Overlay
-
-# object motion bands for the robustness demonstration
-from src import target_motion
-from src.target_motion import TargetMover
+import argparse
+import sys
 
 
-def _log(msg):
-    # Optional diagnostics; gated by config.VERBOSE.
-    if cfg.VERBOSE:
-        print(msg)
+def _parse(argv=None):
+    ap = argparse.ArgumentParser(
+        prog='main.py',
+        description='Vision-guided pick: choose a front-end.',
+        epilog='Simulation is the default until the hardware front-end exists.')
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument('--sim', '--simulation', dest='sim', action='store_true',
+                   help='run the MuJoCo simulation (default)')
+    g.add_argument('--hardware', '--real', dest='hardware', action='store_true',
+                   help='run on the real robot (not implemented yet)')
+    return ap.parse_args(argv)
 
 
-# MODES
-WAIT = 'WAIT'
-SEARCH = 'SEARCH'
+def run_simulation():
+    # Imported lazily so that --hardware does not pull in mujoco/the viewer.
+    from run_simulation import main as sim_main
+    return sim_main()
 
 
-def main():
+def run_hardware():
+    print('[ERROR] The hardware front-end is not implemented yet.')
+    print()
+    print('The robot side is already portable: src/task.py, src/arm.py,')
+    print('src/servo.py and src/controller.py contain no mujoco or viewer.')
+    print('What is missing is a second ObjectWorld (see src/world.py) and')
+    print('real drivers:')
+    print('  * RealObjectWorld backed by RealSense captures')
+    print('  * UR3e forward kinematics for gripper_pose()')
+    print('  * UR RTDE/URScript joint moves for Arm.move')
+    print('  * Modbus reads for the 2F-85 registers Arm.grasp_state uses')
+    return 2
 
-    model = load_robot_model()
 
-    if model is None:
-        return
-
-    data = mujoco.MjData(model)
-
-    home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home')
-    if home_id < 0:
-        print('[ERROR] model has no "home" keyframe; cannot start.')
-        return
-    mujoco.mj_resetDataKeyframe(model, data, home_id)
-    mujoco.mj_forward(model, data)
-
-    home_st = mujoco.MjData(model)
-    mujoco.mj_resetDataKeyframe(model, home_st, home_id)
-    home_q = np.array(home_st.qpos[:ARM_DOF])
-
-    cam_name, cam_id = find_camera(model)
-    if cam_id < 0:
-        print('[ERROR] no wrist camera found; cannot proceed.')
-        return
-    _log(f'[INFO] {model.nbody} bodies, {model.njnt} joints, '
-         f'{model.nu} actuators; wrist camera = {cam_name}')
-
-    rng = np.random.default_rng()
-
-    # 320x240 sensor: ~2x the position error of 640x480 (1.5 mm vs 0.75 mm
-    # mean, still far inside grasp tolerance) but ~5x cheaper per frame, which
-    # keeps the perception stall inside the servo loop below the visible range.
-    camera = RGBDCamera(model, cam_name, width=320, height=240)
-    _log(f'[INFO] intrinsics K:\n{camera.K}')
-
-    # COMMANDS
-    # Keys 6-9 plus '.': the viewer maps a-z onto its 26 render flags (S toggles
-    # shadows, E constraints, P contact-split, R reflection) and 0-5 onto geom
-    # groups, so no letter or low digit is available to us.
-    cmd = {'start': False, 'pause': False, 'place': False, 'reset': False}
-    ui = {'overlay': None}
-    # session-level mover, so the target glides in WAIT as well as in a search
-    demo = {'mover': None, 'idx': None}
-
-    def on_key(keycode):
-        if keycode == ord('6'):
-            cmd['place'] = True
-        elif keycode == ord('7'):
-            cmd['start'] = True
-        elif keycode == ord('8'):
-            cmd['pause'] = True
-        elif keycode == ord('9'):
-            cmd['reset'] = True
-        elif keycode == ord('.'):
-            # cycle the object's motion band: off -> slow -> medium -> fast
-            name, speed = target_motion.cycle_band()
-            print('[MOVE] object motion band: %-6s (%.0f mm/s)'
-                  % (name, speed * 1e3))
-            ov = ui['overlay']
-            if ov is not None:
-                ov.set_info('move', 'obj motion %s' % name,
-                            '%.0f mm/s' % (speed * 1e3))
-
-    def take(name):
-        # Consume a flag: True once per press.
-        if cmd[name]:
-            cmd[name] = False
-            return True
-        return False
-
-    def pending():
-        # Non-consuming peek, safe to call every step.
-        return cmd['reset'] or cmd['place'] or cmd['start']
-
-    arm = Arm(model, data)
-
-    if VERIFY_IK:
-        arm.verify_ik()
-
-    with mujoco.viewer.launch_passive(model, data, key_callback=on_key) as viewer:
-        viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CAMERA] = True
-        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-        viewer.cam.fixedcamid = cam_id
-
-        # Live overlays. Wraps viewer.sync, so every sync anywhere in the code
-        # draws the overlay first -- no plumbing through the call chain.
-        overlay = Overlay(viewer, model, data, camera, cam_id, arm.base_id)
-        overlay.set_info('mode', 'WAIT', 'scene empty')
-        name, speed = target_motion.current_band()
-        overlay.set_info('move', 'obj motion %s' % name,
-                         '%.0f mm/s' % (speed * 1e3))
-        ui['overlay'] = overlay
-        arm.viewer = viewer
-
-        reg = ObjectRegistry(model, POOL_SIZE)
-        reset_scene(model, data, reg, rng, viewer=None)
-
-        print('[INFO] 6 = spawn cube, 7 = start/stop search, 8 = pause, '
-              '9 = reset scene')
-        print('[STATE] WAIT  (scene empty; press 6 to spawn the cube, '
-              '7 to search)')
-
-        paused = [False]
-        mode = [WAIT]
-
-        def estop():
-            # Consume the pause command here, not at the outer-loop boundary:
-            # that boundary is not reached while clear_table is running, so a
-            # mid-search press used to queue up and fire late. Consuming it per
-            # step also stops two quick presses collapsing into one toggle.
-            if cmd['pause']:
-                cmd['pause'] = False
-                paused[0] = not paused[0]
-                say('PAUSED  (holding position)' if paused[0] else 'RESUMED')
-            return paused[0]
-
-        def say(msg):
-            print('[STATE] %s' % msg)
-            overlay.set_info('mode', msg, 'paused' if paused[0] else '')
-
-        def at_home():
-            return float(np.linalg.norm(data.qpos[:ARM_DOF] - home_q)) < 1e-2
-
-        def enter_wait(reason):
-            mode[0] = WAIT
-            say('WAIT  (%s)' % reason)
-            if not at_home():
-                say('not at home -- returning home')
-                arm.move(home_q, GRIP_OPEN, rate=RAPID, viewer=viewer,
-                         estop=estop)
-                say('WAIT  (at home)')
-
-        def hard_reset():
-            # Instant: the arm is teleported, not driven. Every parameter is
-            # cleared, including the pause flag and the command queue.
-            mujoco.mj_resetDataKeyframe(model, data, home_id)
-            mujoco.mj_forward(model, data)
-            for i in range(len(reg.body_ids)):
-                reg.teleport(data, i, PARK_POS)
-                reg.state[i] = 'parked'
-            mujoco.mj_forward(model, data)
-            for k in cmd:
-                cmd[k] = False
-            paused[0] = False
-            mode[0] = WAIT
-            say('WAIT  (9 reset: cube parked, arm at home, all state cleared)')
-
-        while viewer.is_running():
-
-            # RESET pre-empts everything and needs no motion
-            if take('reset'):
-                hard_reset()
-                viewer.sync()
-                continue
-
-            # PAUSE
-            if take('pause'):
-                paused[0] = not paused[0]
-                if paused[0]:
-                    say('PAUSED  (holding position)')
-                else:
-                    say('RESUMED')
-
-            if mode[0] == WAIT:
-                # P places the cube; the robot stays in WAIT
-                if take('place'):
-                    say('SPAWN  (6)')
-                    idx = place_cube(model, data, reg, rng, viewer=viewer,
-                                     stop=lambda: cmd['reset'], estop=estop)
-                    overlay.set_info('task', 'spawned obj %s' % idx,
-                                     'on the table')
-                    say('WAIT  (cube placed on the table, index %s)' % idx)
-                # 7 starts a search
-                if take('start'):
-                    if not reg.active():
-                        say('SEARCH ignored -- no cube on the table '
-                            '(press 6 first)')
-                    else:
-                        mode[0] = SEARCH
-                # Keep the moving-target demo visible. The mover also runs
-                # inside the servo loop during a search, but if it only ran
-                # there then toggling the band in WAIT would look like nothing
-                # happened -- the object would sit still until a search began.
-                act = reg.active()
-                if act:
-                    if demo['idx'] != act[0]:
-                        demo['mover'] = TargetMover(model, data, reg, act[0])
-                        demo['idx'] = act[0]
-                    arm.mover = demo['mover']
-                else:
-                    demo['mover'] = None
-                    demo['idx'] = None
-                    arm.mover = None
-
-                # Step the same number of times per render as the motion loops
-                # do. At one step per frame the sim runs ~0.2x real time, so the
-                # object crawls here and then appears to lurch forward the
-                # moment a search starts.
-                for _ in range(SYNC_STEPS):
-                    if demo['mover'] is not None:
-                        demo['mover'].step(
-                            data, np.array(data.xpos[arm.base_id], float))
-                    arm.hold(GRIP_OPEN)
-                    mujoco.mj_step(model, data)
-                viewer.sync()
-                continue
-
-            # SEARCH
-            say('SEARCH  (7)')
-            overlay.set_info('task', 'searching', 'clear_table')
-
-            if USE_OBSERVER:
-                # imported here so scipy is not loaded when the observer is off
-                from src.observer import ArmObserver
-                from src.controller import (
-                    JointController, LQRController, Encoder, lqr_weights,
-                )
-                observer = ArmObserver(
-                    model, data, data.qpos[:ARM_DOF],
-                    lqr_weights=(lqr_weights() if USE_LQR else None))
-                ctl = (LQRController(observer) if USE_LQR
-                       else JointController())
-                arm.attach_observer(observer, controller=ctl,
-                                    encoder=Encoder())
-
-            def abort_now():
-                return pending() or not viewer.is_running()
-
-            clear_table(model, data, arm, camera, cam_id, rng, reg,
-                        viewer=viewer,
-                        aborted=abort_now,
-                        spawn_request=None,
-                        estop=estop)
-
-            arm.detach_observer()
-
-            if not viewer.is_running():
-                break
-
-            # Decide what the interrupted search means, in priority order
-            if take('reset'):
-                hard_reset()
-            elif take('place'):
-                say('SPAWN  (6 during search) -- aborting, returning home')
-                place_cube(model, data, reg, rng, viewer=viewer,
-                           stop=lambda: cmd['reset'], estop=estop)
-                say('cube teleported out of the gripper onto the table')
-                enter_wait('after P')
-            elif take('start'):
-                say('STOP  (7) -- placing the cube back on the table')
-                put_cube_down(model, data, arm, reg, rng, viewer=viewer,
-                              estop=estop)
-                enter_wait('after S stop')
-            else:
-                enter_wait('table clear')
-
-        camera.renderer.close()
+def main(argv=None):
+    args = _parse(argv)
+    if args.hardware:
+        return run_hardware()
+    # Default: simulation.
+    return run_simulation()
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

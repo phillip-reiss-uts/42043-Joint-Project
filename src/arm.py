@@ -1,4 +1,13 @@
 # Arm motion: IK, trajectory execution, gripper, and view repositioning.
+#
+# HARDWARE BOUNDARY: this module is the robot. It knows about joints, the
+# gripper and the viewer, and it knows NOTHING about the object pool, the cube
+# driver or the demonstration. It has no reference to any object, and no code
+# path here reads or writes object state.
+#
+# The `on_step` callback replaces the old `viewer=` argument so that this
+# module no longer imports the overlay: on hardware there is no viewer, and the
+# trajectory executor must compile without one. `main.py` passes viewer.sync.
 
 import mujoco
 import numpy as np
@@ -9,7 +18,6 @@ from src.config import (
     SYNC_STEPS,
     GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
 )
-from src.overlay import push
 
 
 class Arm:
@@ -24,15 +32,10 @@ class Arm:
         self.controller = None
         self.encoder = None
 
-        # set by main so observe() can push estimator error to the overlay
+        # Diagnostic sink for observe(). Set by main to the overlay; None on
+        # hardware. Typed only as "something with set_info", so this module
+        # still does not depend on the overlay layer.
         self.viewer = None
-
-        # Optional moving-target driver (see target_motion.py). Every planned
-        # move steps it, so the object keeps gliding during re-homing, searching
-        # and lowering -- not only while a servo loop happens to be running.
-        # Owned here rather than per-pick, because anything shorter lived let the
-        # object freeze solid between attempts.
-        self.mover = None
 
         # Finger driver joints, for reading the jaw opening back. A real
         # 2F-85 reports the same thing over Modbus as its position register.
@@ -65,11 +68,16 @@ class Arm:
         u = np.array(self.data.ctrl[:ARM_DOF], float)
         self.observer.predict(u)
         self.observer.update(self.encoder.read(self.data))
-        push(self.viewer, 'observer',
-             'obs err %.5f' % float(np.linalg.norm(
-                 self.observer.xhat[:ARM_DOF] - self.data.qpos[:ARM_DOF])),
-             'v err %.5f' % float(np.linalg.norm(
-                 self.observer.xhat[ARM_DOF:] - self.data.qvel[:ARM_DOF])))
+        # Push to the overlay if one is attached, via duck typing rather than a
+        # direct import, so this module has no overlay dependency.
+        ov = getattr(self.viewer, 'overlay', None)
+        if ov is not None:
+            ov.set_info(
+                'observer',
+                'obs err %.5f' % float(np.linalg.norm(
+                    self.observer.xhat[:ARM_DOF] - self.data.qpos[:ARM_DOF])),
+                'v err %.5f' % float(np.linalg.norm(
+                    self.observer.xhat[ARM_DOF:] - self.data.qvel[:ARM_DOF])))
 
     # IK
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,
@@ -134,9 +142,17 @@ class Arm:
               f'axis={np.round(axis, 4)}')
         return tilt
 
-    def move(self, q_target, grip, rate=RAPID, viewer=None, ease='quintic',
-             estop=None, spawn_hook=None, stop=None, step_hook=None):
+    def move(self, q_target, grip, rate=RAPID, on_step=None, ease='quintic',
+             estop=None, stop=None, step_hook=None, viewer=None):
         # Move to q_target, pausing in place whenever estop() is true.
+        #
+        # on_step is called once per physics step with no arguments. main passes
+        # viewer.sync; on hardware it is None or a status/logging callback. The
+        # arm does not care what it does.
+        # `viewer` is accepted for backwards compatibility and folded into
+        # on_step, so no existing call site silently stops rendering.
+        if viewer is not None and on_step is None:
+            on_step = viewer.sync
         data, model = self.data, self.model
         q_start = data.qpos[:ARM_DOF].copy()
         dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
@@ -169,8 +185,6 @@ class Arm:
             self._q_ref_prev = q_ref
 
             # before the step, so whatever the hook sets applies to this step
-            if self.mover is not None:
-                self.mover.step(data, np.array(data.xpos[self.base_id], float))
             if step_hook is not None:
                 step_hook()
 
@@ -179,10 +193,8 @@ class Arm:
             mujoco.mj_step(model, data)
             if self.observer is not None:
                 self.observer.update(self.encoder.read(data))
-            if spawn_hook is not None:
-                spawn_hook()
-            if viewer is not None and i % sync_every == 0:
-                viewer.sync()
+            if on_step is not None and i % sync_every == 0:
+                on_step()
 
             # freeze in place while paused, re-sending the same command
             while estop is not None and estop():
@@ -196,25 +208,27 @@ class Arm:
                 mujoco.mj_step(model, data)
                 if self.observer is not None:
                     self.observer.update(self.encoder.read(data))
-                if spawn_hook is not None:
-                    spawn_hook()
-                if viewer is not None:
-                    viewer.sync()
+                if on_step is not None:
+                    on_step()
 
-    def close_gripper(self, steps, viewer=None, estop=None, spawn_hook=None,
-                      stop=None):
+    def close_gripper(self, steps, viewer=None, estop=None, stop=None,
+                      on_step=None):
         # Ramp the fingers shut while holding the present arm pose.
         self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer, estop,
-                        spawn_hook, stop)
+                        stop, on_step)
 
-    def open_gripper(self, steps, viewer=None, estop=None, spawn_hook=None,
-                     stop=None):
+    def open_gripper(self, steps, viewer=None, estop=None, stop=None,
+                     on_step=None):
         # Ramp the fingers open while holding the present arm pose.
         self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop,
-                        spawn_hook, stop)
+                        stop, on_step)
 
-    def _ramp_grip(self, g_from, g_to, steps, viewer, estop=None,
-                   spawn_hook=None, stop=None):
+    def _ramp_grip(self, g_from, g_to, steps, viewer=None, estop=None,
+                   stop=None, on_step=None):
+        # `viewer` is accepted for backwards compatibility with existing call
+        # sites and folded into on_step, so nothing silently stops rendering.
+        if viewer is not None and on_step is None:
+            on_step = viewer.sync
         data, model = self.data, self.model
         q_hold = data.qpos[:ARM_DOF].copy()
         for i in range(steps):
@@ -229,10 +243,8 @@ class Arm:
             mujoco.mj_step(model, data)
             if self.observer is not None:
                 self.observer.update(self.encoder.read(data))
-            if spawn_hook is not None:
-                spawn_hook()
-            if viewer is not None and i % SYNC_STEPS == 0:
-                viewer.sync()
+            if on_step is not None and i % SYNC_STEPS == 0:
+                on_step()
 
             while estop is not None and estop():
                 if stop is not None and stop():
@@ -244,10 +256,8 @@ class Arm:
                 mujoco.mj_step(model, data)
                 if self.observer is not None:
                     self.observer.update(self.encoder.read(data))
-                if spawn_hook is not None:
-                    spawn_hook()
-                if viewer is not None:
-                    viewer.sync()
+                if on_step is not None:
+                    on_step()
 
     def grasp_state(self):
         # Are the jaws actually holding something? Reads only the gripper's own

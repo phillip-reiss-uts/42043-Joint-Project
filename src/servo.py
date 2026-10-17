@@ -1,7 +1,10 @@
 # Position-Based Visual Servoing for the grasp approach.
-
-# DISABLED: math was imported but never used.
-# import math
+#
+# HARDWARE BOUNDARY: this module is robot-side. It observes the world only
+# through src.world.ObjectWorld, receiving TargetView records, and it never
+# imports the object pool or the cube driver. It previously imported
+# src.pick_place (inside a demo block) and read object ground truth for a lift
+# check; both are gone.
 
 import mujoco
 import numpy as np
@@ -15,9 +18,20 @@ from src.config import (
     SERVO_SEARCH_LIMIT, SERVO_YAW_SMOOTH, SERVO_WATCH_DESCENT,
     SERVO_MOVE_TOL, SERVO_COMMIT_TRIES,
 )
-from src.perception import perceive_all, rotation_with_yaw
-from src.overlay import push
 from src.tracking import TargetFilter
+# Pure geometry helper; carries no object or simulator state.
+from src.perception import rotation_with_yaw
+
+
+def push(viewer, key, left, right=''):
+    # Publish a one-line status, if a viewer with an overlay is attached.
+    #
+    # Local copy rather than `from src.overlay import push`, so this module does
+    # not depend on the overlay layer: on hardware there is no viewer, and the
+    # servo must compile without one. Duck-typed on purpose.
+    ov = getattr(viewer, 'overlay', None)
+    if ov is not None:
+        ov.set_info(key, left, right)
 
 
 # SERVOING
@@ -29,7 +43,7 @@ def _wrap90(d):
 class PBVSServo:
     # Drives the gripper to a pose derived from the current view of an object.
 
-    def __init__(self, model, data, arm, camera, cam_id,
+    def __init__(self, model, data, arm, world,
                  kp=6.0, ko=6.0, damp=1e-2, dq_max=0.02,
                  perceive_every=15, tol_p=3.0e-3, tol_o=3.0e-2,
                  smooth=1.0, v_max=float('inf'), v_descent=None,
@@ -49,8 +63,9 @@ class PBVSServo:
         self.model = model
         self.data = data
         self.arm = arm
-        self.camera = camera
-        self.cam_id = cam_id
+        # The robot's only view of the world. Everything the servo knows about
+        # the object arrives as a TargetView from here.
+        self.world = world
 
         self.kp = kp                 # translation gain, 1/s
         self.ko = ko                 # rotation gain, 1/s
@@ -145,11 +160,23 @@ class PBVSServo:
         if ov is not None:
             ov.set_control(state)
 
+    def _step_world(self):
+        # Give the world one physics tick. Named so the intent is explicit: the
+        # servo is not driving the object, it is advancing the simulation that
+        # the object lives in. A hardware world would make this a no-op (the
+        # real object moves on its own) or read a fresh sensor frame.
+        step = getattr(self.world, 'step_mover', None)
+        if step is not None:
+            step()
+
     # PERCEPTION
     def observe(self, near=None):
         # Re-observe the object. Keeps the estimate nearest the previous one.
+        #
+        # Reads the world through the boundary only: whatever comes back is a
+        # camera-derived TargetView, with no access to the object's true pose.
         self.obs_try += 1
-        dets = perceive_all(self.model, self.data, self.camera, self.cam_id)
+        dets = self.world.perceive()
         self.last_dets = len(dets)
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
@@ -238,10 +265,10 @@ class PBVSServo:
         return p_des, R_des
 
     def current_pose(self):
-        mujoco.mj_forward(self.model, self.data)
-        p = np.array(self.data.xpos[self.base_id], float)
-        R = np.array(self.data.xmat[self.base_id], float).reshape(3, 3)
-        return p, R
+        # The robot's own end-effector pose, via the boundary. Reading it from
+        # the world rather than from `data` directly is what lets the same
+        # servo run against a real arm, where there is no MuJoCo buffer.
+        return self.world.gripper_pose()
 
     def error(self, p_des, R_des):
         # Pose error: translation vector and rotation vector, base frame.
@@ -282,7 +309,7 @@ class PBVSServo:
     # LOOP
     def servo(self, z_offset, max_iters=1500, viewer=None, estop=None,
               aborted=None, trace=None, v_max=None, check_occlusion=False,
-              mover=None, track=False, stationary_s=None, search=None,
+              track=False, stationary_s=None, search=None,
               track_tol=None, track_tol_rot=None):
         # Servo to the grasp pose at z_offset. Returns (converged, iters, err).
         data, model = self.data, self.model
@@ -471,10 +498,13 @@ class PBVSServo:
             data.ctrl[:ARM_DOF] = q_cmd
             data.ctrl[model.nu - 1] = GRIP_OPEN
 
-            # move the target before stepping, so its velocity applies to this
-            # step; it holds still once the gripper is close enough to commit
-            if mover is not None:
-                mover.step(data, np.array(data.xpos[self.base_id], float))
+            # Advance the world by exactly one physics step, alongside mj_step.
+            # This must happen per physics step, NOT per render sync: the
+            # servo steps physics every iteration but only syncs every
+            # SYNC_STEPS, so driving the object from the sync would move it at
+            # 1/SYNC_STEPS of its real speed. The world owns the motion; the
+            # robot loop only gives it the tick.
+            self._step_world()
 
             mujoco.mj_step(model, data)
 
@@ -493,7 +523,7 @@ class PBVSServo:
 
 
     def _paced_move(self, q, d_cart, v_cart, viewer=None, estop=None,
-                    aborted=None, mover=None, watch=None):
+                    aborted=None, watch=None):
         # arm.move paces on joint distance with a rad/s rate:
         #     steps = dist / rate / dt     (dist in joint rad)
         # so the duration is dist/rate, and the average Cartesian speed is
@@ -507,17 +537,17 @@ class PBVSServo:
                 and dist > 1e-9 and d_cart > 1e-9):
             rate = min(RAPID, dist * float(v_cart) / float(d_cart))
 
-        # The target is stepped by arm.move now (see Arm.mover), so it is not
-        # driven again here. `watch` rides along in the same per-step hook.
-        hook = None
-        if watch is not None:
-            def hook():
+        # The target is driven by the world, not here. The per-step hook does
+        # two things: tick the world's clock (so the cube keeps gliding during
+        # this planned move, which is still physics), and run `watch` if given.
+        def hook():
+            self._step_world()
+            if watch is not None:
                 watch()
         self.arm.move(q, GRIP_OPEN, rate=rate, viewer=viewer, estop=estop,
                       stop=aborted, step_hook=hook)
 
-    def retreat(self, viewer=None, estop=None, aborted=None, v_cart=None,
-                mover=None):
+    def retreat(self, viewer=None, estop=None, aborted=None, v_cart=None):
         # Back straight up in steps until the object is whole in view again.
         # Each step is a planned move, so the retreat itself is open loop; only
         # the verdict comes from the camera. Returns (clear, steps).
@@ -532,7 +562,7 @@ class PBVSServo:
             target = p_cur + np.array([0.0, 0.0, self.retreat_step * j])
             q = self.arm.solve_ik(target, data.qpos[:ARM_DOF], R_target=R_cur)
             self._paced_move(q, self.retreat_step, v_cart, viewer=viewer,
-                             estop=estop, aborted=aborted, mover=mover)
+                             estop=estop, aborted=aborted)
             if aborted is not None and aborted():
                 return False, j
             if (self.observe(near=anchor)
@@ -569,7 +599,7 @@ class PBVSServo:
                  '%.0f mm from commit ref -- abandoning descent' % (d * 1e3))
 
     def commit_open_loop(self, viewer=None, estop=None, aborted=None,
-                         mover=None, watch=None):
+                         watch=None):
         # Drive to the grasp pose from the last unbiased estimate with no further
         # correction, so the jaws cannot re-bias the target on the way in.
         ref = self.ref_p if self.ref_p is not None else self.best_p
@@ -605,7 +635,7 @@ class PBVSServo:
 
         watch_step_ = watch_step if watch else None
         self._paced_move(q, d_cart, self.retreat_v, viewer=viewer, estop=estop,
-                         aborted=stop_now, mover=mover, watch=watch_step_)
+                         aborted=stop_now, watch=watch_step_)
         if self.target_moved:
             return False, 0
         if aborted is not None and aborted():
@@ -614,7 +644,7 @@ class PBVSServo:
 
     def approach(self, standoff=0.10, viewer=None, estop=None, aborted=None,
                  trace=None, coarse=True, max_iters=1500, recover=True,
-                 check_occlusion=True, mover=None, track=None, search=None,
+                 check_occlusion=True, track=None, search=None,
                  stationary_s=None, track_iters=None):
         # Coarse move to the hover pose, then closed-loop hover and descent.
         if self.p_est is None and not self.observe():
@@ -637,7 +667,7 @@ class PBVSServo:
                 ok1, n1, e1 = self.servo(
                     standoff, max_iters=(track_iters or self.track_iters),
                     viewer=viewer, estop=estop, aborted=aborted, trace=trace,
-                    v_max=self.v_max, mover=mover, track=True,
+                    v_max=self.v_max, track=True,
                     stationary_s=stationary_s, search=search)
                 n_done += n1
                 if not ok1:
@@ -646,7 +676,7 @@ class PBVSServo:
                 self.ref_p = np.array(self.p_est, float)
                 self.ref_yaw = float(self.yaw_est)
                 ok_c, n_c = self.commit_open_loop(
-                    viewer=viewer, estop=estop, aborted=aborted, mover=mover,
+                    viewer=viewer, estop=estop, aborted=aborted,
                     watch=self.watch_descent)
                 n_done += n_c
                 if ok_c:
@@ -667,179 +697,32 @@ class PBVSServo:
             self.preposition(standoff, viewer=viewer)
         ok1, n1, e1 = self.servo(standoff, max_iters=max_iters, viewer=viewer,
                                  estop=estop, aborted=aborted, trace=trace,
-                                 v_max=self.v_max, mover=mover)
+                                 v_max=self.v_max)
         if not ok1:
             return False, n1, e1, 0
         # Reference estimate for the open-loop commit. Taken here, while the
         # object is still whole in view: closer in, the jaws bias the fitted
         # centre and the estimate feeds back into the gripper position, so this
-        # is the last unbiased view on the way down. The mover has already
-        # stopped the object by now -- it halts once the gripper is this close.
+        # is the last unbiased view on the way down.
         self.observe(near=self.p_est)
         self.ref_p = np.array(self.p_est, float)
         self.ref_yaw = float(self.yaw_est)
         ok2, n2, e2 = self.servo(0.0, max_iters=max_iters, viewer=viewer,
                                  estop=estop, aborted=aborted, trace=trace,
                                  v_max=self.v_descent,
-                                 check_occlusion=check_occlusion,
-                                 mover=mover)
+                                 check_occlusion=check_occlusion)
         if ok2:
             return True, n1 + n2, e2, n1
         if not (recover and self.occluded):
             return False, n1 + n2, e2, n1
         # the jaws clipped the object on the way down: back off until the view
         # is whole, then commit the grasp open loop from that estimate
-        ok_r, n_r = self.retreat(viewer=viewer, estop=estop, aborted=aborted,
-                                 mover=mover)
+        ok_r, n_r = self.retreat(viewer=viewer, estop=estop, aborted=aborted)
         if not ok_r:
             return False, n1 + n2 + n_r, e2, n1
         ok_c, n_c = self.commit_open_loop(viewer=viewer, estop=estop,
-                                          aborted=aborted, mover=mover)
+                                          aborted=aborted)
         if ok_c:
             self.recovered = True
             return True, n1 + n2 + n_r, 0.0, n1
         return False, n1 + n2 + n_r + n_c, e2, n1
-
-
-# DEMO
-def _try_grasp(model, data, arm, reg, idx):
-    # Close, lift, and report whether the object came with the gripper.
-    arm.close_gripper(1200)
-    p_now = np.array(data.xpos[arm.base_id], float)
-    q = arm.solve_ik(p_now + np.array([0.0, 0.0, 0.15]), data.qpos[:ARM_DOF],
-                     R_target=np.array(data.xmat[arm.base_id],
-                                      float).reshape(3, 3))
-    arm.move(q, GRIP_CLOSED, rate=0.05)
-    lifted = reg.pose(data, idx)[2] > TABLE_HEIGHT + OBJECT_HEIGHT / 2.0
-    arm.open_gripper(600)
-    return lifted
-
-
-def _trial(model, data, home, camera, cam_id, use_servo, shift, seed):
-    # Plan, hover, displace the object, then descend. Measure where we ended.
-    from src.arm import Arm
-    from src.pick_place import ObjectRegistry, spawn_one
-
-    mujoco.mj_resetDataKeyframe(model, data, home)
-    mujoco.mj_forward(model, data)
-    arm = Arm(model, data)
-    reg = ObjectRegistry(model, 8)
-    rng = np.random.default_rng(seed)
-    i = spawn_one(model, data, reg, rng)
-    p0 = np.array(reg.pose(data, i))
-
-    def displace():
-        reg.teleport(data, i, [p0[0] + shift, p0[1], p0[2]],
-                     quat=(1.0, 0.0, 0.0, 0.0))
-        mujoco.mj_forward(model, data)
-
-    if use_servo:
-        s = PBVSServo(model, data, arm, camera, cam_id)
-        s.observe()
-        s.servo(0.10)                    # hover, closed loop
-        displace()
-        s.servo(0.0)                     # descend, re-observing as it goes
-        obs = (s.obs_ok, s.obs_try)
-    else:
-        planner = PBVSServo(model, data, arm, camera, cam_id)
-        planner.observe()                # sees the object BEFORE the move
-        p_hover, R_hover = planner.desired_pose(0.10)
-        q = arm.solve_ik(p_hover, data.qpos[:ARM_DOF], R_target=R_hover)
-        arm.move(q, GRIP_OPEN, rate=0.20)
-        displace()
-        p_grasp, R_grasp = planner.desired_pose(0.0)   # stale by construction
-        q = arm.solve_ik(p_grasp, data.qpos[:ARM_DOF], R_target=R_grasp)
-        arm.move(q, GRIP_OPEN, rate=0.05)
-        obs = (1, 1)
-
-    mujoco.mj_forward(model, data)
-    p_grip = np.array(data.xpos[arm.base_id], float)
-    gap = float(np.linalg.norm(p_grip[:2] - reg.pose(data, i)[:2]))
-    lifted = _try_grasp(model, data, arm, reg, i)
-    return gap, lifted, obs
-
-def main():
-    from src.model_loader import load_robot_model
-    from src.camera import RGBDCamera
-    from src.perception import find_camera
-    from src.arm import Arm
-    from src.pick_place import ObjectRegistry, spawn_one
-
-    model = load_robot_model()
-    if model is None:
-        raise SystemExit('model failed to load')
-
-    home = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home')
-    name, cam_id = find_camera(model)
-    camera = RGBDCamera(model, name, 320, 240)
-
-    print()
-    print('=' * 74)
-    print('POSITION-BASED VISUAL SERVOING')
-    print('=' * 74)
-    print('error is a 3D pose error in the base frame, not an image feature')
-    print('loop: re-observe -> re-derive desired pose -> correct dq -> step')
-    print()
-
-    # Part 1: what the loop looks like
-    data = mujoco.MjData(model)
-    mujoco.mj_resetDataKeyframe(model, data, home)
-    mujoco.mj_forward(model, data)
-    arm = Arm(model, data)
-    reg = ObjectRegistry(model, 8)
-    rng = np.random.default_rng(0)
-    idx = spawn_one(model, data, reg, rng)
-
-    servo = PBVSServo(model, data, arm, camera, cam_id)
-    trace = []
-    ok, iters, err, hover_iters = servo.approach(trace=trace)
-    print('part 1 -- closed-loop approach to a static object')
-    print('  object %d seen at %s' % (idx, np.round(servo.p_est, 4)))
-    print('  %-14s %-14s %s' % ('iteration', 'pos err (m)', 'rot err (rad)'))
-    for e in trace:
-        if e['k'] in (0, 1, 2, 5, 10, 20, 40, 60, 80, 120):
-            print('  %-14d %-14.5f %.5f' % (e['k'], e['err_p'], e['err_o']))
-    print('  converged in %d iterations, final position error %.5f m'
-          % (iters, err))
-    print('  (hover stage took %d of those, descent the rest)' % hover_iters)
-    print()
-
-    # Part 2: the object moves after the arm has committed
-    print('part 2 -- object displaced once the arm has committed to its hover')
-    print('  both modes plan from the object\'s ORIGINAL position; the object')
-    print('  then moves. Open loop descends to its stale target, PBVS')
-    print('  re-observes during the descent and re-derives the target.')
-    print()
-    print('  %-10s %-24s %-24s %s'
-          % ('shift', 'open loop', 'PBVS', 'PBVS re-observations'))
-    print('  %-10s %-24s %-24s' % ('', 'gap / grasp', 'gap / grasp'))
-    for shift in (0.0, 0.015, 0.030, 0.050):
-        g_ol, l_ol, _ = _trial(model, data, home, camera, cam_id, False, shift, 1)
-        g_pb, l_pb, obs = _trial(model, data, home, camera, cam_id, True, shift, 1)
-        print('  %-10s %-24s %-24s %d / %d succeeded'
-              % ('%5.1f mm' % (shift * 1000),
-                 '%5.2f mm  %-6s' % (g_ol * 1000, 'OK' if l_ol else 'MISS'),
-                 '%5.2f mm  %-6s' % (g_pb * 1000, 'OK' if l_pb else 'MISS'),
-                 obs[0], obs[1]))
-    print()
-    print('  Open loop holds the gripper wherever it was aimed before the')
-    print('  object moved, so its gap tracks the shift. PBVS drives the')
-    print('  measured gripper-to-object pose to its tolerance instead, and')
-    print('  the gap stays flat as the shift grows.')
-    print()
-    print('  The re-observation count is the caveat, and it is identical at')
-    print('  every shift (~47 of ~100 attempts), so it is not caused by the')
-    print('  object moving. It is the camera geometry: the depth camera sits')
-    print('  50 mm behind and 30 mm above the jaws, so once the gripper is')
-    print('  directly over the object the object is in its own shadow. The')
-    print('  servo runs on its held estimate for those stretches, which is')
-    print('  why the descent takes longer than the loop gain predicts and')
-    print('  why the largest shift does not fully converge. A standoff-')
-    print('  dependent descend rate, or re-observing while tilted off the')
-    print('  approach axis, would recover it.')
-
-    camera.renderer.close()
-
-
-if __name__ == '__main__':
-    main()
