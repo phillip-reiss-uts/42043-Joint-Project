@@ -44,9 +44,41 @@ It fails if a robot module imports `target_motion`, `pick_place`,
 Note `task.py` is the strictest case: it contains no `mujoco` at all, so the
 task policy — when to search, what a pause means mid-motion, what an
 interrupted search implies — is expressed independently of any simulator.
-`arm.py`, `servo.py`, `observer.py` and `state_space.py` still use `mujoco` for
-kinematics (Jacobians, mass matrix) and will need those calls replaced by the
-real controller's FK when the second `ObjectWorld` is written.
+
+## The kinematics seam
+
+The second boundary is `src/kinematics.py`. FK, the Jacobian, `M(q)`, `g(q)` and
+the servo gains all come from a `Kinematics` provider rather than from direct
+MuJoCo calls in the control layer:
+
+    robot layer                          provider
+    -----------                          --------
+    arm.solve_ik        pose_and_jacobian
+    servo.joint_step    jacobian          MujocoKinematics  (today)
+    observer            mass_gravity, servo_gains
+    state_space         mass_matrix, gravity_torque, servo_gains
+                                          URKinematics      (on hardware)
+
+`MujocoKinematics` wraps the exact calls the project already made, so wiring it
+in is numerically neutral — verified bit-identical for IK, `M(q)`, `g(q)`,
+`A_cl`/`B_cl`, and the observer's `K_ss`/`A_d`/`Q_d`.
+
+The layering test now fails if any robot module calls `mj_kinematics`,
+`mj_jacBody`, `mj_fullM`, `mj_crb`, `mj_rne`, `mj_factorM` or `mj_comPos`
+directly. `mj_step` is exempt: it is the physics-clock question, not a
+kinematics query.
+
+**Two things the seam does not solve.** `mass_matrix`/`gravity_torque` have no
+clean UR3e equivalent — the controller will not hand you an inertia matrix, so a
+real provider needs a pinned or system-identified model. And `servo_gains()`
+returns the *simulated* actuator's stiffness, which is what `A_cl` is built
+from; a real one needs the controller's actual servo dynamics, which UR does not
+publish precisely. Both are flagged in the source.
+
+`arm.move` still steps the simulation directly (`mj_step`), because executing a
+joint trajectory needs a clock. On hardware that call becomes a streamed
+`servoj`/`movej`; the pacing, easing, pause and abort logic around it does not
+change.
 
 ## Setup
 
@@ -106,6 +138,7 @@ its 26 render flags and the digits 0-5 to geom groups, so nothing else is free.
 - `src/config.py` — global flags and constants.
 - `src/controller.py` — joint and LQR controllers, encoder model.
 - `src/model_loader.py` — composes arm + gripper + wrist camera + table.
+- `src/kinematics.py` — **the geometry seam**: FK/Jacobian/M/g providers.
 - `src/observer.py` — observer for the unmeasured joint states.
 - `src/overlay.py` — live viewer overlays (trail, frustum, detections, camera view).
 - `src/perception.py` — clustering, convex hull, calipers, object detection.

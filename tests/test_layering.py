@@ -146,6 +146,30 @@ def check_hardware_signatures():
     return failures
 
 
+def check_kinematics_seam():
+    # FK, the Jacobian, M(q) and g(q) must go through the Kinematics provider
+    # (src/kinematics.py), not through direct MuJoCo calls in the control layer.
+    # This is the seam that lets the same control logic drive a real UR3e.
+    #
+    # `mj_step` is exempt: it is the physics-clock question the driver layer
+    # owns, not a kinematics query.
+    KIN_CALLS = ('mj_kinematics', 'mj_comPos', 'mj_jacBody', 'mj_fullM',
+                 'mj_crb', 'mj_factorM', 'mj_rne')
+    failures = []
+    for name in ROBOT_MODULES:
+        path = os.path.join(SRC, name)
+        with open(path) as fh:
+            lines = fh.readlines()
+        for i, raw in enumerate(lines, 1):
+            code = raw.split('#', 1)[0]
+            for call in KIN_CALLS:
+                if call in code:
+                    failures.append(
+                        '  %s:%d calls %s directly; use a Kinematics provider'
+                        % (name, i, call))
+    return failures
+
+
 def check_world_tick_rate():
     # A physics loop that calls mj_step must also tick the world, or the
     # object's demonstration motion runs at the wrong rate. This bit us once:
@@ -178,6 +202,7 @@ def main():
         ('robot -> object state access', check_calls()),
         ('hardware signature constraints', check_hardware_signatures()),
         ('world tick rate vs physics steps', check_world_tick_rate()),
+        ('kinematics seam (no direct MuJoCo geometry)', check_kinematics_seam()),
     ]
 
     print()

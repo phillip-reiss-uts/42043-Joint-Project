@@ -1,15 +1,16 @@
 # State observer for the arm: estimates joint velocity from position encoders.
+#
+# KINEMATICS: M(q), g(q) and the servo gains come from a Kinematics provider
+# (src/kinematics.py), injected via `kin=`. The default builds a MuJoCo one, so
+# no behaviour changes, but this module no longer imports mujoco at top level.
 
-import mujoco
 import numpy as np
 from scipy.linalg import expm, solve_discrete_are
 
 from src.config import (
     ARM_DOF, ENCODER_NOISE, TAU_NOISE, OBSERVER_RELIN, OBSERVER_SUBSTEPS,
 )
-from src.state_space import (
-    linearise, position_output, servo_gains, forward_minimal, lqr_gain,
-)
+from src.state_space import linearise, position_output, lqr_gain
 
 
 # DISCRETE
@@ -50,7 +51,7 @@ class ArmObserver:
 
     def __init__(self, model, data, q0, sigma_q=ENCODER_NOISE,
                  sigma_tau=TAU_NOISE, relin_steps=OBSERVER_RELIN,
-                 substeps=OBSERVER_SUBSTEPS, lqr_weights=None):
+                 substeps=OBSERVER_SUBSTEPS, lqr_weights=None, kin=None):
         self.model = model
         self.data = data
         self.n = ARM_DOF
@@ -62,10 +63,18 @@ class ArmObserver:
         self.dt = model.opt.timestep
         self.lqr_weights = lqr_weights
 
-        Kp, Kv = servo_gains(model)
+        # Plant model from the injected provider (src/kinematics.py), so the
+        # observer does not reach into the simulator for M(q)/g(q).
+        if kin is None:
+            import mujoco
+            from src.kinematics import MujocoKinematics
+            tool = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY,
+                                     'gripper/base')
+            kin = MujocoKinematics(model, tool, self.n)
+        self.kin = kin
+
+        Kp, Kv = kin.servo_gains()
         self.Kp, self.Kv = Kp, Kv
-        self._scratch = mujoco.MjData(model)
-        self._Mbuf = np.zeros((model.nv, model.nv))   # reused, see _mass_gravity
 
         self.xhat = np.zeros(2 * self.n)
         self.xhat[:self.n] = np.asarray(q0, float)[:self.n]
@@ -78,17 +87,14 @@ class ArmObserver:
 
     # MODEL
     def _mass_gravity(self, q):
-        # M(q) and g(q) for the arm joints, without collision detection.
-        dd = self._scratch
-        dd.qpos[:self.n] = q
-        dd.qvel[:] = 0.0
-        forward_minimal(self.model, dd)
-        mujoco.mj_fullM(self.model, dd, self._Mbuf)
-        return self._Mbuf[:self.n, :self.n], dd.qfrc_bias[:self.n]
+        # M(q) and g(q) for the arm joints, from the provider. One pass for
+        # both, which is why Kinematics.mass_gravity exists.
+        M, g = self.kin.mass_gravity(np.asarray(q, float))
+        return M[:self.n, :self.n], g[:self.n]
 
     def relin(self, q, reset_cov=False):
         # Refresh A_d, B_d, Q_d (and the steady-state gain) for configuration q.
-        lin = linearise(self.model, self._scratch, q)
+        lin = linearise(self.model, self.data, q, kin=self.kin)
         self.A, self.B = lin['A_cl'], lin['B_cl']
         self.Minv = lin['Minv']
         self.A_d, self.B_d = discretise(self.A, self.B, self.dt)

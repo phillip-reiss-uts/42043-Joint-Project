@@ -1,84 +1,104 @@
 # State-space model of the manipulator, with controllability/observability.
+#
+# KINEMATICS: M(q), g(q) and the servo gains come from a Kinematics provider
+# (src/kinematics.py) when one is supplied. The `(model, data)` signatures are
+# still accepted so existing callers keep working; passing a provider is what a
+# hardware build does, and it removes the direct MuJoCo dependency from the
+# linearisation path.
+#
+# NOTE: mass_matrix/gravity_torque have no clean UR3e equivalent. A real
+# implementation needs a pinned or system-identified model; see kinematics.py.
 
-import mujoco
 import numpy as np
 
 from src.config import ARM_DOF
 
 
+def _default_kin(model, data):
+    # Build a MuJoCo provider for the legacy call style.
+    import mujoco
+    from src.kinematics import MujocoKinematics
+    tool = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
+    return MujocoKinematics(model, tool, ARM_DOF)
+
+
+def _resolve(model, data, kin):
+    # Accept either a provider or the legacy (model, data) pair.
+    if kin is not None:
+        return kin
+    return _default_kin(model, data)
+
+
 # PLANT
-def forward_minimal(model, data):
-    # Compute M(q) and qfrc_bias without running collision detection.
-    mujoco.mj_kinematics(model, data)
-    mujoco.mj_comPos(model, data)
-    mujoco.mj_crb(model, data)
-    mujoco.mj_factorM(model, data)
-    mujoco.mj_rne(model, data, 0, data.qfrc_bias)
+#
+# The former forward_minimal() -- mj_kinematics + mj_comPos + mj_crb +
+# mj_factorM + mj_rne -- has moved into MujocoKinematics._forward_dynamics
+# (src/kinematics.py). It had no remaining callers once the mass/gravity
+# queries were routed through the provider, and keeping it here would have left
+# a direct MuJoCo call inside the portable layer.
 
 
-def _set_q(model, data, q):
-    # Put the arm at q with zero velocity and refresh derived quantities.
-    data.qpos[:ARM_DOF] = q
-    data.qvel[:] = 0.0
-    forward_minimal(model, data)
-
-
-def mass_matrix(model, data, q):
+def mass_matrix(model=None, data=None, q=None, kin=None):
     # M(q) for the arm joints, including actuator armature.
-    _set_q(model, data, q)
-    M = np.zeros((model.nv, model.nv))
-    mujoco.mj_fullM(model, data, M)     # (model, data, dst) in this version
-    return M[:ARM_DOF, :ARM_DOF].copy()
+    return _resolve(model, data, kin).mass_matrix(np.asarray(q, float))
 
 
-def gravity_torque(model, data, q):
+def gravity_torque(model=None, data=None, q=None, kin=None):
     # g(q): joint torque required to hold q against gravity.
-    _set_q(model, data, q)
-    return data.qfrc_bias[:ARM_DOF].copy()
+    return _resolve(model, data, kin).gravity_torque(np.asarray(q, float))
 
 
-def gravity_gradient(model, data, q, h=1e-6):
+def gravity_gradient(q, kin=None, h=1e-6, model=None, data=None):
     # G = dg/dq, by central differences on the gravity torque.
+    k = _resolve(model, data, kin)
     G = np.zeros((ARM_DOF, ARM_DOF))
     for j in range(ARM_DOF):
         qp = np.array(q, float)
         qm = np.array(q, float)
         qp[j] += h
         qm[j] -= h
-        G[:, j] = (gravity_torque(model, data, qp)
-                   - gravity_torque(model, data, qm)) / (2.0 * h)
+        G[:, j] = (k.gravity_torque(qp) - k.gravity_torque(qm)) / (2.0 * h)
     return G
 
 
-def servo_gains(model):
-    # Per-joint (Kp, Kv) of MuJoCo's position servos.
-    Kp = np.array([model.actuator_gainprm[i][0] for i in range(ARM_DOF)])
-    Kv = np.array([-model.actuator_biasprm[i][2] for i in range(ARM_DOF)])
-    return Kp, Kv
+def servo_gains(model=None, kin=None):
+    # Per-joint (Kp, Kv). From the provider when available, so a hardware
+    # implementation can supply the real controller's stiffness.
+    if kin is not None:
+        return kin.servo_gains()
+    return _default_kin(model, None).servo_gains()
 
 
-def linearise(model, data, q0):
+def linearise(model, data, q0, kin=None):
     # Linearise about the equilibrium (q = q0, q' = 0).
+    #
+    # The algebra below is pure numpy; only the plant quantities M, G, g and
+    # the servo gains come from the provider, so a hardware build can linearise
+    # around a real controller's model without changing this function.
+    k = _resolve(model, data, kin)
     q0 = np.asarray(q0, float)[:ARM_DOF]
     n = ARM_DOF
     Z, I = np.zeros((n, n)), np.eye(n)
 
-    M = mass_matrix(model, data, q0)
-    G = gravity_gradient(model, data, q0)
+    M = k.mass_matrix(q0)
+    G = gravity_gradient(q0, kin=k)
     Minv = np.linalg.inv(M)
-    Kp, Kv = servo_gains(model)
+    Kp, Kv = k.servo_gains()
     KP, KV = np.diag(Kp), np.diag(Kv)
+    g0 = k.gravity_torque(q0)
 
     # torque input, referred to the gravity trim g(q0)
     A_tau = np.block([[Z, I], [-Minv @ G, Z]])
     B_tau = np.vstack([Z, Minv])
 
-    # position-command input (what the simulator does)
+    # position-command input. NOTE: Kp/Kv describe the *simulated* position
+    # servo. On hardware these come from the real controller (see
+    # MujocoKinematics.servo_gains), so A_cl changes meaning there.
     A_cl = np.block([[Z, I], [-Minv @ (KP + G), -Minv @ KV]])
     B_cl = np.vstack([Z, Minv @ KP])
 
-    return dict(q0=q0, M=M, G=G, Kp=Kp, Kv=Kv, Minv=Minv, g0=gravity_torque(
-        model, data, q0), A_tau=A_tau, B_tau=B_tau, A_cl=A_cl, B_cl=B_cl)
+    return dict(q0=q0, M=M, G=G, Kp=Kp, Kv=Kv, Minv=Minv, g0=g0,
+                A_tau=A_tau, B_tau=B_tau, A_cl=A_cl, B_cl=B_cl)
 
 
 # STRUCTURAL PROPERTIES

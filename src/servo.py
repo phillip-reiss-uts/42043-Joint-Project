@@ -117,8 +117,8 @@ class PBVSServo:
                           else float(retreat_v))
 
         self.base_id = arm.base_id
-        self.jacp = np.zeros((3, model.nv))
-        self.jacr = np.zeros((3, model.nv))
+        # Jacobians come from arm.kin (see src/kinematics.py); the servo no
+        # longer needs its own MuJoCo scratch buffers.
 
         # held visual estimate, in world frame
         self.p_est = None
@@ -283,9 +283,9 @@ class PBVSServo:
     # LAW
     def joint_step(self, err_p, err_o, v_max=None):
         # One damped-least-squares joint increment for this pose error.
-        mujoco.mj_jacBody(self.model, self.data, self.jacp, self.jacr,
-                          self.base_id)
-        J = np.vstack([self.jacp[:, :ARM_DOF], self.jacr[:, :ARM_DOF]])
+        # The Jacobian comes from the arm's Kinematics provider, so this law is
+        # the same on a simulated arm and a real one.
+        J = self.arm.kin.jacobian(self.data.qpos[:ARM_DOF])
         v = np.concatenate([self.kp * err_p, self.ko * err_o])   # m/s, rad/s
         # Cap the commanded twist. The law asks for kp*err outright, which is
         # metre-per-second scale at the start of an approach, and dq_max does

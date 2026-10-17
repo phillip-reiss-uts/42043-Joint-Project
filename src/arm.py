@@ -8,6 +8,14 @@
 # The `on_step` callback replaces the old `viewer=` argument so that this
 # module no longer imports the overlay: on hardware there is no viewer, and the
 # trajectory executor must compile without one. `main.py` passes viewer.sync.
+#
+# KINEMATICS: FK and the Jacobian come from a `Kinematics` provider (see
+# src/kinematics.py), not from a direct MuJoCo call. That is the same seam as
+# ObjectWorld: on a real UR3e the provider asks the controller instead, and this
+# module does not change. `model`/`data` are still held because the trajectory
+# executor steps the simulation; that is the remaining simulator tie, and it is
+# the "who owns the clock" question the real driver layer has to answer.
+# tests/test_layering.py allows `mujoco` here only for that reason.
 
 import mujoco
 import numpy as np
@@ -18,14 +26,20 @@ from src.config import (
     SYNC_STEPS,
     GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
 )
+from src.kinematics import Kinematics, MujocoKinematics
 
 
 class Arm:
-    def __init__(self, model, data):
+    def __init__(self, model, data, kinematics=None):
         self.model = model
         self.data = data
         self.base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
         self.grip_act = model.nu - 1          # fingers_actuator
+
+        # Robot geometry (FK, Jacobian, mass/gravity). Injected so the control
+        # layer does not reach into the simulator directly; defaults to the
+        # MuJoCo implementation, which reproduces the previous behaviour.
+        self.kin = kinematics or MujocoKinematics(model, self.base_id, ARM_DOF)
 
         # Optional closed loop on an estimated state (see controller.py).
         self.observer = None
@@ -83,27 +97,25 @@ class Arm:
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,
                  gain_p=0.5, gain_o=0.5, damp=1e-2, max_joint=3.0):
         # Damped-least-squares IK for gripper/base -- position AND orientation.
-        model, base_id = self.model, self.base_id
+        #
+        # The solver is pure numpy: FK and the Jacobian come from the injected
+        # Kinematics provider. On hardware that provider asks the UR3e
+        # controller for the same two quantities, so this loop is unchanged.
         target = np.asarray(target, float)
-
-        d = mujoco.MjData(model)
-        mujoco.mj_resetDataKeyframe(
-            model, d, mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home'))
-
         q_arm = np.array(q_init[:ARM_DOF], float)
-        jacp = np.zeros((3, model.nv))
-        jacr = np.zeros((3, model.nv))
+
+        # `pose_and_jacobian` when available: one FK pass per iteration instead
+        # of two. Falls back to the narrow interface otherwise.
+        fast = getattr(self.kin, 'pose_and_jacobian', None)
 
         for _ in range(iters):
-            d.qpos[:ARM_DOF] = q_arm
-            # Only the kinematics and comPos stages are needed for xpos/xmat and
-            # for mj_jacBody. The full mj_forward costs ~5x more per iteration
-            # and this runs up to 600 times per solve.
-            mujoco.mj_kinematics(model, d)
-            mujoco.mj_comPos(model, d)
+            if fast is not None:
+                p, R, J = fast(q_arm)
+            else:
+                p, R = self.kin.pose(q_arm)
+                J = self.kin.jacobian(q_arm)
 
-            err_p = target - np.array(d.xpos[base_id])
-            R = np.array(d.xmat[base_id]).reshape(3, 3)
+            err_p = target - p
             eR = R_target @ R.T
             err_o = np.array([eR[2, 1] - eR[1, 2],
                               eR[0, 2] - eR[2, 0],
@@ -112,31 +124,32 @@ class Arm:
             if np.linalg.norm(err_p) < 1e-5 and np.linalg.norm(err_o) < 1e-6:
                 break
 
-            mujoco.mj_jacBody(model, d, jacp, jacr, base_id)
-            J = np.vstack([jacp[:, :ARM_DOF], jacr[:, :ARM_DOF]])
             e = np.concatenate([gain_p * err_p, gain_o * err_o])
             dq = J.T @ np.linalg.solve(J @ J.T + damp * np.eye(6), e)
             q_arm = np.clip(q_arm + dq, -max_joint, max_joint)
 
-        q_full = d.qpos.copy()
+        # Carry the non-arm joints (gripper fingers) through untouched, as
+        # before: callers pass the full qpos and expect it back.
+        q_full = np.array(q_init, float).copy()
         q_full[:ARM_DOF] = q_arm
         return q_full
 
     def verify_ik(self):
         # Self-test: drive IK to a known target and report position + orientation.
-        home = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, 'home')
+        # Uses the injected kinematics, so the check exercises the same provider
+        # the solver does.
         d = mujoco.MjData(self.model)
-        mujoco.mj_resetDataKeyframe(self.model, d, home)
+        mujoco.mj_resetDataKeyframe(
+            self.model, d,
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, 'home'))
         mujoco.mj_forward(self.model, d)
 
         target = np.array([-0.30, 0.45, 0.30])
         q = self.solve_ik(target, d.qpos.copy())
 
-        d2 = mujoco.MjData(self.model)
-        d2.qpos[:] = q
-        mujoco.mj_forward(self.model, d2)
-        pos_err = np.linalg.norm(np.array(d2.xpos[self.base_id]) - target)
-        axis = np.array(d2.xmat[self.base_id]).reshape(3, 3)[:, 2]
+        p, R = self.kin.pose(q[:ARM_DOF])
+        pos_err = np.linalg.norm(p - target)
+        axis = R[:, 2]
         tilt = np.degrees(np.arccos(np.clip(-axis[2], -1, 1)))
         print(f'[IK-CHECK] pos_err={pos_err:.5f} m  tilt={tilt:.2f} deg  '
               f'axis={np.round(axis, 4)}')
