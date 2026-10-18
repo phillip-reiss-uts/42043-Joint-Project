@@ -1,13 +1,37 @@
-# Core simulation
+# Vision-guided pick: simulation
+#
+# Verified on macOS 13.7.8 (x86_64) with Python 3.12.10:
+#     mujoco 3.10.0, numpy 2.5.2, scipy 1.18.1, matplotlib 3.11.1
+#
+# Install with:
+#     python -m pip install -r requirements.txt
+
+# ---- core simulation -------------------------------------------------------
+# mujoco >= 3.0 for the passive viewer and MjSpec; 3.10 is what was tested.
 mujoco>=3.0.0
+# Supplies the Robotiq 2F-85 gripper MJCF. The UR3e itself is vendored under
+# models/ur3e/ (menagerie has no UR3e), so this is only needed for the gripper.
 mujoco-menagerie>=0.1.0
 
-# Math libraries
+# ---- maths -----------------------------------------------------------------
 numpy>=1.24.0
+# expm for the discrete observer, solve_discrete_are for the LQR design.
+scipy>=1.10.0
+# run_tests.py plots; nothing on the control path needs it.
 matplotlib>=3.11.1
-scipy>=1.10.0          # expm + solve_discrete_are, for the state observer
 
-# Inverse kinematics
-# mink>=1.0.0          # LEFTOVER: unused. arm.solve_ik uses a damped
-#                      # least-squares solver; mink's QP was tried and
-#                      # rejected (it finds *a* solution, not the nearest).
+# ---- hardware only (NOT installed here, not needed for simulation) ----------
+# Listed for the eventual port. See "Porting to hardware" in README.md.
+#
+# ur_rtde            # RTDE: servoj/movej for URBackend, joint readback
+# pymodbus           # Modbus: Robotiq 2F-85 registers
+# pyrealsense2       # D435i depth stream for RealObjectWorld
+#
+# pyrealsense2 has NO wheel for Python 3.12 on macOS, so src/world_real.py
+# imports it lazily and falls back to FakeDepthSource. On Linux, or with an
+# older interpreter, install it normally. Alternatively install the
+# librealsense SDK (Homebrew on Intel macOS) and use its own Python bindings.
+
+# ---- deliberately NOT used -------------------------------------------------
+# mink: tried for IK and rejected. arm.solve_ik uses damped least squares, which
+# converges to the solution nearest the seed; mink's QP finds *a* solution.
