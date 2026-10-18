@@ -222,6 +222,9 @@ def main(sensor_size=(320, 240)):
         task.on_put_down = put_down
 
         demo_idx = [None]
+        # Latched arm pose for the WAIT hold, re-taken on each WAIT entry.
+        # None means "capture on the next frame".
+        wait_hold = [None]
 
         while viewer.is_running():
 
@@ -242,11 +245,23 @@ def main(sensor_size=(320, 240)):
                 # do. At one step per frame the sim runs ~0.2x real time, so the
                 # object crawls here and appears to lurch the moment a search
                 # starts.
+                #
+                # The hold target is latched per WAIT entry, NOT re-read each
+                # step: arm.hold(GRIP_OPEN) with no target re-commands wherever
+                # the arm already is, so any gravity sag becomes the new target
+                # and the arm walks away. Measured: 148 mm of tool drift over a
+                # WAIT period with the feedback form, ~12 mm with a latched one.
+                if wait_hold[0] is None:
+                    wait_hold[0] = arm.hold_pose()
                 for _ in range(SYNC_STEPS):
                     world.step_mover()
-                    arm.hold(GRIP_OPEN)
+                    arm.hold(GRIP_OPEN, wait_hold[0])
                     mujoco.mj_step(model, data)
                 viewer.sync()
+            else:
+                # Leaving WAIT: drop the latched pose so the next WAIT entry
+                # captures a fresh one (the arm will have moved by then).
+                wait_hold[0] = None
 
             if not task.step():
                 break

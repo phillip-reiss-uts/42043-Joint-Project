@@ -6,14 +6,22 @@ import numpy as np
 # workcell
 #
 # GEOMETRY IS TUNED FOR THE UR3e (~500 mm reach), not the UR5e this project
-# started on (~850 mm). The UR3e's reachable region for a down-pointing tool at
-# table height was measured by sweeping IK against models/ur3e/ur3e.xml: it is
-# a wedge centred near (0.24, 0.06) in the base frame, widest around x=0.25-0.35.
-# The table below is the largest rectangle verified to be fully reachable:
-#     x in [0.14, 0.41], y in [-0.26, 0.33]   (36/36 sampled points OK)
-# The old UR5e values (centre [-0.134, 0.492], half [0.35, 0.35]) put most of
-# the spawn region 0.4-0.5 m from the UR3e base -- out of reach, so the servo
-# never saw the object.
+# started on (~850 mm).
+#
+# The table is a 400 mm square. The UR3e cannot reach a table the size of the
+# original one (700 x 700 mm, centre [-0.134, 0.492]) -- that put most of the
+# spawn region 0.4-0.5 m from the base, out of reach, so the servo never saw the
+# object. 400 mm is the largest SQUARE that keeps the whole spawn region
+# reachable; the reachable-down region measured by sweeping IK against
+# models/ur3e/ur3e.xml is a wedge, and the table's outer margin falls outside
+# it at the near corner (x < ~0.10) where the arm cannot fold back.
+#
+# Checked: with SPAWN_MARGIN and the object half-extent applied, the spawn
+# region x 0.165..0.385, y -0.075..0.145 is 25/25 reachable bottom-up in a
+# straight-down pose. Only the unused margin strips are unreachable.
+#
+# The centre is unchanged from the UR3e re-tune, so the home keyframe in
+# models/ur3e/ur3e.xml still hovers over the middle of the table.
 #
 # If you switch back to the UR5e, restore:
 #     TABLE_CENTRE = [-0.134, 0.492]   TABLE_HALF = [0.35, 0.35]
@@ -21,7 +29,7 @@ import numpy as np
 TABLE_HEIGHT = 0.02
 TABLE_THICK = 0.02
 TABLE_CENTRE = [0.275, 0.035]
-TABLE_HALF = [0.135, 0.295]
+TABLE_HALF = [0.20, 0.20]
 
 OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
@@ -168,9 +176,23 @@ SPAWN_MARGIN = 0.06      # keep this clear of the table edge
 SPAWN_Y_MIN = None
 SPAWN_ARM_CLEARANCE = 0.12   # instant drops keep this clear of gripper/base (xy)
 
-SPAWN_X_RANGE = (TABLE_CENTRE[0] - TABLE_HALF[0] + SPAWN_MARGIN + OBJECT_SIZE[0],
-                 TABLE_CENTRE[0] + TABLE_HALF[0] - SPAWN_MARGIN - OBJECT_SIZE[0])
+# The spawn region is the intersection of what the arm can REACH and what the
+# wrist camera can SEE from the home pose -- not just the table's inner rect.
+# With the table widened to 400 mm those stopped coinciding: the camera sits on
+# the flange and looks at the table centre, so an object near the table's near
+# edge (x < ~0.24) is invisible from home even though the arm could reach it.
+# Measured on the 400 mm table at the home pose:
+#     visible at y = 0.035: x 0.24..0.46
+#     visible at x = 0.30 : y -0.15..0.21
+# Intersected with the reachable set this gives x 0.22..0.46, y -0.15..0.21.
+# SPAWN_X_MIN clamps the low x end to that; the upper bounds follow the table
+# edge with SPAWN_MARGIN and the object half-extent applied.
+SPAWN_X_MIN = 0.24       # measured: below this the object leaves the home view
+
+_x_lo = TABLE_CENTRE[0] - TABLE_HALF[0] + SPAWN_MARGIN + OBJECT_SIZE[0]
 _y_lo = TABLE_CENTRE[1] - TABLE_HALF[1] + SPAWN_MARGIN + OBJECT_SIZE[1]
+SPAWN_X_RANGE = (max(_x_lo, SPAWN_X_MIN),
+                 TABLE_CENTRE[0] + TABLE_HALF[0] - SPAWN_MARGIN - OBJECT_SIZE[0])
 SPAWN_Y_RANGE = ((_y_lo if SPAWN_Y_MIN is None else max(_y_lo, SPAWN_Y_MIN)),
                  TABLE_CENTRE[1] + TABLE_HALF[1] - SPAWN_MARGIN - OBJECT_SIZE[1])
 

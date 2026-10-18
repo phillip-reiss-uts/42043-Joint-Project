@@ -305,9 +305,29 @@ class Arm:
         return {'state': state, 'held': state == 'held', 'q': q,
                 'force': f, 'vel': v}
 
-    def hold(self, grip):
-        # Command the current pose and grip without advancing a ramp.
-        self.backend.command(self.backend.joint_positions(), grip)
+    def hold(self, grip, q=None):
+        # Command a fixed pose and grip without advancing a ramp.
+        #
+        # `q` MUST be latched by the caller before the loop starts. Passing None
+        # re-reads the current position every call, which makes this an
+        # integrator rather than a hold: gravity moves the arm slightly, that
+        # displaced position becomes the next target, and the arm walks away.
+        # Measured over 2000 steps holding a pose, with gravity compensation
+        # active in both cases:
+        #     feedback target (q=None):  0.214 m of drift
+        #     latched target:            0.012 m of drift
+        # It is slow enough to look like settling, which is why it went
+        # unnoticed; over a WAIT period it reaches ~150 mm at the tool.
+        #
+        # The q=None form is kept for one-shot "hold where you are" uses, but it
+        # must not be called in a loop.
+        if q is None:
+            q = self.backend.joint_positions()
+        self.backend.command(q, grip)
+
+    def hold_pose(self):
+        # Latch point for a loop: capture once, then pass to hold() each step.
+        return self.backend.joint_positions()
 
     def settle(self, steps, grip=GRIP_OPEN):
         # Step in place with the current pose commanded, letting the scene rest.

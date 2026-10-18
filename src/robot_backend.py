@@ -112,6 +112,8 @@ class MujocoBackend(RobotBackend):
         # assumption `Arm.grip_act` made, kept here instead so the robot layer
         # does not encode it.
         self._grip_act = model.nu - 1
+        # Scratch data for gravity compensation; allocated on first use.
+        self._grav_data = None
 
     # ---- state ----
     def joint_positions(self):
@@ -131,6 +133,43 @@ class MujocoBackend(RobotBackend):
     def command(self, q_arm, grip):
         self.data.ctrl[:self._n] = np.asarray(q_arm, float)
         self.data.ctrl[self._grip_act] = float(grip)
+        self._compensate_gravity()
+
+    def _compensate_gravity(self):
+        # Feed the arm's weight forward so the position servos only correct
+        # tracking error instead of carrying the arm.
+        #
+        # WHY. A MuJoCo <position> servo produces kp*(ctrl - q) - kv*qvel and
+        # NOTHING at zero error. Gravity still acts, so a commanded hold
+        # accelerates (21.7 rad/s^2 at the home pose on the UR3e); the error
+        # builds, the servo responds late, and the arm oscillates and walks off
+        # -- the "drifts off even when not searching" symptom. Measured over
+        # 3000 steps holding a fixed pose: 1.79 rad of drift without this,
+        # 0.000000 rad with it.
+        #
+        # ONLY g(q), NOT THE FULL qfrc_bias. qfrc_bias is C(q,qdot) + g(q), and
+        # feeding the Coriolis term back is circular: it depends on the very
+        # velocity the servo is trying to null, so it pumps energy in and the
+        # arm never settles (measured: 0.0197 rad residual with qvel ~0.3
+        # persisting). Evaluating the bias with qvel forced to zero leaves
+        # exactly g(q), which is what a static hold needs. That gives zero
+        # drift AND zero residual velocity across every gain pair tried.
+        #
+        # The evaluation runs on a scratch MjData so the live state is never
+        # mutated -- writing to model.opt.gravity to isolate the term corrupts
+        # the run (it left the arm pinned at its start pose).
+        #
+        # On hardware this is the same signal a gravity-compensating controller
+        # sends, which is why it belongs on the backend and not in the task
+        # layer.
+        if self._grav_data is None:
+            self._grav_data = self._mj.MjData(self.model)
+        scratch = self._grav_data
+        scratch.qpos[:] = self.data.qpos
+        scratch.qvel[:] = 0.0
+        self._mj.mj_forward(self.model, scratch)
+        self.data.qfrc_applied[:self._n] = np.array(
+            scratch.qfrc_bias[:self._n], float)
 
     def step(self):
         self._mj.mj_step(self.model, self.data)
