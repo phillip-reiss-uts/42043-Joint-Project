@@ -197,6 +197,9 @@ below the flange the tilt was amplified into lateral error at the grasp point:
 | pad-centre error | 6.6 mm | **3.7 mm** |
 | open-loop commit, pad error | 12.9 mm | **2.4 mm** |
 
+Those figures were taken with the Euler integrator; the `implicitfast` setting
+described below removes the remaining ~2 mm of hold error.
+
 Two details that matter:
 
 - **Only `g(q)`, not the full `qfrc_bias`.** `qfrc_bias` is `C(q,qdot) + g(q)`,
@@ -211,6 +214,20 @@ its controller needs, exactly once.** A `URBackend` streams joint targets over
 RTDE and the UR controller does the compensating — it must not add a second
 term. `tests/test_hardware.py --sim` now enforces this: `body.gravcomp` must be
 zero and `qfrc_applied` must equal `g(q)` immediately after a command.
+
+## Integration — `src/model_loader.py`
+
+MuJoCo's default Euler integrator evaluates the actuator's velocity term
+explicitly. At this model's 2 ms timestep that term is past the explicit
+stability limit on the wrists — `Kv*dt/M` is ~3.9 against a limit of 2 — so a
+commanded hold chattered at ~0.1 rad/s and sat 2–4 mm off its command.
+`model_loader` selects `implicitfast`, which integrates that term: a 2 s hold
+now reads 0.000 rad/s and <0.1 mm, and the open-loop grasp commit lands on its
+commanded pose instead of ~2 mm off.
+
+Simulation-only. On hardware the controller owns its own integration, so this
+choice has no hardware equivalent. `tests/test_hardware.py --sim` pins it with
+a sub-millimetre hold check.
 
 ## Turning the integral and damping on
 
@@ -379,9 +396,8 @@ points the tool sideways).
   level. Hover xy error is **0.4–3.0 mm** against ground truth.
 - Detection: the wrist camera locates the cube to ~1.3 mm.
 - Gravity compensation: a single feedforward term in the simulation backend,
-  matching what a UR controller does internally. A commanded hold sits within
-  ~4 mm of its command (limited by the servo chatter below, not by the model).
-  See *Gravity compensation*.
+  matching what a UR controller does internally. A commanded hold settles to
+  **<0.1 mm** with no chatter (see *Gravity compensation* and *Integration*).
 - Put-down: the pickup key toggles grasp → release → grasp, with the cube set
   back down gently at its own xy.
 - The grasp is verified from the gripper's own registers, not assumed.
@@ -389,24 +405,27 @@ points the tool sideways).
 
 ## Known limitation: grasp accuracy
 
-**5 of 6** grasps succeed in a 6-trial headless run after the gravity fix, with
-a mean gap of **3.8 mm** between the gripper and the cube (previously 5 of 10 at
-5.7 mm). The remaining miss is a lateral error built up on the way down, not a
-perception error:
+**8 of 10** grasps succeed in a 10-trial headless run, with a mean gap of
+**3.2 mm** between the gripper and the cube (the baseline was 5 of 10 at
+5.7 mm).
 
-    at hover       1.5 mm mean xy error
-    at grasp       3.8 mm mean xy error
-
-Two mechanisms remain, both smaller than the double compensation that used to
-dominate:
+The endpoint is no longer a contributor: with the integrator fixed, the
+open-loop commit lands on its commanded pose to 0.01 mm, so the residual gap is
+the vision estimate at commit time. The two remaining misses happen at 4-4.5 mm
+of gap, well inside the jaws' ~12.5 mm clearance per side, so they are not a
+lateral-offset failure. They come from contact on the way down:
 
 - The descent interpolates the **joint** vector to the IK solution. A straight
-  line in joint space is not a straight line for the tool: measured pad swing is
-  up to 33 mm along the path, and the pads cross the cube's top face ~10 mm
-  off-centre (8 mm with a Cartesian path).
-- The simulated position servo runs at 500 Hz with `Kv*dt/M > 2` on the wrist
-  joints, so it chatters at ~0.01 rad. That sets a 3-4 mm floor on the hold and
-  is a simulation artifact, not something to port.
+  line in joint space is not a straight line for the tool: the pads swing up to
+  33 mm along the path and cross the cube's top face ~7 mm off-centre (0.0 mm
+  with a Cartesian path). Any contact there nudges the cube before the jaws
+  close.
+- The commit gate is loose in rotation: `SERVO_TRACK_TOL_ROT` is 0.15 rad
+  (8.6°), so the jaws can be rotated relative to the cube and close on its
+  corners.
+
+The next step is a Cartesian commit descent, which removes the swing; tightening
+the rotation gate is cheap and complementary.
 
 A ~17 mm lateral offset on a 60 mm cube puts the pads against its side on the
 way down; they deflect and close on air (`jaw_q` reads 0.785, fully closed, in

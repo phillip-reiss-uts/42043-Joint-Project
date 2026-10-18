@@ -200,7 +200,21 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
         print(f"[ERROR] Failed to compile composed model: {e}")
         return None
 
-    # 10. Gripper squeeze force limit.
+    # 10. Integrator.
+    #
+    # MuJoCo's default Euler integrator evaluates the actuator's velocity term
+    # explicitly. At this model's 2 ms timestep that term is past the explicit
+    # stability limit on the wrist joints -- Kv*dt/M is about 3.9 against a limit
+    # of 2 -- so a commanded hold chattered at ~0.1 rad/s and sat 2-4 mm off its
+    # command. implicitfast integrates that term (and the Coriolis terms), which
+    # removes the chatter exactly: measured 0.000 rad/s and 0.0 mm on a 2 s hold,
+    # and the open-loop grasp commit lands on its target instead of 2 mm off.
+    #
+    # This is a SIMULATION-only choice. On hardware the controller owns its own
+    # integration, and the servo gains are identified from it.
+    model.opt.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
+
+    # 11. Gripper squeeze force limit.
     grip_act = model.nu - 1
     model.actuator_forcerange[grip_act] = GRIP_FORCE_RANGE
     print(f"[INFO] gripper force range = {GRIP_FORCE_RANGE} N")

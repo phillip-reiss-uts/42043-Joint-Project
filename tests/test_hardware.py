@@ -329,6 +329,41 @@ def run_sim(h):
               % (100 * (s[:, 0].max() - s[:, 0].min()) / s[:, 0].mean(),
                  100 * (s[:, 1].max() - s[:, 1].min()) / s[:, 1].mean()))
 
+    with h.check('SERVO', 'commanded hold settles to sub-millimetre',
+                 'The default Euler integrator evaluates the actuator damping\n'
+                 'term explicitly. On this model Kv*dt/M is ~3.9 on the wrists\n'
+                 'against an explicit-stability limit of 2, so the hold chatters\n'
+                 '~0.1 rad/s and sits 2-4 mm off its command. model_loader selects\n'
+                 'implicitfast; if that is reverted this check fails.') as r:
+        from src.robot_backend_mujoco import MujocoBackend
+        b = MujocoBackend(model, data, ARM_DOF)
+        q_cmd = np.array(data.qpos[:ARM_DOF], float)
+        p_cmd, _ = mj.pose(q_cmd)
+        q_save = np.array(data.qpos, float)
+        v_save = np.array(data.qvel, float)
+        t_save = float(data.time)
+        for _ in range(3000):
+            b.command(q_cmd, 0.0)
+            b.step()
+        ps = []
+        for _ in range(500):
+            b.command(q_cmd, 0.0)
+            b.step()
+            p_now, _ = mj.pose(data.qpos[:ARM_DOF])
+            ps.append(p_now)
+        ps = np.array(ps)
+        err = float(np.linalg.norm(ps.mean(axis=0) - p_cmd))
+        jitter = float(np.max(np.linalg.norm(ps - ps.mean(axis=0), axis=1)))
+        peak_v = float(np.abs(data.qvel[:ARM_DOF]).max())
+        data.qpos[:] = q_save
+        data.qvel[:] = v_save
+        data.time = t_save
+        mujoco.mj_forward(model, data)
+        r.set(err < 0.5e-3 and jitter < 0.5e-3,
+              'integrator = %d   hold error %.3f mm   jitter %.3f mm\n'
+              'peak |qvel| during hold = %.1e rad/s'
+              % (int(model.opt.integrator), err * 1e3, jitter * 1e3, peak_v))
+
     # ---------------- GRIPPER ----------------
     with h.check('GRIPPER', 'gripper actuator identified',
                  'The code assumes the gripper is the last actuator in the\n'
