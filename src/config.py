@@ -40,14 +40,23 @@ POOL_SIZE = 1
 INITIAL_OBJECTS = 0       # spawned when the scene is reset
 MIN_OBJECT_SEPARATION = 0.10   # centre-to-centre; keeps clusters from merging
 
-# chute: sunk bin at the table's outer edge, nearest the robot's reach limit.
-# Sized as a strip along the far edge of the re-tuned table; the drop point is
-# kept inside the reachable rectangle so the arm can actually get there.
-CHUTE_X = (0.30, 0.41)          # x extent; left edge inside the table
-CHUTE_Y = (-0.26, 0.33)         # y extent; runs the table's full depth
-CHUTE_FLOOR_Z = 0.02 - 0.35     # floor 35 cm below the tabletop
-CHUTE_WALL_THICK = 0.02         # wall thickness, half-extent in x/y
-CHUTE_WALL_HEIGHT = 0.35        # walls rise to tabletop height
+# NO CHUTE. There is one flat table and nothing else: a picked object is set
+# back down on the table, and the table is never cleared into a bin. The
+# original design had a sunk chute cut into the table's far edge, but it was
+# a simulation-only convenience -- a real cell has no such bin, and dropping
+# into a hole is a different motion from placing.
+#
+# The removal took CHUTE_X/CHUTE_Y/CHUTE_FLOOR_Z/CHUTE_WALL_THICK/
+# CHUTE_WALL_HEIGHT with it, plus the chute geoms in the MJCF and the
+# despawn-into-chute bookkeeping. DROP_RADIUS survives; it now scatters the
+# release point across a patch of tabletop.
+#
+# If a bin is ever wanted again, put it OUTSIDE the table footprint and give
+# the drop its own reachability check -- the old one sat inside the table and
+# half its scatter radius fell off the edge.
+
+# where a released object is put down, relative to the table
+PLACE_EDGE_MARGIN = 0.10   # keep this clear of the far edge so it stays in view
 
 # pool parking pose: far below the scene; objects are frozen here until spawned
 PARK_POS = [5.0, 5.0, -0.6]
@@ -302,6 +311,38 @@ KF_GATE = 3.0                # innovation gate, sigmas; 0 disables
 # Aim ahead of the estimate by this long to cancel the servo's own lag. Only
 # has an effect once the filter sees a velocity, so a still object is unaffected.
 SERVO_LEAD_S = 0.15
+
+# ---- integral + damping on the pose error ----
+#
+# BOTH DEFAULT TO OFF, and should stay off unless there is a specific reason.
+#
+# They were added while chasing a sag-and-jerk that turned out to be a bug in
+# servo(): the commanded joint vector was re-seeded from data.qpos on every
+# call, so chunking the loop ratcheted the command downhill (measured: 600
+# calls of 1 iteration drifted 102 mm; one call of 600 iterations drifted 1.8
+# mm). With that fixed, both terms measurably HURT:
+#
+#   ki    damp_gain   reversals   qvel_sd   z_err
+#   0.0   0.0         9           0.0023    0.05 mm   <- best, used
+#   0.5   0.0         4           0.0034    0.16 mm
+#   0.0   1.0         9           0.0038    0.19 mm
+#   0.5   1.0         5           0.0043    0.17 mm
+#
+# (Reversals are noisy at this scale -- qvel_sd ~0.003 rad/s is near the noise
+# floor -- but the error column is unambiguous: the integral raises it 3x,
+# because it integrates against a bias that is no longer there.)
+#
+# They are kept, defaulted off, because on hardware the gravity feedforward is
+# approximate rather than exact, and a standing bias is exactly what the I term
+# is for. Re-enable and re-tune then; do not assume these numbers transfer.
+SERVO_KI = 0.0               # integral gain on the Cartesian pose error
+SERVO_KI_NEAR_M = 0.05
+SERVO_KI_NEAR_RAD = 0.30
+SERVO_KI_MAX_M = 0.02
+SERVO_KI_MAX_RAD = 0.20
+SERVO_DAMP_GAIN = 0.0        # joint-space D; 0 disables
+SERVO_DAMP_NEAR_M = 0.05
+SERVO_DAMP_NEAR_RAD = 0.15
 
 # ---- tracking a moving target ----
 # The robot servos for as long as the object keeps moving, re-acquires it with

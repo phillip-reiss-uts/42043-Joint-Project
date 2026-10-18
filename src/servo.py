@@ -11,6 +11,9 @@ from src.config import (
     ARM_DOF, TIP_OFFSET, R_DOWN, TABLE_HEIGHT, OBJECT_HEIGHT,
     GRIP_OPEN, GRIP_CLOSED, SYNC_STEPS, RAPID,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
+    SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD, SERVO_KI_MAX_M,
+    SERVO_KI_MAX_RAD, SERVO_DAMP_GAIN, SERVO_DAMP_NEAR_M,
+    SERVO_DAMP_NEAR_RAD,
     SERVO_TRACK_TOL, SERVO_TRACK_TOL_ROT, SERVO_STILL_SPEED, SERVO_LOST_LIMIT,
     SERVO_TRACK_MOVING, SERVO_STILL_TIME, SERVO_TRACK_ITERS, SERVO_STILL_TOL,
     SERVO_SEARCH_LIMIT, SERVO_YAW_SMOOTH, SERVO_WATCH_DESCENT,
@@ -48,6 +51,11 @@ class PBVSServo:
                  yaw_smooth=SERVO_YAW_SMOOTH,
                  occlude_ratio=0.95, occlude_recover=0.97, occlude_fails=2,
                  retreat_step=0.02, retreat_max=15, retreat_v=None,
+                 damp_gain=SERVO_DAMP_GAIN, damp_near_m=SERVO_DAMP_NEAR_M,
+                 damp_near_rad=SERVO_DAMP_NEAR_RAD,
+                 ki=SERVO_KI, ki_near_m=SERVO_KI_NEAR_M,
+                 ki_near_rad=SERVO_KI_NEAR_RAD,
+                 ki_max_m=SERVO_KI_MAX_M, ki_max_rad=SERVO_KI_MAX_RAD,
                  use_kf=SERVO_USE_KF, kf_sigma_meas=KF_SIGMA_MEAS,
                  kf_sigma_acc=KF_SIGMA_ACC, kf_gate=KF_GATE,
                  lead_s=SERVO_LEAD_S, track_tol=SERVO_TRACK_TOL,
@@ -68,6 +76,21 @@ class PBVSServo:
         self.kp = kp                 # translation gain, 1/s
         self.ko = ko                 # rotation gain, 1/s
         self.damp = damp             # DLS damping
+        self.damp_gain = float(damp_gain)      # joint-space D, near the target
+        # Integral gain and its guards. ki=0 disables the I term entirely, which
+        # is the default so the law stays purely proportional unless asked.
+        self.ki = float(ki)
+        self.ki_near_m = float(ki_near_m)      # only integrate inside this band
+        self.ki_near_rad = float(ki_near_rad)
+        self.ki_max_m = float(ki_max_m)        # clamp on the accumulated error
+        self.ki_max_rad = float(ki_max_rad)
+        self._err_int_p = np.zeros(3)
+        self._err_int_o = np.zeros(3)
+        # Commanded joint vector, persisted across servo() calls so that
+        # chunking is equivalent to one long call. See the note in servo().
+        self._q_cmd = None
+        self.damp_near_m = float(damp_near_m)
+        self.damp_near_rad = float(damp_near_rad)
         self.dq_max = dq_max         # joint increment clip per iteration (rad)
         self.perceive_every = perceive_every
         self.tol_p = tol_p
@@ -157,6 +180,15 @@ class PBVSServo:
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_control(state)
+
+    def reset_command(self):
+        # Forget the persisted joint command and the integral accumulator, so
+        # the next servo() starts fresh from whatever the arm is doing now.
+        # Call this when the servo is pointed at a DIFFERENT target; without it
+        # a new grasp would inherit the command (and wind-up) left by the last.
+        self._q_cmd = None
+        self._err_int_p = np.zeros(3)
+        self._err_int_o = np.zeros(3)
 
     def _trace_camera(self):
         # Camera pose for the servo trace, if the world can supply one.
@@ -293,18 +325,114 @@ class PBVSServo:
         # The Jacobian comes from the arm's Kinematics provider, so this law is
         # the same on a simulated arm and a real one.
         J = self.arm.kin.jacobian(self.data.qpos[:ARM_DOF])
-        v = np.concatenate([self.kp * err_p, self.ko * err_o])   # m/s, rad/s
+
+        # INTEGRAL TERM. The law is P+I on the pose error; the I part is what
+        # removes the standing sag.
+        #
+        # Why it is needed: the servo loop does `q_cmd += dq` every iteration. A
+        # P-only law leaves a residual dq whenever the pose error is non-zero --
+        # even a couple of millimetres -- and that residual ACCUMULATES into a
+        # ramp. Measured at steady state on the UR3e: dq was 2.8e-4 per step, so
+        # the commanded elbow walked 32 mrad downhill over 100 iterations and
+        # qpos followed it. The arm visibly sags under that, the position servo
+        # pulls back, and it rings -- the "sagging and catching itself" cycle.
+        # The plant is not at fault: with ctrl frozen it holds to qvel_sd
+        # 0.00000, and gravity feedforward is exact to 0.00 N.m.
+        #
+        # The integral is accumulated in the CARTESIAN error and re-expressed as
+        # a twist, so it needs no separate Jacobian inverse and picks up the same
+        # damping and limits as the proportional term.
+        #
+        # It lives on the instance, not in the loop: servo() is called in chunks
+        # and re-seeds q_cmd from data.qpos each call, so a local accumulator
+        # would reset every chunk and never build.
+        if self.ki > 0.0:
+            dt = self.model.opt.timestep
+            self._err_int_p = self._err_int_p + np.asarray(err_p, float) * dt
+            self._err_int_o = self._err_int_o + np.asarray(err_o, float) * dt
+
+            # Conditional integration (anti-windup): freeze the accumulator while
+            # the arm is far from the target or a limit is saturating. Without
+            # this, a long transit or an occlusion -- during which the estimate
+            # is frozen and the error therefore stays large -- winds the integral
+            # up and produces a lurch when the target reappears.
+            far = (np.linalg.norm(err_p) > self.ki_near_m
+                   or np.linalg.norm(err_o) > self.ki_near_rad)
+            if far:
+                self._err_int_p = self._err_int_p - np.asarray(err_p, float) * dt
+                self._err_int_o = self._err_int_o - np.asarray(err_o, float) * dt
+
+            # Clamp: the integral can only ever contribute a bounded share of the
+            # command, so even a pathology cannot make it dominate.
+            for acc, lim in ((self._err_int_p, self.ki_max_m),
+                             (self._err_int_o, self.ki_max_rad)):
+                mag = float(np.linalg.norm(acc))
+                if lim and mag > lim:
+                    acc *= lim / mag
+
+        v = np.concatenate([self.kp * err_p + self.ki * self._err_int_p,
+                            self.ko * err_o + self.ki * self._err_int_o])
+
         # Cap the commanded twist. The law asks for kp*err outright, which is
-        # metre-per-second scale at the start of an approach, and dq_max does
-        # not catch it. Scaling the whole 6-vector preserves the motion
-        # direction and slows rotation with it.
-        n = float(np.linalg.norm(v[:3]))
-        if n > 1e-12:
-            limit = self.v_max if v_max is None else v_max
-            if np.isfinite(limit) and n > limit:
-                v = v * (limit / n)
+        # metre-per-second scale at the start of an approach.
+        #
+        # BOTH halves must be capped. The original test measured the speed from
+        # the POSITION error only (norm(v[:3])) and then scaled the whole
+        # 6-vector by it. Such a guard can only ever scale DOWN, and only when
+        # translation is too large, so the angular rate was never bounded at
+        # all: with a small position error and a large yaw error it ran at
+        # ko*0.8 = 4.8 rad/s unchecked. Near the hover that is exactly the
+        # regime -- position converges while yaw has not -- so the arm swung the
+        # tool up and over instead of settling, and ended with the gripper
+        # pointing sideways at the sky rather than down at the table.
+        #
+        # The two parts are now limited separately. The rotational limit is
+        # stated as the rate that moves the tool at v_max on a 0.15 m lever arm,
+        # so a single v_max still means "how fast should this move" at both
+        # scales, and neither limit acts unless exceeded.
+        limit_v = self.v_max if v_max is None else v_max
+        finite = np.isfinite(limit_v) and limit_v > 0.0
+
+        n_t = float(np.linalg.norm(v[:3]))
+        if finite and n_t > limit_v:
+            v[:3] *= limit_v / n_t
+
+        limit_w = (limit_v / 0.15) if finite else np.inf
+        n_r = float(np.linalg.norm(v[3:]))
+        if np.isfinite(limit_w) and n_r > limit_w:
+            v[3:] *= limit_w / n_r
+
         dq = J.T @ np.linalg.solve(J @ J.T + self.damp * np.eye(6), v)
         dq = dq * self.model.opt.timestep
+
+        # JOINT-SPACE DAMPING.
+        #
+        # The law above is purely kinematic: it converts a POSE error into a
+        # joint increment with no reference to how fast the joints are already
+        # moving. The position servos underneath have their own kv, but this
+        # outer loop re-issues a command every iteration, so it keeps re-exciting
+        # them. The result is a limit cycle rather than convergence: with the arm
+        # correctly positioned (z error 0.4-2.3 mm) joint 2 still swung +/-0.35
+        # rad/s and reversed sign between chunks. On screen that is the arm
+        # sagging, catching itself, and sagging again instead of holding.
+        #
+        # Subtracting a term proportional to the measured joint velocity removes
+        # the energy that drives that cycle. It is the D term the P law never
+        # had, expressed in the same units as dq so it composes with everything
+        # above: dq is a per-step increment, so the damping is a fraction of the
+        # velocity's own per-step displacement.
+        #
+        # DAMP_GAIN = 1.0 cancels the joint velocity over one timestep, which is
+        # critically damped for this discrete law. It is applied only when the
+        # arm is already close to the target -- during a transit, velocity is
+        # wanted, not damped.
+        if self.damp_gain > 0.0:
+            near = (np.linalg.norm(err_p) < self.damp_near_m
+                    and np.linalg.norm(err_o) < self.damp_near_rad)
+            if near:
+                qvel = np.asarray(self.data.qvel[:ARM_DOF], float)
+                dq = dq - (self.damp_gain * qvel * self.model.opt.timestep)
+
         return np.clip(dq, -self.dq_max, self.dq_max)
 
     def preposition(self, z_offset, viewer=None):
@@ -349,7 +477,34 @@ class PBVSServo:
         if self.p_est is None and not self.observe():
             return False, 0, float('inf')
 
-        q_cmd = np.array(data.qpos[:ARM_DOF], float)
+        # COMMANDED JOINTS PERSIST ACROSS CALLS.
+        #
+        # This used to re-seed q_cmd from data.qpos on every call, on the
+        # reasoning that it made a short chunk "resume from where the arm is".
+        # That is wrong, and it is what made tracking sag and jerk. Measured
+        # with the same 600 physics steps either way:
+        #
+        #   servo(max_iters=600)      z 0.377 -> 0.376   err   1.76 mm
+        #   600 x servo(max_iters=1)  z 0.377 -> 0.469   err 101.94 mm
+        #
+        # The loop is an integrator: it does q_cmd += dq each iteration, and a
+        # P/integral law needs many iterations to close the error. Re-seeding
+        # throws away the accumulated command every call, so a one-iteration
+        # chunk commands a tiny step, the plant barely responds, and the next
+        # call re-seeds from that barely-moved position and commands again. The
+        # result is a command that ratchets downhill under gravity instead of
+        # converging, which is exactly the sag-then-catch on screen.
+        #
+        # Keeping q_cmd on the instance makes repetition equivalent to one long
+        # call, so the chunk size no longer changes the answer -- a caller can
+        # run 1 iteration per frame or 600 and get the same motion.
+        #
+        # It is reset when the servo is pointed at a new target (see
+        # _reset_command), so a genuinely new grasp does not inherit the old
+        # command.
+        if self._q_cmd is None or len(self._q_cmd) != ARM_DOF:
+            self._q_cmd = np.array(data.qpos[:ARM_DOF], float)
+        q_cmd = np.array(self._q_cmd, float)
         err_norm = float('inf')
         last_t = float(data.time)
 
@@ -505,10 +660,10 @@ class PBVSServo:
 
             dq = self.joint_step(err_p, err_o, v_max=v_max)
             q_cmd = q_cmd + dq
+            self._q_cmd = np.array(q_cmd, float)   # persists across calls
             # Command + tick through the arm's backend, the same path Arm.move
             # uses. The servo no longer needs to know what a control cycle is.
             self.arm.backend.command(q_cmd, GRIP_OPEN)
-
             # Advance the world by exactly one physics step, alongside the tick.
             # This must happen per physics step, NOT per render sync: the
             # servo steps physics every iteration but only syncs every

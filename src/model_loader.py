@@ -16,7 +16,6 @@ from src.config import (
     CALIB_BOARD_MARGIN,
     ROBOT_ARM, ROBOT_GRIPPER, ROBOT_CAMERA,
     POOL_SIZE,
-    CHUTE_X, CHUTE_Y, CHUTE_FLOOR_Z, CHUTE_WALL_THICK, CHUTE_WALL_HEIGHT,
     PARK_POS,
 )
 
@@ -111,38 +110,10 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     table_geom.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT - TABLE_THICK / 2.0]
     table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
 
-    # 6. Chute: a sunk bin attached to the right edge of the table.
-    chx0, chx1 = CHUTE_X
-    chy0, chy1 = CHUTE_Y
-    chute_cx = 0.5 * (chx0 + chx1)
-    chute_cy = 0.5 * (chy0 + chy1)
-
-    chute_floor = arm.worldbody.add_geom()
-    chute_floor.name = "chute_floor"
-    chute_floor.type = mujoco.mjtGeom.mjGEOM_BOX
-    chute_floor.size = [0.5 * (chx1 - chx0), 0.5 * (chy1 - chy0), 0.01]
-    chute_floor.pos = [chute_cx, chute_cy, CHUTE_FLOOR_Z - 0.01]
-    chute_floor.rgba = [0.25, 0.30, 0.40, 1.0]
-
-    wall_h = CHUTE_WALL_HEIGHT
-    wall_t = CHUTE_WALL_THICK
-    wall_z = CHUTE_FLOOR_Z + wall_h / 2.0
-
-    def add_wall(name, x, y, sx, sy):
-        g = arm.worldbody.add_geom()
-        g.name = name
-        g.type = mujoco.mjtGeom.mjGEOM_BOX
-        g.size = [sx, sy, wall_h / 2.0]
-        g.pos = [x, y, wall_z]
-        g.rgba = [0.20, 0.45, 0.50, 1.0]
-
-    # inner wall (table side): flush against the table's right edge
-    add_wall("chute_wall_inner", 0.216 + wall_t, chute_cy, wall_t, 0.5 * (chy1 - chy0))
-    # outer wall
-    add_wall("chute_wall_outer", 0.566 - wall_t, chute_cy, wall_t, 0.5 * (chy1 - chy0))
-    # end walls
-    add_wall("chute_wall_near", chute_cx, chy0 - wall_t, 0.5 * (chx1 - chx0), wall_t)
-    add_wall("chute_wall_far", chute_cx, chy1 + wall_t, 0.5 * (chx1 - chx0), wall_t)
+    # 6. No chute. There is one flat table and nothing else -- a picked object
+    #    is set back down on the tabletop. The old sunk bin was a simulation
+    #    convenience that does not exist in a real cell, and as placed it sat
+    #    inside the table footprint with half its scatter radius off the edge.
 
     # 7. Object pool: POOL_SIZE bodies, each with its own freejoint.
     for i in range(POOL_SIZE):

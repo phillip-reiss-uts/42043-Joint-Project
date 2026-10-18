@@ -11,7 +11,7 @@ from src import config as cfg
 
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED, R_DOWN,
-    TABLE_HEIGHT, TABLE_CENTRE, OBJECT_HEIGHT,
+    TABLE_HEIGHT, TABLE_CENTRE, TABLE_HALF, OBJECT_HEIGHT,
     SPAWN_X_RANGE, SPAWN_Y_RANGE, SPAWN_CLEARANCE, SPAWN_ARM_CLEARANCE,
     HARD_SPAWNS, HARD_SPAWN_MODE, REALLY_HARD_MODE, HARD_BLIND_Y,
     RANDOMIZE_SPAWN, RANDOMIZE_YAW,
@@ -26,7 +26,7 @@ from src.config import (
     SEARCH_OFFSETS, SEARCH_SPEED,
     GRASP_LIFT_RECHECK,
     MAX_PASSES,
-    CHUTE_X, CHUTE_Y,
+    PLACE_EDGE_MARGIN,
     INITIAL_OBJECTS, PARK_POS,
     DROP_RADIUS,
 )
@@ -184,22 +184,6 @@ def spawn_now(model, data, reg, rng, viewer=None):
     return None
 
 
-def despawn_into_chute(model, data, reg, viewer=None):
-    # Freeze any active object that has fallen into the chute region.
-    changed = []
-    for i in reg.active():
-        pos = reg.pose(data, i)
-        if pos[2] < TABLE_HEIGHT - 0.02:
-            # below the tabletop: only the chute floor exists down there
-            reg.freeze(data, i)
-            reg.state[i] = 'chuted'
-            changed.append(i)
-            if viewer is not None:
-                viewer.sync()
-    return changed
-
-
-# SINGLE-CUBE COMMANDS
 def _hold_arm(model, data, q_hold, grip, mujoco):
     # Command a joint hold, with the arm's gravity load fed forward.
     #
@@ -295,38 +279,68 @@ def place_cube(model, data, reg, rng, viewer=None, settle=True, index=0,
 
 
 def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
-                  stop=None, world=None):
-    # Controlled release: carry the held cube to a clear spot on the table,
-    # lower it and open the jaws. Used by the S-stop command.
-    i = 0
-    pos = reg.pose(data, i)
+                  stop=None, world=None, xy=None, grip_index=0):
+    # Controlled release: carry the held cube to `xy`, lower it gently onto the
+    # table and open the jaws.
+    #
+    # "Put it back down" -- the second press of the pickup key. There is no
+    # chute, so a held cube is simply set down on the tabletop.
+    #
+    # WHERE. The caller passes the cube's current xy, so it goes back down
+    # roughly where it was picked from rather than at a random clear spot (the
+    # old behaviour, which was for dropping into a bin). The point is clamped
+    # into the spawn region, which is the part of the table that is BOTH
+    # reachable by the arm and visible to the wrist camera from home:
+    #     x 0.24..0.385, y -0.075..0.145
+    # Without the clamp, releasing near an edge could put the cube somewhere
+    # the tracking servo can never see again -- and the next pick would fail
+    # with no obvious cause.
+    #
+    # HOW. It lowers in two stages (high traverse, then FEED rate down) rather
+    # than dropping from the lift height, so the cube is placed, not thrown.
+    pos = reg.pose(data, grip_index)
     if pos[2] < TABLE_HEIGHT + OBJECT_HEIGHT:
         return False                       # not holding anything
 
-    for k in range(200):
-        cand = np.array(_choose_spawn_xy(rng, fallback=(k >= 100)))
-        R = rotation_with_yaw(float(rng.uniform(0.0, np.pi / 2.0)), R_DOWN)
-        q_high = arm.solve_ik([cand[0], cand[1], TABLE_HEIGHT + LIFT_Z],
-                              data.qpos[:ARM_DOF], R_target=R)
-        q_low = arm.solve_ik([cand[0], cand[1], TABLE_HEIGHT + OBJECT_HEIGHT],
-                             q_high, R_target=R)
-        arm.move(q_high, GRIP_CLOSED, rate=RAPID, viewer=viewer, estop=estop,
-                 stop=stop)
-        if stop is not None and stop():
-            return False
-        arm.move(q_low, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
-                 stop=stop)
-        arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stop)
-        q_hold = data.qpos[:ARM_DOF].copy()
-        for s in range(600):
-            _hold_arm(model, data, q_hold, GRIP_OPEN, mujoco)
-            if world is not None:
-                world.step_mover()  # keep the object demo advancing
-            mujoco.mj_step(model, data)
-            if viewer is not None and s % SYNC_STEPS == 0:
-                viewer.sync()
-        return True
-    return False
+    if xy is None:
+        tx, ty = pos[0], pos[1]
+    else:
+        tx, ty = float(xy[0]), float(xy[1])
+
+    # Keep the cube where the robot can find it again.
+    tx = float(np.clip(tx, SPAWN_X_RANGE[0], SPAWN_X_RANGE[1]))
+    ty = float(np.clip(ty, SPAWN_Y_RANGE[0], SPAWN_Y_RANGE[1]))
+
+    # Release at the cube's own yaw so it lands square rather than spun.
+    R = rotation_with_yaw(float(rng.uniform(0.0, np.pi / 2.0)), R_DOWN)
+    q_high = arm.solve_ik([tx, ty, TABLE_HEIGHT + LIFT_Z],
+                          data.qpos[:ARM_DOF], R_target=R)
+    q_low = arm.solve_ik([tx, ty, TABLE_HEIGHT + OBJECT_HEIGHT],
+                         q_high, R_target=R)
+    if q_high is None or q_low is None:
+        return False
+
+    arm.move(q_high, GRIP_CLOSED, rate=RAPID, viewer=viewer, estop=estop,
+             stop=stop)
+    if stop is not None and stop():
+        return False
+    arm.move(q_low, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
+             stop=stop)
+    if stop is not None and stop():
+        return False
+
+    arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stop)
+
+    # Let it settle on the table before anything else moves.
+    q_hold = data.qpos[:ARM_DOF].copy()
+    for s in range(600):
+        _hold_arm(model, data, q_hold, GRIP_OPEN, mujoco)
+        if world is not None:
+            world.step_mover()
+        mujoco.mj_step(model, data)
+        if viewer is not None and s % SYNC_STEPS == 0:
+            viewer.sync()
+    return True
 
 # SCENE SETUP
 def pick_one(model, data, arm, world, i, drop_xy,
@@ -418,7 +432,8 @@ def pick_one(model, data, arm, world, i, drop_xy,
              'q %.3f  f %+.2f' % (g['q'], g['force']))
         if not g['held']:
             # Nothing in the jaws. Put it down cleanly and let the caller retry
-            # rather than carrying air to the chute and calling it a success.
+            # rather than carrying air to the release point and calling it a
+            # success.
             arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stopped)
             print('[GRASP] verified empty -- abandoning this pick')
             return False
@@ -432,7 +447,8 @@ def pick_one(model, data, arm, world, i, drop_xy,
     # The simulation-side check lives in the harness, where ground truth
     # legitimately belongs.
 
-    # carry to the drop point, high enough that the cube clears the chute walls
+    # carry to the release point. No chute to clear, so this is a plain place
+    # on the tabletop: lift, traverse high, then lower.
     drop_z = TABLE_HEIGHT + LIFT_Z
     q_app = arm.solve_ik([drop_xy[0], drop_xy[1], drop_z + APPROACH_Z],
                          q_lift, R_target=R)
@@ -523,12 +539,14 @@ def _ik_reaches(model, arm, q, target, tol=1e-3):
 
 
 def clear_table(model, data, arm, world, rng,
-                viewer=None, aborted=None, estop=None):
-    # Pick every object on the table and drop it into the chute.
+                viewer=None, aborted=None, estop=None, passes_max=None):
+    # Find the object again and put it back on the table.
     #
-    # The world supplies both perception and the object set (a layout query
-    # main.py owns). No mid-motion spawning: the cube is placed by the operator
-    # before a search begins.
+    # This USED to empty the table into a chute. There is no chute any more, so
+    # the only thing left for it to do is recovery: after a failed grip the
+    # robot re-homes and looks for the object, then re-attempts. It is no
+    # longer an operator-driven mode -- run_simulation binds it to the failure
+    # path of an explicit pickup.
     def stopped():
         return aborted is not None and aborted()
 
@@ -538,17 +556,23 @@ def clear_table(model, data, arm, world, rng,
         mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home'))
     home_q = np.array(home.qpos[:ARM_DOF])
 
-    chute_cx = 0.5 * (CHUTE_X[0] + CHUTE_X[1])
-    chute_cy = 0.5 * (CHUTE_Y[0] + CHUTE_Y[1])
+    # Release point: a patch of tabletop short of the far edge, not a bin.
+    place_cx = TABLE_CENTRE[0] + TABLE_HALF[0] - PLACE_EDGE_MARGIN
+    place_cy = TABLE_CENTRE[1]
 
+    # With no chute the table is never emptied, so this loop would otherwise run
+    # to MAX_PASSES every time. The recovery caller passes passes_max to bound
+    # it to a single find-and-grab attempt.
+    limit = MAX_PASSES if passes_max is None else int(passes_max)
     passes = 0
     while not stopped():
         passes += 1
-        if passes > MAX_PASSES:
-            # With the object band left on the target never holds still, so the
-            # servo never commits and each pass burns the full track cap. Bound
-            # the loop rather than re-homing forever.
-            print(f'[TASK] giving up after {MAX_PASSES} passes')
+        if passes > limit:
+            if passes_max is None:
+                # With the object band left on the target never holds still, so
+                # the servo never commits and each pass burns the full track
+                # cap. Bound the loop rather than re-homing forever.
+                print(f'[TASK] giving up after {limit} passes')
             return
 
         # back to the viewing pose so the nominal view is the known-good one
@@ -573,10 +597,6 @@ def clear_table(model, data, arm, world, rng,
             return found
 
         dets = see()
-        despawned = world.despawn_into_chute(viewer=viewer)
-        if despawned:
-            print(f'[TASK] despawned {despawned}')
-
         active = world.active()
         if not active:
             print(f'[TASK] table clear: no active objects after {passes} passes')
@@ -608,8 +628,8 @@ def clear_table(model, data, arm, world, rng,
         print(f'[TASK] pass {passes}: {len(active)} active, picking object '
               f'{chosen} at {np.round(best_xy, 3)} (score {best.score:.2f})')
 
-        drop_xy = (rng.uniform(chute_cx - DROP_RADIUS, chute_cx + DROP_RADIUS),
-                   rng.uniform(chute_cy - DROP_RADIUS, chute_cy + DROP_RADIUS))
+        drop_xy = (rng.uniform(place_cx - DROP_RADIUS, place_cx + DROP_RADIUS),
+                   rng.uniform(place_cy - DROP_RADIUS, place_cy + DROP_RADIUS))
         if pick_one(model, data, arm, world, chosen, drop_xy,
                     viewer=viewer, aborted=aborted, estop=estop):
             # let it fall, then despawn whatever reached the bin.
@@ -633,8 +653,6 @@ def clear_table(model, data, arm, world, rng,
                     arm.observe()
                     if viewer is not None:
                         viewer.sync()
-            world.despawn_into_chute(viewer=viewer)
-
         # hold the fingers open after the drop so the release does not blur
         q_hold = arm.hold_pose()
         for _ in range(DROP_HOLD_STEPS):

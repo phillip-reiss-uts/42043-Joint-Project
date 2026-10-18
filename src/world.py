@@ -166,10 +166,6 @@ class SimObjectWorld(ObjectWorld):
         return place_cube(self.model, self.data, self.reg, rng, viewer=viewer,
                           settle=True, world=self)
 
-    def despawn_into_chute(self, viewer=None):
-        from src.pick_place import despawn_into_chute
-        return despawn_into_chute(self.model, self.data, self.reg, viewer=viewer)
-
     def active(self):
         # Which pooled objects are currently on the table. Object indices are a
         # simulation concept, so this stays off the boundary too.

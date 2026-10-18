@@ -91,7 +91,11 @@ def main(sensor_size=(320, 240)):
         if keycode == ord('6'):
             cmd.place = True
         elif keycode == ord('7'):
-            cmd.start = True
+            # Key 7 is now PICKUP, not "start a search". Searching is no longer
+            # an operator mode: the robot tracks whatever is on the table and
+            # only grasps on this explicit command. Recovery searches happen
+            # inside a pick.
+            cmd.pickup = True
         elif keycode == ord('8'):
             cmd.pause = True
         elif keycode == ord('9'):
@@ -137,10 +141,10 @@ def main(sensor_size=(320, 240)):
         # stepped from the physics loops.
         world = SimObjectWorld(model, data, camera, cam_id, reg)
 
-        print('[INFO] 6 = spawn cube, 7 = start/stop search, 8 = pause, '
+        print('[INFO] 6 = spawn cube, 7 = PICK UP now, 8 = pause, '
               '9 = reset scene, . = object motion band')
-        print('[STATE] WAIT  (scene empty; press 6 to spawn the cube, '
-              '7 to search)')
+        print('[STATE] WAIT  (scene empty; press 6 to spawn the cube. '
+              'The robot then tracks it automatically; 7 grabs it)')
 
         def say(msg):
             print('[STATE] %s' % msg)
@@ -158,7 +162,8 @@ def main(sensor_size=(320, 240)):
             commands=cmd, say=say, at_home=at_home,
             go_home=lambda: None,          # bound below
             place_object=lambda: None,     # bound below
-            clear_table=lambda: None,      # bound below
+            track_step=lambda: None,       # bound below
+            pick_object=lambda: False,     # bound below
             running=lambda: viewer.is_running(),
             arm=arm, world=world)
 
@@ -194,13 +199,153 @@ def main(sensor_size=(320, 240)):
             def abort_now():
                 return cmd.pending() or not viewer.is_running()
 
+            # One attempt: this is the recovery after a failed grip, not an
+            # operator-driven "empty the table" loop. With no chute the table
+            # never empties, so an unbounded loop would spin to MAX_PASSES.
             clear_table(model, data, arm, world, rng,
-                        viewer=viewer, aborted=abort_now, estop=estop)
+                        viewer=viewer, aborted=abort_now, estop=estop,
+                        passes_max=1)
             arm.detach_observer()
 
         def put_down():
-            put_cube_down(model, data, arm, reg, rng, viewer=viewer,
-                          estop=estop, world=world)
+            # Set the held cube back down where it currently is. The xy comes
+            # from the object's own pose, not a random clear spot: the request
+            # was "place it down at wherever the cube is in the table xy".
+            # put_cube_down clamps it into the reachable+visible region and
+            # lowers gently rather than dropping.
+            active = world.active()
+            xy = None
+            if active:
+                p = world.pose(active[0])
+                xy = (float(p[0]), float(p[1]))
+            return put_cube_down(model, data, arm, reg, rng, viewer=viewer,
+                                 estop=estop, world=world, xy=xy,
+                                 stop=stopped)
+
+        # --- TRACK: follow the object, never descend -----------------------
+        #
+        # A long-lived servo, not one per frame: the Kalman filter it holds is
+        # the target's velocity estimate, and rebuilding it each frame would
+        # throw that away and re-bootstrap from a single noisy look.
+        from src.servo import PBVSServo
+        from src.pick_place import pick_one, search_for_object
+        # Frame granularity for tracking.
+        #
+        # The chunk size no longer changes the result: servo() now persists its
+        # commanded joint vector across calls, so N iterations spread over any
+        # number of calls gives the same motion as one call of N. Measured, with
+        # the same 600 physics steps: peak-to-peak tool height was 0.62 mm at
+        # chunk 1, 0.62 at 30, 0.69 at 100 and 0.63 at 300.
+        #
+        # That was NOT true before the fix -- chunk 1 and chunk 600 differed by
+        # 100 mm of drift, because the command was re-seeded from data.qpos on
+        # every call and ratcheted downhill. The earlier comment here claimed
+        # small chunks "cannot converge", which was a symptom of that bug.
+        #
+        # So this is now purely a responsiveness choice: small enough that a
+        # frame returns quickly, large enough that the viewer is not synced on
+        # every physics step. 60 iterations is 0.12 s of sim per frame, and the
+        # camera render (~17 ms) is matched to it so every frame has one render
+        # rather than a burst.
+        TRACK_CHUNK_ITERS = 60
+        TRACK_SLICE_S = 2.0
+        tracker = PBVSServo(
+            model, data, arm, world, smooth=1.0,
+            # One camera render per tracking chunk. The render is ~41 ms of a
+            # ~55 ms chunk, so rendering every chunk keeps it steady; a cadence
+            # shorter than the chunk would double the stalls, a longer one would
+            # make some frames render and others not.
+            perceive_every=TRACK_CHUNK_ITERS,
+            v_max=cfg.SERVO_V_TRANSIT, v_descent=cfg.SERVO_V_DESCENT,
+            occlude_ratio=cfg.SERVO_OCCLUDE_RATIO,
+            occlude_recover=cfg.SERVO_OCCLUDE_RECOVER,
+            occlude_fails=cfg.SERVO_OCCLUDE_FAILS,
+            retreat_step=cfg.SERVO_RETREAT_STEP,
+            retreat_max=cfg.SERVO_RETREAT_MAX,
+            retreat_v=cfg.SERVO_RETREAT_V)
+
+        # servo() blocks until it converges, which would freeze the viewer, so
+        # tracking runs in chunks of TRACK_CHUNK_ITERS. The chunk size and the
+        # wall-clock abort are both explained above; the abort exists only so a
+        # genuine hang returns, and must stay far longer than one chunk (the
+        # servo's entry work -- observe, filter setup -- alone can exceed a
+        # quarter second, which is what made a 0.25 s cap fire before the first
+        # step and leave the arm creeping toward a target it never reached).
+        # Set DSH_TRACK_DEBUG=1 to print one line per tracking chunk.
+        import os as _os
+        TRACK_DEBUG = [_os.environ.get('DSH_TRACK_DEBUG', '') == '1']
+
+        def _time_slice(seconds):
+            import time as _time
+            deadline = _time.perf_counter() + seconds
+            return lambda: _time.perf_counter() >= deadline
+
+        def track_step():
+            def see():
+                return [True] if tracker.observe() else []
+
+            def reacquire():
+                return search_for_object(model, data, arm, see, viewer=viewer,
+                                         estop=estop,
+                                         stop=lambda: not viewer.is_running(),
+                                         wide=True)
+
+            # z_offset = SERVO_STANDOFF means "hover, do not descend": the same
+            # servo the pick uses, stopped short of the grasp pose.
+            _p0 = np.array(data.xpos[arm.base_id], float)
+            tracker.servo(cfg.SERVO_STANDOFF,
+                          max_iters=TRACK_CHUNK_ITERS,
+                          viewer=viewer, estop=estop,
+                          aborted=_time_slice(TRACK_SLICE_S),
+                          v_max=cfg.SERVO_V_TRANSIT, track=True,
+                          stationary_s=cfg.SERVO_STILL_TIME,
+                          search=reacquire)
+            if TRACK_DEBUG[0]:
+                _p1 = np.array(data.xpos[arm.base_id], float)
+                _R = np.array(data.xmat[arm.base_id], float).reshape(3, 3)
+                _pd, _ = tracker.desired_pose(cfg.SERVO_STANDOFF)
+                print('[TRACK] tool z %.4f -> %.4f (d %.4f)  axis=%s  '
+                      'p_des=%s  err=%.4f' % (
+                          _p0[2], _p1[2], _p1[2] - _p0[2],
+                          np.round(_R[:, 2], 3), np.round(_pd, 3),
+                          float(np.linalg.norm(_p1 - _pd))))
+
+        # --- PICK: one explicit grasp attempt ------------------------------
+        def pick_object():
+            active = world.active()
+            if not active:
+                return False
+            i = active[0]
+            # With the chute gone the object is simply released back on the
+            # table, short of the far edge so it stays in view.
+            drop_xy = (cfg.TABLE_CENTRE[0] + cfg.TABLE_HALF[0] - 0.10,
+                       cfg.TABLE_CENTRE[1])
+            import time as _time
+            # An explicit pickup must not turn into an indefinite chase. If the
+            # object will not hold still, the servo would otherwise spend
+            # SERVO_TRACK_ITERS (~2 min of sim time) waiting before giving up,
+            # which reads as a hang. Bound the whole attempt by wall time and
+            # let the caller treat it as a failed grip -- which re-homes and
+            # searches, exactly the documented failed-grip path.
+            # The budget is WALL time, and the viewer makes a pick far slower
+            # than the headless measurement: a successful pick takes ~9.5 s of
+            # CPU, but every chunk also renders, so the same pick can take two
+            # or three times that on screen. 20 s was measured to abort genuine
+            # grasps on a perfectly stationary cube ("target would not hold
+            # still" with nothing moving). 120 s still bounds a real hang --
+            # the servo's own iteration cap is what normally terminates a
+            # fruitless chase -- without cutting off a legitimate attempt.
+            mission_deadline = _time.perf_counter() + 120.0
+
+            def give_up():
+                return (cmd.pending() or not viewer.is_running()
+                        or _time.perf_counter() >= mission_deadline)
+
+            ok = pick_one(model, data, arm, world, i, drop_xy,
+                          viewer=viewer, aborted=give_up, estop=estop)
+            if not ok and _time.perf_counter() >= mission_deadline:
+                print('[PICK] pick exceeded its wall-clock budget -- abandoning')
+            return bool(ok)
 
         def on_reset():
             # Instant: the arm is teleported, not driven. Every parameter is
@@ -217,9 +362,15 @@ def main(sensor_size=(320, 240)):
         # Wire the scene-specific behaviour in, and clear the placeholders.
         task._go_home = go_home
         task._place_object = place_object
-        task._clear_table = run_search
+        task._track_step = track_step
+        task._pick_object = pick_object
         task.on_reset = on_reset
-        task.on_put_down = put_down
+        # Recovery search after a failed grip: re-home, then look for the
+        # object again. This is the old search, now reachable only from inside
+        # a pick rather than as an operator mode.
+        task.on_recover_search = run_search
+        # Second press of the pickup key: put the held cube back on the table.
+        task.on_put_object = put_down
 
         demo_idx = [None]
         # Latched arm pose for the WAIT hold, re-taken on each WAIT entry.
@@ -231,20 +382,18 @@ def main(sensor_size=(320, 240)):
             # The moving-target demo: decide WHICH object glides. The world
             # owns the mover and the physics loop steps it, so the robot is not
             # involved in the selection either.
-            if task.mode == WAIT:
-                act = world.active()
-                if act:
-                    if demo_idx[0] != act[0]:
-                        world.set_mover(TargetMover(model, data, reg, act[0]))
-                        demo_idx[0] = act[0]
-                else:
-                    world.set_mover(None)
-                    demo_idx[0] = None
+            act = world.active()
+            if act:
+                if demo_idx[0] != act[0]:
+                    world.set_mover(TargetMover(model, data, reg, act[0]))
+                    demo_idx[0] = act[0]
+            else:
+                world.set_mover(None)
+                demo_idx[0] = None
 
-                # Step the same number of times per render as the motion loops
-                # do. At one step per frame the sim runs ~0.2x real time, so the
-                # object crawls here and appears to lurch the moment a search
-                # starts.
+            if task.mode == WAIT:
+                # Nothing to follow: hold the home pose, keep the object demo
+                # running so a spawn still glides.
                 #
                 # The hold target is latched per WAIT entry, NOT re-read each
                 # step: arm.hold(GRIP_OPEN) with no target re-commands wherever
@@ -259,8 +408,9 @@ def main(sensor_size=(320, 240)):
                     mujoco.mj_step(model, data)
                 viewer.sync()
             else:
-                # Leaving WAIT: drop the latched pose so the next WAIT entry
-                # captures a fresh one (the arm will have moved by then).
+                # TRACK and PICK drive the arm themselves (through the servo,
+                # which steps the world and syncs the viewer). Leaving WAIT
+                # drops the latched pose so the next entry captures a fresh one.
                 wait_hold[0] = None
 
             if not task.step():

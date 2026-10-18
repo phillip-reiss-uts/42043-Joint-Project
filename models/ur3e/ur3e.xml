@@ -119,9 +119,9 @@
        forcerange is scaled to the UR3e's own actuatorfrcrange from its joints
        (54 / 54 / 28 / 9 / 9 / 9 N.m), not the UR5e's larger values. -->
   <actuator>
-    <position name="ur3e_shoulder_pan"  joint="shoulder_pan_joint"  kp="4000" kv="800" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-54 54"/>
-    <position name="ur3e_shoulder_lift" joint="shoulder_lift_joint" kp="4000" kv="800" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-54 54"/>
-    <position name="ur3e_elbow"         joint="elbow_joint"         kp="4000" kv="800" ctrllimited="true" ctrlrange="-3.1415 3.1415" forcerange="-28 28"/>
+    <position name="ur3e_shoulder_pan"  joint="shoulder_pan_joint"  kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-54 54"/>
+    <position name="ur3e_shoulder_lift" joint="shoulder_lift_joint" kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-54 54"/>
+    <position name="ur3e_elbow"         joint="elbow_joint"         kp="1000" kv="200" ctrllimited="true" ctrlrange="-3.1415 3.1415" forcerange="-28 28"/>
     <position name="ur3e_wrist_1"       joint="wrist_1_joint"       kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-9 9"/>
     <position name="ur3e_wrist_2"       joint="wrist_2_joint"       kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-9 9"/>
     <position name="ur3e_wrist_3"       joint="wrist_3_joint"       kp="1000" kv="200" ctrllimited="true" ctrlrange="-6.2831 6.2831" forcerange="-9 9"/>
