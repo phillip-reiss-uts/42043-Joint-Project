@@ -156,7 +156,7 @@ def run_sim(h):
     import mujoco
     from src.model_loader import load_robot_model
     from src.arm_dynamics import ArmDynamics, _JOINT_NAMES
-    from src.kinematics import MujocoKinematics
+    from src.kinematics_mujoco import MujocoKinematics
     from src.camera import RGBDCamera
     from src.perception import find_camera
     from src.config import (
@@ -249,6 +249,42 @@ def run_sim(h):
             worst_g = max(worst_g, float(np.max(np.abs(gt - gp))))
         r.set(worst_M < 1e-10 and worst_g < 1e-10,
               'max |dM| = %.2e   max |dg| = %.2e' % (worst_M, worst_g))
+
+    with h.check('DYNAMICS', 'gravity is compensated exactly once',
+                 'The plant must carry its own weight, and the backend must feed\n'
+                 'g(q) forward once, the way a UR controller does. Two\n'
+                 'compensations push the arm off its commanded pose: measured\n'
+                 '~7 mm high and ~2-3 mm sideways, with ~2 deg of tool tilt, at a\n'
+                 'grasp pose.') as r:
+        from src.robot_backend_mujoco import MujocoBackend
+        b = MujocoBackend(model, data, ARM_DOF)
+        q_cmd = np.array(data.qpos[:ARM_DOF], float)
+        b.command(q_cmd, 0.0)
+        scr = mujoco.MjData(model)
+        scr.qpos[:] = data.qpos
+        scr.qvel[:] = 0.0
+        mujoco.mj_forward(model, scr)
+        match = float(np.max(np.abs(data.qfrc_applied[:ARM_DOF]
+                                    - scr.qfrc_bias[:ARM_DOF])))
+        p_cmd, _ = mj.pose(q_cmd)
+        # snapshot, so the checks after this one see the scene unchanged
+        q_save = np.array(data.qpos, float)
+        v_save = np.array(data.qvel, float)
+        t_save = float(data.time)
+        for _ in range(3000):
+            b.command(q_cmd, 0.0)
+            b.step()
+        p_hold, _ = mj.pose(data.qpos[:ARM_DOF])
+        err = float(np.linalg.norm(p_hold - p_cmd))
+        data.qpos[:] = q_save
+        data.qvel[:] = v_save
+        data.time = t_save
+        mujoco.mj_forward(model, data)
+        gc = float(model.body_gravcomp.max())
+        r.set(gc == 0.0 and match < 1e-8 and err < 6e-3,
+              'max body.gravcomp = %.1f   qfrc_applied vs g(q) = %.1e\n'
+              'commanded hold, 6 s: tool sits %.1f mm from the command'
+              % (gc, match, err * 1e3))
 
     # ---------------- SERVO ----------------
     with h.check('SERVO', 'servo gains known and positive',

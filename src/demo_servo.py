@@ -42,11 +42,16 @@ def _trial(model, data, home, world, use_servo, shift, seed):
     from src.camera import RGBDCamera
     from src.perception import find_camera
     from src.servo import PBVSServo
-    from src.world import SimObjectWorld
+    from src.world_sim import SimObjectWorld
+    from src.kinematics_mujoco import MujocoKinematics
+    from src.robot_backend_mujoco import MujocoBackend
 
     mujoco.mj_resetDataKeyframe(model, data, home)
     mujoco.mj_forward(model, data)
-    arm = Arm(model, data)
+    backend = MujocoBackend(model, data, ARM_DOF)
+    arm = Arm(model, data,
+              kinematics=MujocoKinematics(model, backend.tool_body_id, ARM_DOF),
+              backend=backend)
     reg = ObjectRegistry(model, 8)
     rng = np.random.default_rng(seed)
     i = spawn_one(model, data, reg, rng)
@@ -90,7 +95,9 @@ def main():
     from src.arm import Arm
     from src.pick_place import ObjectRegistry, spawn_one
     from src.servo import PBVSServo
-    from src.world import SimObjectWorld
+    from src.world_sim import SimObjectWorld
+    from src.kinematics_mujoco import MujocoKinematics
+    from src.robot_backend_mujoco import MujocoBackend
 
     model = load_robot_model()
     if model is None:
@@ -112,7 +119,10 @@ def main():
     data = mujoco.MjData(model)
     mujoco.mj_resetDataKeyframe(model, data, home)
     mujoco.mj_forward(model, data)
-    arm = Arm(model, data)
+    backend = MujocoBackend(model, data, ARM_DOF)
+    arm = Arm(model, data,
+              kinematics=MujocoKinematics(model, backend.tool_body_id, ARM_DOF),
+              backend=backend)
     reg = ObjectRegistry(model, 8)
     rng = np.random.default_rng(0)
     idx = spawn_one(model, data, reg, rng)

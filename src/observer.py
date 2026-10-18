@@ -67,7 +67,7 @@ class ArmObserver:
         # observer does not reach into the simulator for M(q)/g(q).
         if kin is None:
             import mujoco
-            from src.kinematics import MujocoKinematics
+            from src.kinematics_mujoco import MujocoKinematics
             tool = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY,
                                      'gripper/base')
             kin = MujocoKinematics(model, tool, self.n)

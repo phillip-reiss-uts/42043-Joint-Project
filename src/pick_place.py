@@ -33,6 +33,7 @@ from src.config import (
 
 from src.perception import rotation_with_yaw
 from src.overlay import push
+from src.robot_backend_mujoco import gravity_feedforward
 from src.servo import PBVSServo
 from src.world import ObjectWorld, TargetView
 
@@ -139,7 +140,7 @@ def spawn_one(model, data, reg, rng, viewer=None, world=None):
         # settle: let it fall onto the table, sync the viewer through the fall
         q_home = data.qpos[:ARM_DOF].copy()
         for s in range(2000):
-            _hold_arm(model, data, q_home, GRIP_OPEN, mujoco)
+            _hold_arm(model, data, q_home, GRIP_OPEN)
             if world is not None:
                 world.step_mover()  # keep the object demo advancing
             mujoco.mj_step(model, data)
@@ -184,42 +185,18 @@ def spawn_now(model, data, reg, rng, viewer=None):
     return None
 
 
-def _hold_arm(model, data, q_hold, grip, mujoco):
+def _hold_arm(model, data, q_hold, grip):
     # Command a joint hold, with the arm's gravity load fed forward.
     #
-    # A MuJoCo <position> servo produces kp*(ctrl - q) - kv*qvel and nothing at
-    # zero error, so it cannot hold the arm against its own weight: the arm
-    # accelerates, the error builds, and it oscillates and walks off. Measured
-    # over 3000 steps: 1.79 rad of drift without this term, 0.000000 with it.
-    #
-    # Only g(q), not the full qfrc_bias: that is C(q,qdot) + g(q), and feeding
-    # Coriolis back is circular -- it depends on the velocity the servo is
-    # nulling, so it pumps energy in and the arm never settles (measured 0.0197
-    # rad residual, qvel ~0.3 persisting). Zeroing qvel leaves exactly g(q).
-    #
-    # This mirrors MujocoBackend._compensate_gravity. It lives here too because
-    # these settle loops drive `data` directly rather than going through the
-    # backend, and a hold that drifts would undo the rest of the task.
+    # The compensation itself lives in the simulation backend
+    # (robot_backend_mujoco.gravity_feedforward), because it models what the UR
+    # controller does on hardware. These settle loops drive `data` directly
+    # rather than going through the backend, so they call the same function
+    # instead of keeping a second copy that could drift out of step -- a second
+    # copy is exactly how the double-compensation bug arose.
     data.ctrl[:ARM_DOF] = q_hold
     data.ctrl[model.nu - 1] = grip
-    scratch = _gravity_scratch(model, mujoco)
-    scratch.qpos[:] = data.qpos
-    scratch.qvel[:] = 0.0
-    mujoco.mj_forward(model, scratch)
-    data.qfrc_applied[:ARM_DOF] = scratch.qfrc_bias[:ARM_DOF]
-
-
-_GRAV_SCRATCH = {}
-
-
-def _gravity_scratch(model, mujoco):
-    # One scratch MjData per model, so the gravity evaluation does not mutate
-    # the live state and is not reallocated on every hold step.
-    key = id(model)
-    s = _GRAV_SCRATCH.get(key)
-    if s is None:
-        s = _GRAV_SCRATCH[key] = mujoco.MjData(model)
-    return s
+    gravity_feedforward(model, data, ARM_DOF)
 
 
 def place_cube(model, data, reg, rng, viewer=None, settle=True, index=0,
@@ -259,13 +236,13 @@ def place_cube(model, data, reg, rng, viewer=None, settle=True, index=0,
             for s in range(2000):
                 if stop is not None and stop():
                     break
-                _hold_arm(model, data, q_hold, GRIP_OPEN, mujoco)
+                _hold_arm(model, data, q_hold, GRIP_OPEN)
                 if world is not None:
                     if world is not None:
                         world.step_mover()
                 mujoco.mj_step(model, data)
                 while estop is not None and estop():
-                    _hold_arm(model, data, q_hold, GRIP_OPEN, mujoco)
+                    _hold_arm(model, data, q_hold, GRIP_OPEN)
                     if world is not None:
                         world.step_mover()
                     mujoco.mj_step(model, data)
@@ -334,7 +311,7 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     # Let it settle on the table before anything else moves.
     q_hold = data.qpos[:ARM_DOF].copy()
     for s in range(600):
-        _hold_arm(model, data, q_hold, GRIP_OPEN, mujoco)
+        _hold_arm(model, data, q_hold, GRIP_OPEN)
         if world is not None:
             world.step_mover()
         mujoco.mj_step(model, data)

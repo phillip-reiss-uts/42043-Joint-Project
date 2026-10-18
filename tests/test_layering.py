@@ -16,8 +16,20 @@
 #   ROBOT modules must NOT import: target_motion, pick_place, model_loader,
 #   or camera/calibration (the sensor and scene are the world's business).
 #
-# World-facing modules (main, run_tests, demo_servo, pick_place, world,
+# World-facing modules (main, run_tests, demo_servo, pick_place, world_sim,
 # calibration, model_loader, overlay, target_motion) may import anything.
+#
+# PROVIDER SEAM (second rule, no simulator behind the interfaces)
+# --------------------------------------------------------------
+# The three seams that let the same robot code drive MuJoCo or a real UR3e are:
+#
+#     src/kinematics.py       Kinematics      -> src/kinematics_mujoco.py
+#     src/robot_backend.py    RobotBackend    -> src/robot_backend_mujoco.py
+#     src/world.py            ObjectWorld     -> src/world_sim.py
+#
+# The left-hand modules are SHARED: they must not import mujoco, and must not
+# import any of the right-hand implementation modules. The implementations are
+# simulation-only and are chosen by the entry point, never by the robot layer.
 #
 # Run:  python tests/test_layering.py      (or `python -m pytest tests/`)
 
@@ -71,6 +83,25 @@ FORBIDDEN_CALLS = [
     ('place_cube', 'object spawning'),
     ('Perceive_all(', 'bypassing the world boundary'),
 ]
+
+# Provider seam: interface module -> (implementation module, required class).
+PROVIDER_SEAM = {
+    'kinematics.py': ('kinematics_mujoco.py', 'MujocoKinematics',
+                      'Kinematics'),
+    'robot_backend.py': ('robot_backend_mujoco.py', 'MujocoBackend',
+                         'RobotBackend'),
+    'world.py': ('world_sim.py', 'SimObjectWorld', 'ObjectWorld'),
+}
+
+# Implementation modules that are simulation-only.
+SIM_IMPLEMENTATIONS = ('kinematics_mujoco', 'robot_backend_mujoco', 'world_sim')
+
+# Known, deliberate legacy couplings. These two modules still build a MuJoCo
+# provider when the caller passes no `kin=`, so that the demos and older call
+# styles keep working without threading a provider through every signature.
+# They are allow-listed rather than ignored so the deviation is visible and
+# cannot spread to another robot module.
+LEGACY_KIN_DEFAULTS = ('observer.py', 'state_space.py')
 
 
 def _imported_names(tree, path):
@@ -227,6 +258,74 @@ def check_no_mujoco_imports():
     return failures
 
 
+def _module_imports(tree):
+    # Every import in the file, including function bodies. A deferred import
+    # still couples two modules; it only hides the cycle.
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ''
+            if mod:
+                found.add(mod.split('.')[0])
+                if mod.startswith('src.'):
+                    found.add(mod[len('src.'):].split('.')[0])
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                found.add(a.name.split('.')[0])
+                if a.name.startswith('src.'):
+                    found.add(a.name[len('src.'):].split('.')[0])
+    return found
+
+
+def check_provider_seam():
+    # The three interfaces must be implementation-free, and the implementations
+    # must actually implement them. This is what makes "shared code" a fact
+    # rather than a comment: nothing in src/kinematics.py, src/robot_backend.py
+    # or src/world.py can reach a simulator.
+    failures = []
+    for iface, (impl, cls, base) in PROVIDER_SEAM.items():
+        ipath = os.path.join(SRC, iface)
+        with open(ipath) as fh:
+            tree = ast.parse(fh.read(), ipath)
+        imports = _module_imports(tree)
+        if 'mujoco' in imports:
+            failures.append('  %s imports mujoco; it is the shared interface'
+                            % iface)
+        for sim in SIM_IMPLEMENTATIONS:
+            if sim in imports:
+                failures.append('  %s imports %s; the implementation is chosen '
+                                'by the entry point, not the interface'
+                                % (iface, sim))
+
+        ppath = os.path.join(SRC, impl)
+        if not os.path.isfile(ppath):
+            failures.append('  %s is missing' % impl)
+            continue
+        with open(ppath) as fh:
+            ptree = ast.parse(fh.read(), ppath)
+        classes = {n.name: n for n in ast.walk(ptree)
+                   if isinstance(n, ast.ClassDef)}
+        if cls not in classes:
+            failures.append('  %s does not define %s' % (impl, cls))
+        elif base not in [getattr(b, 'id', None) for b in classes[cls].bases]:
+            failures.append('  %s.%s does not subclass %s'
+                            % (impl, cls, base))
+
+    # No robot module outside the documented legacy pair may reach for a
+    # simulation implementation.
+    for name in ROBOT_MODULES:
+        if name in LEGACY_KIN_DEFAULTS:
+            continue
+        path = os.path.join(SRC, name)
+        with open(path) as fh:
+            tree = ast.parse(fh.read(), path)
+        for mod in _module_imports(tree):
+            if mod in SIM_IMPLEMENTATIONS:
+                failures.append('  %s imports %s; inject the provider instead'
+                                % (name, mod))
+    return failures
+
+
 def main():
     groups = [
         ('robot -> world imports', check_imports()),
@@ -236,6 +335,8 @@ def main():
         ('kinematics seam (no direct MuJoCo geometry)', check_kinematics_seam()),
         ('no mujoco imports in the tight robot modules',
          check_no_mujoco_imports()),
+        ('provider seam (interfaces stay implementation-free)',
+         check_provider_seam()),
     ]
 
     print()

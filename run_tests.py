@@ -33,7 +33,9 @@ from src.servo import PBVSServo
 from src.pick_place import (ObjectRegistry, reset_scene, place_cube,
                             search_for_object)
 from src.perception import rotation_with_yaw
-from src.world import SimObjectWorld
+from src.world_sim import SimObjectWorld
+from src.kinematics_mujoco import MujocoKinematics
+from src.robot_backend_mujoco import MujocoBackend
 from src import target_motion as TM
 from src.config import (
     POOL_SIZE, SERVO_STANDOFF, SERVO_MAX_ITERS, SERVO_V_TRANSIT,
@@ -91,7 +93,10 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     mujoco.mj_resetDataKeyframe(model, data, home)
     mujoco.mj_forward(model, data)
 
-    arm = Arm(model, data)
+    backend = MujocoBackend(model, data, ARM_DOF)
+    arm = Arm(model, data,
+              kinematics=MujocoKinematics(model, backend.tool_body_id, ARM_DOF),
+              backend=backend)
     reg = ObjectRegistry(model, POOL_SIZE)
     rng = np.random.default_rng(seed)
     with contextlib.redirect_stdout(io.StringIO()):

@@ -24,6 +24,21 @@ swapping arms is a config change plus a matching `Kinematics` provider.
 Robot code must run on real hardware; the object side is a simulation
 demonstration. Three seams keep them apart, each enforced by a test.
 
+Every seam is split the same way: an **interface** in a shared module that owns
+no implementation, and an **implementation** in whichever layer runs it.
+
+| interface (shared) | simulation implementation | hardware implementation |
+|---|---|---|
+| `src/kinematics.py` — `Kinematics` | `src/kinematics_mujoco.py` — `MujocoKinematics` | `URKinematics` (to do) |
+| `src/robot_backend.py` — `RobotBackend` | `src/robot_backend_mujoco.py` — `MujocoBackend` | `URBackend` (to do) |
+| `src/world.py` — `ObjectWorld` | `src/world_sim.py` — `SimObjectWorld` | `src/world_real.py` — `RealObjectWorld` |
+
+The entry point constructs the implementations and injects them; `arm.py` takes
+its `Kinematics` and `RobotBackend` as required arguments and imports neither.
+`tests/test_layering.py` fails if an interface module imports `mujoco` or one of
+the simulation implementations, or if the robot layer reaches for an
+implementation instead of being handed one.
+
 ## 1. The robot / world boundary — `src/world.py`
 
     robot side (hardware-portable)      world side (simulation)
@@ -161,12 +176,26 @@ Unchanged and deliberate:
   first reading is empty.
 - **On a failed grip**, re-home and search again.
 
-## Gravity compensation — `src/robot_backend.py`
+## Gravity compensation — `src/robot_backend_mujoco.py`
 
 A MuJoCo `<position>` servo produces `kp*(ctrl - q) - kv*qvel` and **nothing at
-zero error**. Gravity still acts, so a commanded hold accelerates; the error
-then builds and the arm oscillates and walks away. `MujocoBackend.command()`
-therefore feeds `g(q)` forward onto `qfrc_applied`.
+zero error**. A real UR3e controller carries the arm's weight internally; a
+MuJoCo actuator does not. `MujocoBackend.command()` therefore feeds `g(q)`
+forward onto `qfrc_applied` (via `gravity_feedforward`), and that is the **only**
+compensation in the model.
+
+The model itself must not compensate. `model_loader` used to set
+`body.gravcomp = 1.0` on every body as well, which made the simulated arm
+weightless and turned the backend's term into an upward disturbance. With both
+active the arm sat off its commanded pose, and because the pads hang 112 mm
+below the flange the tilt was amplified into lateral error at the grasp point:
+
+| at a grasp pose | double (before) | single (after) |
+|---|---|---|
+| tool error | 7.3 mm | **2.1 mm** |
+| tool tilt | 1.83° | **0.99°** |
+| pad-centre error | 6.6 mm | **3.7 mm** |
+| open-loop commit, pad error | 12.9 mm | **2.4 mm** |
 
 Two details that matter:
 
@@ -177,17 +206,11 @@ Two details that matter:
   state is never mutated. Writing to `model.opt.gravity` to isolate the term
   corrupts the run.
 
-Measured holding a fixed pose:
-
-| model | without comp | with comp |
-|---|---|---|
-| bare arm (`ur3e.xml`, 6 actuators) | 1.79 rad | **0.000000 rad** |
-| composed (arm + gripper, what runs) | 0.0127 rad | **0.0198 rad** |
-
-The bare-arm figure is the clean demonstration that the mechanism is right, but
-note the composed model — the one the simulation actually runs — still carries
-~0.02 rad (about 14 mm at the tool) and the compensation does not currently
-reduce it. That residual is a known open issue, not a solved one.
+The rule is the same on hardware: **each backend supplies whatever compensation
+its controller needs, exactly once.** A `URBackend` streams joint targets over
+RTDE and the UR controller does the compensating — it must not add a second
+term. `tests/test_hardware.py --sim` now enforces this: `body.gravcomp` must be
+zero and `qfrc_applied` must equal `g(q)` immediately after a command.
 
 ## Turning the integral and damping on
 
@@ -316,7 +339,10 @@ points the tool sideways).
 - `tests/test_hardware.py` — validates hardware assumptions (sim + real modes).
 - `tests/test_dynamics.py` — analytic `M(q)`/`g(q)` vs the simulator.
 - `models/ur3e/` — vendored UR3e MJCF and STL meshes.
-- `src/world.py` — **the boundary**: `TargetView`, `ObjectWorld`, `SimObjectWorld`.
+- `src/world.py` — **the boundary**: `TargetView` and the `ObjectWorld`
+  interface.
+- `src/world_sim.py` — the MuJoCo implementation of that boundary: scene,
+  object pool, cube driver, camera pose.
 - `src/task.py` — WAIT/TRACK/PICK/HOLD/PUTDOWN state machine. Pure policy: no
   mujoco, no viewer, no scene.
 - `src/arm.py` — IK, trajectory execution, gripper, grasp readback.
@@ -325,9 +351,12 @@ points the tool sideways).
 - `src/config.py` — global flags and constants.
 - `src/controller.py` — joint and LQR controllers, encoder model.
 - `src/model_loader.py` — composes arm + gripper + wrist camera + table.
-- `src/kinematics.py` — **the geometry seam**: FK/Jacobian/M/g providers.
-- `src/robot_backend.py` — **the I/O seam**: stepping, joint read/write,
-  gripper, gravity feedforward.
+- `src/kinematics.py` — **the geometry seam**: the `Kinematics` interface, plus
+  `AnalyticKinematics` (hardware-portable `M(q)`/`g(q)`).
+- `src/kinematics_mujoco.py` — the MuJoCo implementation of that interface.
+- `src/robot_backend.py` — **the I/O seam**: the `RobotBackend` interface.
+- `src/robot_backend_mujoco.py` — the MuJoCo implementation: simulation clock,
+  joint read/write, gripper readback, gravity feedforward.
 - `src/arm_dynamics.py` — Newton-Euler `M(q)`/`g(q)` from link data.
 - `src/world_real.py` — **hardware world**: RealSense depth behind `ObjectWorld`.
 - `src/observer.py` — observer for the unmeasured joint states.
@@ -349,8 +378,10 @@ points the tool sideways).
 - Tracking: the arm follows a moving cube at 0.20 m standoff with the tool held
   level. Hover xy error is **0.4–3.0 mm** against ground truth.
 - Detection: the wrist camera locates the cube to ~1.3 mm.
-- Gravity compensation: removes **1.79 rad** of hold drift on the bare arm
-  model. The composed model still shows ~0.02 rad; see *Gravity compensation*.
+- Gravity compensation: a single feedforward term in the simulation backend,
+  matching what a UR controller does internally. A commanded hold sits within
+  ~4 mm of its command (limited by the servo chatter below, not by the model).
+  See *Gravity compensation*.
 - Put-down: the pickup key toggles grasp → release → grasp, with the cube set
   back down gently at its own xy.
 - The grasp is verified from the gripper's own registers, not assumed.
@@ -358,26 +389,28 @@ points the tool sideways).
 
 ## Known limitation: grasp accuracy
 
-**5 of 10** grasps succeed in the current harness. The failures are a lateral
-offset introduced during the descent, not a perception error:
+**5 of 6** grasps succeed in a 6-trial headless run after the gravity fix, with
+a mean gap of **3.8 mm** between the gripper and the cube (previously 5 of 10 at
+5.7 mm). The remaining miss is a lateral error built up on the way down, not a
+perception error:
 
     at hover       1.5 mm mean xy error
-    at grasp       5.7 mm mean xy error
+    at grasp       3.8 mm mean xy error
 
-A ~17 mm lateral offset on a 30 mm cube puts the pads against the cube's side on
-the way down; they deflect and close on air (`jaw_q` reads 0.785, fully closed,
-in every failure).
+Two mechanisms remain, both smaller than the double compensation that used to
+dominate:
 
-The descent currently interpolates the **joint** vector to the IK solution. A
-straight line in joint space is not a straight line for the tool — as the arm
-folds down the tool swings sideways. The mechanism is measured: the commanded z
-falls 0.377 → 0.156 while the tool only reaches 0.287, and the xy error grows
-monotonically with that lag (0.9 → 3.0 → 10.1 → 16.7 → 20.3 mm).
+- The descent interpolates the **joint** vector to the IK solution. A straight
+  line in joint space is not a straight line for the tool: measured pad swing is
+  up to 33 mm along the path, and the pads cross the cube's top face ~10 mm
+  off-centre (8 mm with a Cartesian path).
+- The simulated position servo runs at 500 Hz with `Kv*dt/M > 2` on the wrist
+  joints, so it chatters at ~0.01 rad. That sets a 3-4 mm floor on the hold and
+  is a simulation artifact, not something to port.
 
-Three attempts at fixing this (a Cartesian straight-line descent, per-target
-settle steps, and a closed-loop settle) did not reduce the error and were
-**reverted**. Diagnosing why the arm lags a ramp it should track is the next
-step; it is the same shape as the `_q_cmd` bug that was fixed.
+A ~17 mm lateral offset on a 60 mm cube puts the pads against its side on the
+way down; they deflect and close on air (`jaw_q` reads 0.785, fully closed, in
+the failure).
 
 ## Also open
 

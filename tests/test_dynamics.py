@@ -24,7 +24,7 @@ def main():
     import mujoco
     from src.model_loader import load_robot_model
     from src.arm_dynamics import ArmDynamics
-    from src.kinematics import MujocoKinematics
+    from src.kinematics_mujoco import MujocoKinematics
 
     model = load_robot_model()
     if model is None:

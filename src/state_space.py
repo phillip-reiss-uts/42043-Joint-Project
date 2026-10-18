@@ -17,7 +17,7 @@ from src.config import ARM_DOF
 def _default_kin(model, data):
     # Build a MuJoCo provider for the legacy call style.
     import mujoco
-    from src.kinematics import MujocoKinematics
+    from src.kinematics_mujoco import MujocoKinematics
     tool = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
     return MujocoKinematics(model, tool, ARM_DOF)
 

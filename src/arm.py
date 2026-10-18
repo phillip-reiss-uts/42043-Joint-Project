@@ -12,14 +12,21 @@
 # TWO SEAMS, NO MUJOCO
 # --------------------
 # This module contains no `import mujoco`. Everything simulator-specific is
-# behind a provider:
+# behind a provider, and both providers are REQUIRED constructor arguments:
 #
 #   src/kinematics.py     FK, Jacobian, M(q), g(q)   -- geometry
 #   src/robot_backend.py  stepping, joint I/O, gripper readback -- the clock
 #
-# On a real UR3e both providers talk to the controller instead, and this module
-# does not change. `model`/`data` are still passed in because the default
-# MujocoBackend needs them to construct; nothing here dereferences them.
+# The implementations live with their own layer and are never imported here:
+#
+#   simulation   src/kinematics_mujoco.py  MujocoKinematics
+#                src/robot_backend_mujoco.py  MujocoBackend
+#   hardware     URKinematics / URBackend, talking to the controller instead
+#
+# The entry point decides which pair to build, so this module does not change
+# between simulation and hardware. `model`/`data` are still accepted because
+# the simulation implementations are constructed from them; nothing here
+# dereferences them for control.
 
 import numpy as np
 
@@ -29,18 +36,27 @@ from src.config import (
     SYNC_STEPS,
     GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
 )
-from src.kinematics import Kinematics, MujocoKinematics
-from src.robot_backend import MujocoBackend, RobotBackend
+from src.kinematics import Kinematics
+from src.robot_backend import RobotBackend
 
 
 class Arm:
-    def __init__(self, model, data, kinematics=None, backend=None):
+    def __init__(self, model, data, kinematics, backend):
+        # Both providers are required: `kinematics` supplies FK/Jacobian/M/g,
+        # `backend` supplies the clock and joint I/O. There is deliberately no
+        # MuJoCo default -- choosing an implementation is the entry point's
+        # job, and that is what keeps this module free of the simulator.
+        if kinematics is None or backend is None:
+            raise ValueError(
+                'Arm needs both a Kinematics and a RobotBackend provider; '
+                'construct them at the entry point (simulation: '
+                'src.kinematics_mujoco + src.robot_backend_mujoco)')
         self.model = model
         self.data = data
         # Robot I/O (stepping, joint read/write, gripper readback). Injected so
         # this module does not encode "the gripper is the last actuator" or
         # "a control cycle is mj_step"; both are simulation facts.
-        self.backend = backend or MujocoBackend(model, data, ARM_DOF)
+        self.backend = backend
         self.base_id = self.backend.tool_body_id
         self.grip_act = getattr(self.backend, 'grip_actuator', model.nu - 1)
 
@@ -48,9 +64,8 @@ class Arm:
         self._last_cmd = self.backend.joint_positions()
 
         # Robot geometry (FK, Jacobian, mass/gravity). Injected so the control
-        # layer does not reach into the simulator directly; defaults to the
-        # MuJoCo implementation, which reproduces the previous behaviour.
-        self.kin = kinematics or MujocoKinematics(model, self.base_id, ARM_DOF)
+        # layer does not reach into the simulator directly.
+        self.kin = kinematics
 
         # Optional closed loop on an estimated state (see controller.py).
         self.observer = None

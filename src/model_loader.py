@@ -175,10 +175,23 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
                 g.contype = 0
                 g.conaffinity = 0
 
-    # 8. Gravity compensation: everything except the pooled objects.
-    for body in arm.bodies:
-        if not body.name.startswith("obj_"):
-            body.gravcomp = 1.0
+    # 8. Gravity is left ON for every body, including the arm.
+    #
+    # It used to be switched off here (body.gravcomp = 1.0 on every non-object
+    # body) and that was wrong twice over. First, it made the simulated plant
+    # weightless: a real UR3e carries its own weight, and the point of the model
+    # is to reproduce the load the controller has to hold. Second, the backend
+    # ALSO feeds g(q) forward (see robot_backend_mujoco.gravity_feedforward),
+    # which is the single compensation a UR controller applies internally. With
+    # both active the arm was pushed UP by g against its position servos, so a
+    # commanded grasp pose sat ~7 mm high and ~2-3 mm sideways with the tool
+    # tilted ~1.8 deg -- the offset that put the pads on the cube's side instead
+    # of around it.
+    #
+    # The rule is: the model has honest gravity, and the controller emulation
+    # (or the real UR controller, on hardware) compensates it exactly once.
+    # Nothing to set here -- MuJoCo's default is gravcomp = 0, which is what
+    # every body should keep.
 
     # 9. Compile
     try:

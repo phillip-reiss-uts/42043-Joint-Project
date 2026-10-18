@@ -31,9 +31,13 @@ from src import config as cfg
 from src.model_loader import load_robot_model
 from src.perception import find_camera
 from src.arm import Arm
+# The simulation decides which providers the robot layer gets. Arm itself
+# imports neither of these.
+from src.kinematics_mujoco import MujocoKinematics
+from src.robot_backend_mujoco import MujocoBackend
 from src.pick_place import (ObjectRegistry, reset_scene, place_cube,
                             put_cube_down, clear_table)
-from src.world import SimObjectWorld
+from src.world_sim import SimObjectWorld
 from src.overlay import Overlay
 from src.task import Commands, TaskStateMachine, WAIT
 from src import target_motion
@@ -110,7 +114,10 @@ def main(sensor_size=(320, 240)):
                 ov.set_info('move', 'obj motion %s' % name,
                             '%.0f mm/s' % (speed * 1e3))
 
-    arm = Arm(model, data)
+    backend = MujocoBackend(model, data, ARM_DOF)
+    arm = Arm(model, data,
+              kinematics=MujocoKinematics(model, backend.tool_body_id, ARM_DOF),
+              backend=backend)
 
     if VERIFY_IK:
         arm.verify_ik()
