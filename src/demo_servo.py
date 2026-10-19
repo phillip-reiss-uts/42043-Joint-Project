@@ -40,7 +40,7 @@ def _trial(model, data, home, world, use_servo, shift, seed):
     from src.arm import Arm
     from src.pick_place import ObjectRegistry, spawn_one
     from src.camera import RGBDCamera
-    from src.perception import find_camera
+    from src.camera import find_camera
     from src.servo import PBVSServo
     from src.world_sim import SimObjectWorld
     from src.kinematics_mujoco import MujocoKinematics
@@ -91,7 +91,7 @@ def _trial(model, data, home, world, use_servo, shift, seed):
 def main():
     from src.model_loader import load_robot_model
     from src.camera import RGBDCamera
-    from src.perception import find_camera
+    from src.camera import find_camera
     from src.arm import Arm
     from src.pick_place import ObjectRegistry, spawn_one
     from src.servo import PBVSServo

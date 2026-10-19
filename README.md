@@ -29,8 +29,8 @@ no implementation, and an **implementation** in whichever layer runs it.
 
 | interface (shared) | simulation implementation | hardware implementation |
 |---|---|---|
-| `src/kinematics.py` — `Kinematics` | `src/kinematics_mujoco.py` — `MujocoKinematics` | `URKinematics` (to do) |
-| `src/robot_backend.py` — `RobotBackend` | `src/robot_backend_mujoco.py` — `MujocoBackend` | `URBackend` (to do) |
+| `src/kinematics.py` — `Kinematics` | `src/kinematics_mujoco.py` — `MujocoKinematics` | `src/kinematics_ur.py` — `URKinematics` |
+| `src/robot_backend.py` — `RobotBackend` | `src/robot_backend_mujoco.py` — `MujocoBackend` | `src/robot_backend_ur.py` — `URBackend` |
 | `src/world.py` — `ObjectWorld` | `src/world_sim.py` — `SimObjectWorld` | `src/world_real.py` — `RealObjectWorld` |
 
 The entry point constructs the implementations and injects them; `arm.py` takes
@@ -264,26 +264,32 @@ matplotlib 3.11.1 on macOS 13.7.8 (x86_64).
 
     python main.py                # simulation (current default)
     python main.py --sim          # simulation, explicit
-    python main.py --hardware     # real robot (not implemented; exits 2)
+    python main.py --hardware     # real robot: run_hardware.py
 
-`main.py` is a minimal dispatcher: it chooses a front-end and nothing else. With
-no option it runs the simulation. Once the hardware front-end exists the
-sensible default becomes the real robot and simulation should require `--sim`;
-that is a one-line change in `main.py`'s `_parse`.
+`main.py` is a minimal dispatcher: it chooses a front-end and nothing else.
+Simulation is still the default so the project runs on a laptop; on the cell the
+sensible default becomes the real robot and simulation should require `--sim`.
+That is a one-line change in `main.py`'s `_parse`.
 
 On macOS, use `mjpython` for the viewer:
 
     mjpython main.py
 
-The front-end can also be run directly:
+The front-ends can also be run directly:
 
     python run_simulation.py
+    python run_hardware.py --ip 192.168.1.10
 
-## Usage
+`run_hardware.py` imports no MuJoCo -- checked in `tests/test_ur_backend.py` by
+importing the front-end in a fresh interpreter and asserting `mujoco` is absent
+from `sys.modules`.
+
+## Usage (simulation)
 
 - `6` — spawn the cube on the table.
-- `7` — **pick up / put down**. First press grasps, second sets the cube back
-  down on the table, third grasps again.
+- `7` — **pick up / put down**. First press grasps, lifts and carries the cube
+  to the home pose, where it waits in the jaws. The second press sets it back
+  down. The cube is deliberately *not* released on the first press.
 - `8` — pause / resume. The robot holds position and resumes where it left off.
 - `9` — reset the scene.
 - `.` — cycle the object's motion band: off / slow 15 / medium 30 / fast 45 mm/s.
@@ -296,6 +302,9 @@ free.
 
     python tests/test_layering.py            # robot/world separation
     python tests/test_dynamics.py            # analytic M(q)/g(q) vs MuJoCo
+    python tests/test_ur_kinematics.py       # hardware chain FK/J/M/g vs MuJoCo
+    python tests/test_ur_backend.py          # RTDE/Modbus plumbing, no robot
+    python tests/test_task_flow.py           # pickup toggle: grasp -> hold -> put down
     python tests/test_hardware.py --sim      # hardware assumptions, sim mode
     python tests/test_hardware.py --real     # acceptance checklist, real mode
     python tests/test_hardware.py --selfcheck # proves the checks can fail
@@ -351,11 +360,17 @@ points the tool sideways).
 - `main.py` — minimal entry point: dispatches to a front-end.
 - `run_simulation.py` — **simulation front-end**: passive viewer, keyboard,
   scene reset, the moving cube.
+- `run_hardware.py` — **hardware front-end**: UR3e + 2F-85 + D435i, operator
+  console, no MuJoCo.
 - `run_tests.py` — headless trial harness; writes `summary.csv` and four graphs.
 - `tests/test_layering.py` — enforces the robot / world separation.
 - `tests/test_hardware.py` — validates hardware assumptions (sim + real modes).
 - `tests/test_dynamics.py` — analytic `M(q)`/`g(q)` vs the simulator.
+- `tests/test_ur_kinematics.py` — the hardware chain vs the simulator.
+- `tests/test_ur_backend.py` — RTDE/Modbus plumbing against fakes.
 - `models/ur3e/` — vendored UR3e MJCF and STL meshes.
+- `models/ur3e/arm_dynamics.json` — the link data a hardware build loads for
+  `M(q)`/`g(q)`; derived from the model once, shipped as data.
 - `src/world.py` — **the boundary**: `TargetView` and the `ObjectWorld`
   interface.
 - `src/world_sim.py` — the MuJoCo implementation of that boundary: scene,
@@ -371,9 +386,15 @@ points the tool sideways).
 - `src/kinematics.py` — **the geometry seam**: the `Kinematics` interface, plus
   `AnalyticKinematics` (hardware-portable `M(q)`/`g(q)`).
 - `src/kinematics_mujoco.py` — the MuJoCo implementation of that interface.
+- `src/kinematics_ur.py` — the hardware implementation: chain FK/Jacobian from
+  `arm_dynamics`, plus the gripper mount.
 - `src/robot_backend.py` — **the I/O seam**: the `RobotBackend` interface.
 - `src/robot_backend_mujoco.py` — the MuJoCo implementation: simulation clock,
   joint read/write, gripper readback, gravity feedforward.
+- `src/robot_backend_ur.py` — the UR implementation: RTDE `servoj`, Modbus for
+  the 2F-85, and the register map that turns the device into the grasp trio.
+- `src/pick.py` — the robot-side pick sequence: search, approach, grasp, lift,
+  carry. No MuJoCo, so the hardware front-end can use it as-is.
 - `src/arm_dynamics.py` — Newton-Euler `M(q)`/`g(q)` from link data.
 - `src/world_real.py` — **hardware world**: RealSense depth behind `ObjectWorld`.
 - `src/observer.py` — observer for the unmeasured joint states.
@@ -462,20 +483,51 @@ are now explicit:
 wheel for Python 3.12 on macOS. It is written against the API but is unverified
 until it runs against a device.
 
-## Still to do
+## Done: the three providers
 
-- **`URBackend`** — RTDE `servoj`/`movej` for `step()`, Modbus for the 2F-85
-  registers `Arm.grasp_state` already consumes.
-- **`URKinematics`** — FK/Jacobian from the controller, with `arm_dynamics`
-  supplying `M(q)`/`g(q)`.
-- **Camera mount + table plane** — measure `T_flange_cam` and `TABLE_HEIGHT`.
-- **Rotor inertia and `Kp/Kv`** — identify both; `tests/test_hardware.py --real`
-  describes the procedure for each. The invariant to measure is the **time
-  constant** `Kp/Kv`, not the damping ratio: `ζ` varies with pose through
-  `M_jj`, whereas `Kp/Kv` is fixed by the servo and is what the observer's
-  prediction was tuned against.
-- **Re-tune the integral and damping** — see above; the simulation numbers do
-  not transfer, because on hardware the gravity feedforward is approximate.
+- **`src/robot_backend_ur.py`** — `URBackend`: RTDE `servoj` streaming for
+  `step()`, `getActualQ`/`getActualQd` for state, and a Robotiq 2F-85 Modbus
+  class for the registers `Arm.grasp_state` consumes. The clients are injected,
+  so `tests/test_ur_backend.py` runs the whole thing against fakes.
+- **`src/kinematics_ur.py`** — `URKinematics`: FK and the Jacobian from the
+  6R chain in `arm_dynamics`, `M(q)`/`g(q)` from the same. The link data ships
+  as `models/ur3e/arm_dynamics.json`, so no MuJoCo is needed on the robot.
+  `tests/test_ur_kinematics.py` checks FK, `J`, `M` and `g` against MuJoCo to
+  machine precision — offline.
+- **`src/pick.py`** — the pick sequence moved out of `pick_place.py` so it no
+  longer drags the simulator onto the robot. `run_hardware.py` uses it directly.
+- **`run_hardware.py`** — composition root: builds the UR providers, the
+  RealSense world, the task policy and an operator console. Imports no MuJoCo.
+
+## Before the first run: measure these
+
+Everything below is a placeholder in `src/config.py`, taken from the simulation.
+They are the difference between "the code runs" and "the robot picks":
+
+- **`UR_SERVO_KP` / `UR_SERVO_KV`** — the controller's stiffness, not published
+  by UR. Identify from a step response; `tests/test_hardware.py --real`
+  describes the procedure. The invariant to measure is the **time constant**
+  `Kp/Kv`, not the damping ratio: `ζ` varies with pose through `M_jj`, whereas
+  `Kp/Kv` is fixed by the servo.
+- **`TOOL_MOUNT_POS` / `TOOL_MOUNT_QUAT`** — wrist_3_link to the gripper base
+  (~10.8 mm and a 90° yaw in the model). A millimetre here is a millimetre on
+  every grasp.
+- **`CAM_MOUNT_POS` / `CAM_MOUNT_QUAT`** — gripper base to the D435i optical
+  frame. A few millimetres biases every deprojected centre.
+- **`TABLE_HEIGHT`** — as before; the sim's check proves the constant is
+  load-bearing.
+
+## Still unverified
+
+- **`RealSenseSource`** has never been executed — no `pyrealsense2` wheel for
+  Python 3.12 on macOS. The depth → deproject → detect path is exercised by
+  `FakeDepthSource`; the device half is not.
+- **`URBackend`** has never seen a controller. `tests/test_ur_backend.py` proves
+  the plumbing and the register map; only `--real` proves the robot.
+- **The 2F-85 force mapping** (`gCU` → N) is a monotone placeholder, chosen so
+  the simulation's thresholds apply. Check the two endpoints on the unit.
+- **Re-tune the integral and damping** when you enable them; the simulation
+  numbers do not transfer.
 
 Task logic (`src/task.py`), the servo law and its occlusion recovery, the EKF,
 the LQR design and the grasp verification need no change.

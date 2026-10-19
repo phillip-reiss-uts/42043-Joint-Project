@@ -8,8 +8,8 @@
 import numpy as np
 
 from src.config import (
-    ARM_DOF, TIP_OFFSET, R_DOWN, TABLE_HEIGHT, OBJECT_HEIGHT,
-    GRIP_OPEN, GRIP_CLOSED, SYNC_STEPS, RAPID,
+    ARM_DOF, TIP_OFFSET, R_DOWN,
+    GRIP_OPEN, SYNC_STEPS, RAPID,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
     SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD, SERVO_KI_MAX_M,
     SERVO_KI_MAX_RAD, SERVO_DAMP_GAIN, SERVO_DAMP_NEAR_M,
@@ -235,7 +235,7 @@ class PBVSServo:
         if self.kf is not None:
             # propagate to now, then fold the measurement in; a gated-out
             # measurement leaves the prediction standing
-            self.kf.advance_to(float(self.data.time))
+            self.kf.advance_to(float(self.arm.backend.time()))
             fresh = self.kf.update(new_est)
             self.p_est = self.kf.position
             self.yaw_est = (new_yaw if self.yaw_est is None else
@@ -324,7 +324,7 @@ class PBVSServo:
         # One damped-least-squares joint increment for this pose error.
         # The Jacobian comes from the arm's Kinematics provider, so this law is
         # the same on a simulated arm and a real one.
-        J = self.arm.kin.jacobian(self.data.qpos[:ARM_DOF])
+        J = self.arm.kin.jacobian(self.arm.backend.joint_positions())
 
         # INTEGRAL TERM. The law is P+I on the pose error; the I part is what
         # removes the standing sag.
@@ -347,7 +347,7 @@ class PBVSServo:
         # and re-seeds q_cmd from data.qpos each call, so a local accumulator
         # would reset every chunk and never build.
         if self.ki > 0.0:
-            dt = self.model.opt.timestep
+            dt = self.arm.backend.dt
             self._err_int_p = self._err_int_p + np.asarray(err_p, float) * dt
             self._err_int_o = self._err_int_o + np.asarray(err_o, float) * dt
 
@@ -403,7 +403,7 @@ class PBVSServo:
             v[3:] *= limit_w / n_r
 
         dq = J.T @ np.linalg.solve(J @ J.T + self.damp * np.eye(6), v)
-        dq = dq * self.model.opt.timestep
+        dq = dq * self.arm.backend.dt
 
         # JOINT-SPACE DAMPING.
         #
@@ -430,15 +430,15 @@ class PBVSServo:
             near = (np.linalg.norm(err_p) < self.damp_near_m
                     and np.linalg.norm(err_o) < self.damp_near_rad)
             if near:
-                qvel = np.asarray(self.data.qvel[:ARM_DOF], float)
-                dq = dq - (self.damp_gain * qvel * self.model.opt.timestep)
+                qvel = np.asarray(self.arm.backend.joint_velocities(), float)
+                dq = dq - (self.damp_gain * qvel * self.arm.backend.dt)
 
         return np.clip(dq, -self.dq_max, self.dq_max)
 
     def preposition(self, z_offset, viewer=None):
         # Coarse open-loop move to the desired pose, before servoing.
         p_des, R_des = self.desired_pose(z_offset)
-        q = self.arm.solve_ik(p_des, self.data.qpos[:ARM_DOF], R_target=R_des)
+        q = self.arm.solve_ik(p_des, self.arm.backend.joint_positions(), R_target=R_des)
         self.arm.move(q, GRIP_OPEN, rate=0.20, viewer=viewer)
 
     # LOOP
@@ -447,7 +447,7 @@ class PBVSServo:
               track=False, stationary_s=None, search=None,
               track_tol=None, track_tol_rot=None):
         # Servo to the grasp pose at z_offset. Returns (converged, iters, err).
-        data, model = self.data, self.model
+        backend = self.arm.backend
         self.viewer = viewer
         self._control('open')
 
@@ -468,7 +468,7 @@ class PBVSServo:
         self.err_norm = float('inf')
         self.err_rot = float('inf')
         self._still_ref = None
-        self._still_ref_t = float(data.time)
+        self._still_ref_t = float(backend.time())
         if track_tol is None:
             track_tol = self.track_tol
         if track_tol_rot is None:
@@ -503,18 +503,18 @@ class PBVSServo:
         # _reset_command), so a genuinely new grasp does not inherit the old
         # command.
         if self._q_cmd is None or len(self._q_cmd) != ARM_DOF:
-            self._q_cmd = np.array(data.qpos[:ARM_DOF], float)
+            self._q_cmd = np.array(backend.joint_positions(), float)
         q_cmd = np.array(self._q_cmd, float)
         err_norm = float('inf')
-        last_t = float(data.time)
+        last_t = float(backend.time())
 
         for k in range(max_iters):
             if aborted is not None and aborted():
                 self._control('open')
                 return False, k, err_norm
 
-            dt = float(data.time) - last_t
-            last_t = float(data.time)
+            dt = float(backend.time()) - last_t
+            last_t = float(backend.time())
 
             if k % self.perceive_every == 0:
                 # re-observe; hold the last estimate if the view is blocked
@@ -541,7 +541,7 @@ class PBVSServo:
                         print('[SERVO] re-acquired, resuming servo')
                     else:
                         print('[SERVO] search found nothing')
-                    last_t = float(data.time)
+                    last_t = float(backend.time())
                     # Give up rather than sweeping forever: the target is not on
                     # the table where we can see it, and spinning to the
                     # iteration cap only ties up the arm.
@@ -572,7 +572,7 @@ class PBVSServo:
             # carry the estimate forward to now, so the lead term is current
             # even across the stretches with no measurement
             if self.kf is not None and self.kf.ready:
-                self.kf.advance_to(float(data.time))
+                self.kf.advance_to(float(backend.time()))
 
             p_des, R_des = self.desired_pose(z_offset)
             err_p, err_o = self.error(p_des, R_des)
@@ -603,12 +603,12 @@ class PBVSServo:
                     p_now = np.array(self.p_est, float)
                     if self._still_ref is None:
                         self._still_ref = p_now
-                        self._still_ref_t = float(data.time)
+                        self._still_ref_t = float(backend.time())
                     elif float(np.linalg.norm(p_now - self._still_ref)) \
                             > self.still_tol:
                         self._still_ref = p_now
-                        self._still_ref_t = float(data.time)
-                    self.still_time = float(data.time) - self._still_ref_t
+                        self._still_ref_t = float(backend.time())
+                    self.still_time = float(backend.time()) - self._still_ref_t
 
             ov = getattr(viewer, 'overlay', None)
             if ov is not None:
@@ -695,7 +695,7 @@ class PBVSServo:
         # d_cart * rate / dist. Invert that to get the rate which yields the
         # speed the servo itself was running at. Exact for the average; the
         # move still eases in and out because arm.move always does.
-        q_start = np.array(self.data.qpos[:ARM_DOF], float)
+        q_start = np.array(self.arm.backend.joint_positions(), float)
         dist = float(np.linalg.norm(np.asarray(q)[:ARM_DOF] - q_start))
         rate = RAPID
         if (v_cart is not None and np.isfinite(v_cart)
@@ -716,7 +716,6 @@ class PBVSServo:
         # Back straight up in steps until the object is whole in view again.
         # Each step is a planned move, so the retreat itself is open loop; only
         # the verdict comes from the camera. Returns (clear, steps).
-        data = self.data
         if v_cart is None:
             v_cart = self.retreat_v
         p_cur, R_cur = self.current_pose()
@@ -725,7 +724,8 @@ class PBVSServo:
             if aborted is not None and aborted():
                 return False, j - 1
             target = p_cur + np.array([0.0, 0.0, self.retreat_step * j])
-            q = self.arm.solve_ik(target, data.qpos[:ARM_DOF], R_target=R_cur)
+            q = self.arm.solve_ik(target, self.arm.backend.joint_positions(),
+                                  R_target=R_cur)
             self._paced_move(q, self.retreat_step, v_cart, viewer=viewer,
                              estop=estop, aborted=aborted)
             if aborted is not None and aborted():
@@ -774,7 +774,7 @@ class PBVSServo:
         self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
                              else self.best_yaw)
         p_des, R_des = self.desired_pose(0.0)
-        q = self.arm.solve_ik(p_des, self.data.qpos[:ARM_DOF], R_target=R_des)
+        q = self.arm.solve_ik(p_des, self.arm.backend.joint_positions(), R_target=R_des)
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_target(p_des, R_des)
@@ -782,7 +782,7 @@ class PBVSServo:
              'open-loop commit to %6.3f %6.3f' % (self.best_p[0], self.best_p[1]),
              'from the fullest view, span %.4f' % self.best_span)
         # same pacing again, so the open-loop descent matches the servo it replaces
-        d_cart = float(np.linalg.norm(p_des - np.array(self.data.xpos[self.base_id],
+        d_cart = float(np.linalg.norm(p_des - np.array(self.world.gripper_pose()[0],
                                                        float)))
 
         # Watch for the target moving during the descent, on the camera only.

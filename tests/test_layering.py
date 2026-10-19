@@ -46,6 +46,7 @@ if SRC not in sys.path:
 ROBOT_MODULES = [
     'arm.py',
     'servo.py',
+    'pick.py',
     'controller.py',
     'observer.py',
     'state_space.py',
@@ -95,6 +96,10 @@ PROVIDER_SEAM = {
 
 # Implementation modules that are simulation-only.
 SIM_IMPLEMENTATIONS = ('kinematics_mujoco', 'robot_backend_mujoco', 'world_sim')
+
+# Implementation modules that are hardware-only. A robot module must not import
+# these either: the front-end chooses the provider and injects it.
+HARDWARE_IMPLEMENTATIONS = ('kinematics_ur', 'robot_backend_ur')
 
 # Known, deliberate legacy couplings. These two modules still build a MuJoCo
 # provider when the caller passes no `kin=`, so that the demos and older call
@@ -236,7 +241,7 @@ def check_no_mujoco_imports():
     # shims (e.g. state_space._default_kin), where the provider is built lazily
     # so the module has no simulator dependency at import time.
     failures = []
-    for name in ('task.py', 'arm.py', 'servo.py', 'controller.py',
+    for name in ('task.py', 'arm.py', 'servo.py', 'pick.py', 'controller.py',
                  'tracking.py', 'state_space.py', 'kinematics.py',
                  'robot_backend.py', 'arm_dynamics.py'):
         path = os.path.join(SRC, name)
@@ -320,7 +325,7 @@ def check_provider_seam():
         with open(path) as fh:
             tree = ast.parse(fh.read(), path)
         for mod in _module_imports(tree):
-            if mod in SIM_IMPLEMENTATIONS:
+            if mod in SIM_IMPLEMENTATIONS or mod in HARDWARE_IMPLEMENTATIONS:
                 failures.append('  %s imports %s; inject the provider instead'
                                 % (name, mod))
     return failures

@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-import mujoco
 import numpy as np
 
 from src.config import (
@@ -115,19 +114,6 @@ def rotation_with_yaw(yaw_deg, R_down):
                    [s,  c, 0.0],
                    [0.0, 0.0, 1.0]])
     return Rz @ R_down
-
-
-def find_camera(model):
-    # Return (name, id) of the wrist camera, or (None, -1).
-    for candidate in ('camera/depth_cam', 'depth_cam'):
-        cid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, candidate)
-        if cid >= 0:
-            return candidate, cid
-    for i in range(model.ncam):
-        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_CAMERA, i)
-        if name and 'depth_cam' in name:
-            return name, i
-    return None, -1
 
 
 # SENSING

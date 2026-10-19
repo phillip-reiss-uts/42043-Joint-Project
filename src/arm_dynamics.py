@@ -99,6 +99,32 @@ class Link:
         self.I_tensor = np.diag(I) if I.shape == (3,) else I
         self.axis = np.asarray(axis, float)        # joint axis, link frame
 
+    # SERIALISATION
+    #
+    # The link data is a property of the PHYSICAL arm + payload, not of the
+    # simulator, so it is what a hardware build needs. These three methods let
+    # it be derived once from the model and then shipped as data, with no
+    # MuJoCo import on the robot.
+    def to_dict(self):
+        return {'name': self.name,
+                'pos': self.pos.tolist(),
+                'R': self.R.tolist(),
+                'mass': float(self.mass),
+                'com': self.com.tolist(),
+                'inertia': self.I_tensor.tolist(),
+                'axis': self.axis.tolist()}
+
+    @classmethod
+    def from_dict(cls, d):
+        # Bypasses the quat conversion: the stored R and inertia tensor are
+        # already in the link frame.
+        link = cls(name=d['name'], pos=d['pos'], quat=(1.0, 0.0, 0.0, 0.0),
+                   mass=d['mass'], com=d['com'], inertia=d['inertia'],
+                   axis=d['axis'])
+        link.R = np.array(d['R'], float)
+        link.I_tensor = np.array(d['inertia'], float)
+        return link
+
     @classmethod
     def from_model(cls, model, body_id, joint_axis, mu=None):
         # Build a Link from a MuJoCo body/joint pair. Convenience for the
@@ -238,6 +264,27 @@ class ArmDynamics:
 
         rotor = np.array(model.dof_armature[:n], float)
         return cls(links, rotor_inertia=rotor, gravity=model.opt.gravity)
+
+    # SERIALISATION: the link data is hardware description, not simulation state
+    def to_dict(self):
+        return {'links': [l.to_dict() for l in self.links],
+                'rotor_inertia': self.rotor.tolist(),
+                'gravity': self.gravity.tolist()}
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls([Link.from_dict(x) for x in d['links']],
+                   rotor_inertia=d['rotor_inertia'],
+                   gravity=d.get('gravity', (0.0, 0.0, -9.81)))
+
+    @classmethod
+    def from_file(cls, path):
+        # Load a chain written by to_dict(). This is how a hardware build gets
+        # M(q)/g(q) with no MuJoCo: the numbers were derived offline once and
+        # are shipped as data (models/ur3e/arm_dynamics.json).
+        import json
+        with open(path) as fh:
+            return cls.from_dict(json.load(fh))
 
     def __init__(self, links, rotor_inertia, gravity=(0.0, 0.0, -9.81)):
         self.links = list(links)

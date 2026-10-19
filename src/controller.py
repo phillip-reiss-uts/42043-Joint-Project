@@ -71,8 +71,10 @@ class Encoder:
         self.noisy = bool(noisy)
         self.rng = np.random.default_rng(seed)
 
-    def read(self, data):
-        q = np.array(data.qpos[:ARM_DOF], float)
+    def read(self, q):
+        # q is the measured joint vector -- data.qpos in simulation, the
+        # encoder readback on hardware. The noise model is the same either way.
+        q = np.asarray(q, float)[:ARM_DOF]
         if self.noisy and self.sigma > 0.0:
             q = q + self.rng.normal(0.0, self.sigma, ARM_DOF)
         return q

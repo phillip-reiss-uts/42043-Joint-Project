@@ -36,16 +36,16 @@ from src.config import (
     SYNC_STEPS,
     GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
 )
-from src.kinematics import Kinematics
-from src.robot_backend import RobotBackend
-
-
 class Arm:
-    def __init__(self, model, data, kinematics, backend):
+    def __init__(self, model=None, data=None, kinematics=None, backend=None):
         # Both providers are required: `kinematics` supplies FK/Jacobian/M/g,
         # `backend` supplies the clock and joint I/O. There is deliberately no
         # MuJoCo default -- choosing an implementation is the entry point's
         # job, and that is what keeps this module free of the simulator.
+        #
+        # `model`/`data` are optional and kept only for callers that still pass
+        # them; nothing here reads them. On hardware there is no MuJoCo model,
+        # so the front-end passes neither.
         if kinematics is None or backend is None:
             raise ValueError(
                 'Arm needs both a Kinematics and a RobotBackend provider; '
@@ -58,7 +58,9 @@ class Arm:
         # "a control cycle is mj_step"; both are simulation facts.
         self.backend = backend
         self.base_id = self.backend.tool_body_id
-        self.grip_act = getattr(self.backend, 'grip_actuator', model.nu - 1)
+        # Which actuator index the gripper occupies, when the backend has one.
+        # On hardware the gripper is a separate Modbus device, so this is None.
+        self.grip_act = getattr(self.backend, 'grip_actuator', None)
 
         # Last commanded joint vector, for the observer's predict step.
         self._last_cmd = self.backend.joint_positions()
@@ -108,7 +110,7 @@ class Arm:
             return
         u = np.array(self._last_cmd, float)
         self.observer.predict(u)
-        self.observer.update(self.encoder.read(self.data))
+        self.observer.update(self.encoder.read(self.backend.joint_positions()))
         # Push to the overlay if one is attached, via duck typing rather than a
         # direct import, so this module has no overlay dependency.
         ov = getattr(self.viewer, 'overlay', None)
@@ -130,7 +132,7 @@ class Arm:
         self.backend.command(q_cmd, grip)
         self.backend.step()
         if self.observer is not None:
-            self.observer.update(self.encoder.read(self.data))
+            self.observer.update(self.encoder.read(self.backend.joint_positions()))
 
     # IK
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,
@@ -199,12 +201,11 @@ class Arm:
         # on_step, so no existing call site silently stops rendering.
         if viewer is not None and on_step is None:
             on_step = viewer.sync
-        data, model = self.data, self.model
-        q_start = data.qpos[:ARM_DOF].copy()
+        q_start = self.backend.joint_positions()
         dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
                                     - np.asarray(q_start)[:ARM_DOF]))
         floor = FEED_MIN_STEPS if rate <= FEED else RAPID_MIN_STEPS
-        steps = max(floor, int(dist / rate / model.opt.timestep))
+        steps = max(floor, int(dist / rate / self.backend.dt))
 
         # Pace frames by simulated time (~60 Hz), not by move length.
         sync_every = max(1, SYNC_STEPS)
@@ -222,7 +223,7 @@ class Arm:
             q_ref = a * q_target[:ARM_DOF] + (1 - a) * q_start
             if self.observer is not None:
                 # close the outer loop on the estimate
-                qd_ref = (q_ref - self._q_ref_prev) / model.opt.timestep
+                qd_ref = (q_ref - self._q_ref_prev) / self.backend.dt
                 ctrl_arm = self.controller.command(q_ref, qd_ref,
                                                    self.observer.xhat)
                 self.observer.predict(ctrl_arm)
@@ -267,8 +268,7 @@ class Arm:
         # sites and folded into on_step, so nothing silently stops rendering.
         if viewer is not None and on_step is None:
             on_step = viewer.sync
-        data, model = self.data, self.model
-        q_hold = data.qpos[:ARM_DOF].copy()
+        q_hold = self.backend.joint_positions()
         for i in range(steps):
             if stop is not None and stop():
                 return
@@ -291,8 +291,12 @@ class Arm:
 
     def grasp_state(self):
         # Are the jaws actually holding something? Reads only the gripper's own
-        # position and force -- the same two registers a 2F-85 exposes over
+        # position, velocity and force -- the same trio a 2F-85 exposes over
         # Modbus -- so nothing here depends on knowing where the object is.
+        #
+        # The backend supplies all three: the simulator reads its finger joints,
+        # a URBackend reads the Modbus registers. There is deliberately no read
+        # of `data` here, so the same verdict logic runs on both.
         #
         # Measured on this model: closing on nothing drives the driver joints to
         # 0.77 with the actuator force at -0.13, the linkage bottoming out.
@@ -300,14 +304,13 @@ class Arm:
         # at +5.0. Three signals agree, so the verdict is taken from all of them
         # rather than trusting the position alone, which cannot separate
         # "gripped the cube" from "stopped against the table".
-        if not self.finger_q:
-            return {'state': 'unknown', 'held': False, 'q': float('nan'),
-                    'force': float('nan'), 'vel': float('nan')}
-        q = float(np.mean([self.data.qpos[a] for a in self.finger_q]))
-        v = float(np.mean([self.data.qvel[a] for a in self.finger_v]))
-        # Force comes from the backend: on a 2F-85 this is the Modbus torque
-        # register rather than a MuJoCo actuator array.
-        f = float(self.backend.gripper_state()['force'])
+        g = self.backend.gripper_state()
+        q = float(g['q'])
+        v = float(g['v'])
+        f = float(g['force'])
+        if not np.isfinite(q):
+            return {'state': 'unknown', 'held': False, 'q': q,
+                    'force': f, 'vel': v}
 
         if q > GRASP_CLOSED_Q:
             state = 'empty'                 # ran to the stop, nothing between

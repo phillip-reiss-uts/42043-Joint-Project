@@ -10,32 +10,24 @@ import numpy as np
 from src import config as cfg
 
 from src.config import (
-    ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED, R_DOWN,
+    ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED,
     TABLE_HEIGHT, TABLE_CENTRE, TABLE_HALF, OBJECT_HEIGHT,
     SPAWN_X_RANGE, SPAWN_Y_RANGE, SPAWN_CLEARANCE, SPAWN_ARM_CLEARANCE,
     HARD_SPAWNS, HARD_SPAWN_MODE, REALLY_HARD_MODE, HARD_BLIND_Y,
     RANDOMIZE_SPAWN, RANDOMIZE_YAW,
     MIN_OBJECT_SEPARATION,
-    APPROACH_Z, LIFT_Z,
-    STEPS_CLOSE, STEPS_RELEASE, DROP_HOLD_STEPS,
-    SERVO_V_TRANSIT, SERVO_V_DESCENT, SERVO_MAX_ITERS, SERVO_PERCEIVE_EVERY,
-    SERVO_OCCLUSION_RECOVERY, SERVO_OCCLUDE_RATIO, SERVO_OCCLUDE_RECOVER,
-    SERVO_OCCLUDE_FAILS, SERVO_RETREAT_STEP, SERVO_RETREAT_MAX, SERVO_STANDOFF,
-    SERVO_RETREAT_V,
-    REVOLVE_DEG, REVOLVE_SPEED, SYNC_STEPS,
-    SEARCH_OFFSETS, SEARCH_SPEED,
-    GRASP_LIFT_RECHECK,
+    APPROACH_Z, LIFT_Z, TIP_OFFSET,
+    STEPS_RELEASE, DROP_HOLD_STEPS,
+    SYNC_STEPS,
     MAX_PASSES,
     PLACE_EDGE_MARGIN,
     INITIAL_OBJECTS, PARK_POS,
     DROP_RADIUS,
 )
 
-from src.perception import rotation_with_yaw
 from src.overlay import push
+from src.pick import grasp_and_lift
 from src.robot_backend_mujoco import gravity_feedforward
-from src.servo import PBVSServo
-from src.world import ObjectWorld, TargetView
 
 
 def _log(msg):
@@ -288,12 +280,19 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     tx = float(np.clip(tx, SPAWN_X_RANGE[0], SPAWN_X_RANGE[1]))
     ty = float(np.clip(ty, SPAWN_Y_RANGE[0], SPAWN_Y_RANGE[1]))
 
-    # Release at the cube's own yaw so it lands square rather than spun.
-    R = rotation_with_yaw(float(rng.uniform(0.0, np.pi / 2.0)), R_DOWN)
-    q_high = arm.solve_ik([tx, ty, TABLE_HEIGHT + LIFT_Z],
-                          data.qpos[:ARM_DOF], R_target=R)
-    q_low = arm.solve_ik([tx, ty, TABLE_HEIGHT + OBJECT_HEIGHT],
-                         q_high, R_target=R)
+    # Lower with the arm's CURRENT orientation. The jaws define the cube's yaw
+    # while it is held, so commanding a different one (this used to pick a
+    # random yaw) would spin the cube on the way down.
+    _, R = arm.kin.pose(arm.backend.joint_positions())
+
+    # TIP_OFFSET is the base-to-cube-centre distance at grasp, so releasing at
+    # this height sets the cube down ON the table rather than several mm into
+    # it. The old targets were TABLE_HEIGHT+LIFT_Z and TABLE_HEIGHT+
+    # OBJECT_HEIGHT, which put the pads through the tabletop.
+    release_z = TABLE_HEIGHT + OBJECT_HEIGHT / 2.0 + TIP_OFFSET
+    q_high = arm.solve_ik([tx, ty, release_z + APPROACH_Z],
+                          arm.backend.joint_positions(), R_target=R)
+    q_low = arm.solve_ik([tx, ty, release_z], q_high, R_target=R)
     if q_high is None or q_low is None:
         return False
 
@@ -319,110 +318,20 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
             viewer.sync()
     return True
 
-# SCENE SETUP
 def pick_one(model, data, arm, world, i, drop_xy,
              viewer=None, aborted=None, estop=None):
     # Pick pooled object i and drop it at drop_xy.
     #
-    # `i` and drop_xy are scene-layout parameters chosen by the caller (a
-    # simulation concern); everything the robot learns about the object comes
-    # through `world`.
+    # Kept for the harness and the recovery path, which score a complete
+    # pick-and-place. The interactive pickup uses pick_and_hold instead, so the
+    # cube is not released until the operator asks for it.
     def stopped():
         return aborted is not None and aborted()
 
-    # Closed-loop approach: the servo drives the WHOLE transit, re-observing and
-    # re-deriving its target every perceive_every iterations. coarse=False means
-    # no open-loop preposition, so vision corrects the entire approach rather
-    # than only the final descent. Everything after the grasp stays open loop,
-    # which the overlay shows as the trail turning red.
-    sv = PBVSServo(model, data, arm, world, smooth=1.0,
-                   perceive_every=SERVO_PERCEIVE_EVERY,
-                   v_max=SERVO_V_TRANSIT, v_descent=SERVO_V_DESCENT,
-                   occlude_ratio=SERVO_OCCLUDE_RATIO,
-                   occlude_recover=SERVO_OCCLUDE_RECOVER,
-                   occlude_fails=SERVO_OCCLUDE_FAILS,
-                   retreat_step=SERVO_RETREAT_STEP,
-                   retreat_max=SERVO_RETREAT_MAX,
-                   retreat_v=SERVO_RETREAT_V)
-    if not sv.observe():
+    ok, q_lift, R = grasp_and_lift(model, data, arm, world, i, viewer=viewer,
+                           aborted=aborted, estop=estop)
+    if not ok:
         return False
-
-    def reacquire():
-        # Handed to the servo: when the target leaves the view entirely, run
-        # the same sweep the task uses and report whether it found anything.
-        # observe() with no 'near' hint takes the best-scoring cluster, which is
-        # the right choice once we no longer know roughly where the object is.
-        def perceive():
-            return [True] if sv.observe() else []
-        return search_for_object(model, data, arm, perceive, viewer=viewer,
-                                 estop=estop, stop=stopped, wide=True)
-
-    ok, _, _, _ = sv.approach(standoff=SERVO_STANDOFF, viewer=viewer,
-                              estop=estop,
-                              aborted=stopped, coarse=False,
-                              max_iters=SERVO_MAX_ITERS,
-                              check_occlusion=SERVO_OCCLUSION_RECOVERY,
-                              recover=SERVO_OCCLUSION_RECOVERY,
-                              search=reacquire)
-    if not ok or stopped():
-        return False
-
-    # Grasp committed. From here the object is held in the jaws. The mover is
-    # owned by the world and keeps gliding whatever it was told to do; the
-    # robot neither installs nor detaches it.
-    #
-    # lift from where the gripper actually ended up, with the servo's own yaw
-    # estimate, so no stored target is carried past the closed-loop phase
-    R = rotation_with_yaw(sv.yaw_est, R_DOWN)
-    q_lift = arm.solve_ik(np.array(data.xpos[arm.base_id], float)
-                          + np.array([0.0, 0.0, LIFT_Z]),
-                          data.qpos[:ARM_DOF], R_target=R)
-
-    arm.close_gripper(STEPS_CLOSE, viewer, estop=estop, stop=stopped)
-    if stopped():
-        return False
-
-    # Ask the jaws whether they got anything. Without this the result is
-    # inferred from the servo converging, which reports success after grasping
-    # empty air -- the arm reaches its committed pose either way.
-    g = arm.grasp_state()
-    print(f'[GRASP] {g["state"]}: finger {g["q"]:.3f}  force {g["force"]:+.2f}  '
-          f'vel {g["vel"]:+.4f}')
-    push(viewer, 'gripper', 'grasp %s' % g['state'],
-         'q %.3f  f %+.2f' % (g['q'], g['force']))
-    if not g['held']:
-        # Lift clear and read again. A first reading can be taken while the
-        # fingers are still travelling, and if the cube was merely resting
-        # between the jaws a lift shakes it out -- so a positive second reading
-        # is the one worth trusting.
-        q_recheck = arm.solve_ik(np.array(data.xpos[arm.base_id], float)
-                                 + np.array([0.0, 0.0, GRASP_LIFT_RECHECK]),
-                                 data.qpos[:ARM_DOF], R_target=R)
-        arm.move(q_recheck, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
-                 stop=stopped)
-        if stopped():
-            return False
-        g = arm.grasp_state()
-        print(f'[GRASP] recheck after lift: {g["state"]}: finger {g["q"]:.3f}  '
-              f'force {g["force"]:+.2f}  vel {g["vel"]:+.4f}')
-        push(viewer, 'gripper', 'grasp recheck %s' % g['state'],
-             'q %.3f  f %+.2f' % (g['q'], g['force']))
-        if not g['held']:
-            # Nothing in the jaws. Put it down cleanly and let the caller retry
-            # rather than carrying air to the release point and calling it a
-            # success.
-            arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stopped)
-            print('[GRASP] verified empty -- abandoning this pick')
-            return False
-
-    arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
-             stop=stopped)
-
-    # The old code confirmed the lift by reading the object's true height from
-    # the simulator. That is not available on hardware and is not needed: the
-    # jaws already reported 'held' above, from the gripper's own registers.
-    # The simulation-side check lives in the harness, where ground truth
-    # legitimately belongs.
 
     # carry to the release point. No chute to clear, so this is a plain place
     # on the tabletop: lift, traverse high, then lower.
@@ -442,77 +351,6 @@ def pick_one(model, data, arm, world, i, drop_xy,
 
     arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stopped)
     return True
-
-
-def search_for_object(model, data, arm, perceive, viewer=None, estop=None,
-                      stop=None, anchor=None, wide=False):
-    # Sweep the blind strip, then revolve, looking for the object. `perceive`
-    # is the caller's own perception callable, so the task-level search and the
-    # servo's re-acquire are one implementation rather than two.
-    if anchor is None:
-        anchor = np.array(data.xpos[arm.base_id], float)
-    anchor = np.array(anchor, float)
-    z = float(anchor[2])
-
-    def sweep(target, rate, rot=None, follow=True):
-        # Move to one search pose and look. Returns detections, or [] to keep
-        # sweeping. `follow=False` means keep the gripper where it is and only
-        # turn the wrist.
-        if follow:
-            q = arm.solve_ik(target, data.qpos[:ARM_DOF],
-                             R_target=rot if rot is not None else R_DOWN)
-        else:
-            q = arm.solve_ik(target, data.qpos[:ARM_DOF], R_target=rot)
-        if q is None or not _ik_reaches(model, arm, q, target):
-            return []
-        arm.move(q, GRIP_OPEN, rate=rate, viewer=viewer, estop=estop, stop=stop)
-        if stop is not None and stop():
-            return None
-        return perceive()
-
-    # Wide re-acquisition first: a target that slipped out of the footprint
-    # while the arm was chasing can be far outside the small offsets below, and
-    # the narrow sweep alone never finds it. Coarse grid over the spawn region.
-    if wide:
-        for y in np.linspace(SPAWN_Y_RANGE[0], SPAWN_Y_RANGE[1], 3):
-            for x in np.linspace(SPAWN_X_RANGE[0], SPAWN_X_RANGE[1], 3):
-                dets = sweep([x, y, z], SEARCH_SPEED)
-                if dets is None:
-                    return []
-                if dets:
-                    return dets
-
-    for dx, dy in SEARCH_OFFSETS:
-        dets = sweep([anchor[0] + dx, anchor[1] + dy, z], SEARCH_SPEED)
-        if dets is None:
-            return []
-        if dets:
-            return dets
-
-    for ang in REVOLVE_DEG:
-        R_ang = rotation_with_yaw(ang, R_DOWN)
-        dets = sweep([anchor[0], anchor[1], z], REVOLVE_SPEED, rot=R_ang,
-                     follow=False)
-        if dets is None:
-            return []
-        if dets:
-            return dets
-    return []
-
-
-def _ik_reaches(model, arm, q, target, tol=1e-3):
-    # Reject a search pose the IK could not actually reach, so the sweep does
-    # not command a move that goes somewhere else entirely.
-    #
-    # `q` may be a full qpos vector or just the ARM_DOF joint values: solve_ik
-    # returns whatever length it was given as q_init, and callers vary.
-    # Assigning a 6-vector straight into qpos raised a broadcast error, so only
-    # the arm joints are set here and the rest keep their defaults.
-    chk = mujoco.MjData(model)
-    chk.qpos[:ARM_DOF] = np.asarray(q, float)[:ARM_DOF]
-    mujoco.mj_forward(model, chk)
-    return float(np.linalg.norm(np.array(chk.xpos[arm.base_id])
-                                - np.array(target, float))) <= tol
 
 
 def clear_table(model, data, arm, world, rng,

@@ -145,3 +145,20 @@ class RGBDCamera:
                           -(vk - cy) * zk / fy,
                           -zk], axis=-1)
         return p_cam @ R.T + t
+
+def find_camera(model):
+    # Return (name, id) of the wrist camera, or (None, -1).
+    #
+    # Simulation-only: it resolves a camera in a MuJoCo model. Kept here rather
+    # than in perception so the perception geometry (clustering, calipers,
+    # yaw) stays importable on a machine with no MuJoCo -- which is what the
+    # hardware front-end needs.
+    for candidate in ('camera/depth_cam', 'depth_cam'):
+        cid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, candidate)
+        if cid >= 0:
+            return candidate, cid
+    for i in range(model.ncam):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_CAMERA, i)
+        if name and 'depth_cam' in name:
+            return name, i
+    return None, -1

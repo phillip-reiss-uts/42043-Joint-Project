@@ -27,11 +27,11 @@ import mujoco
 
 from src.model_loader import load_robot_model
 from src.camera import RGBDCamera
-from src.perception import find_camera
+from src.camera import find_camera
 from src.arm import Arm
 from src.servo import PBVSServo
-from src.pick_place import (ObjectRegistry, reset_scene, place_cube,
-                            search_for_object)
+from src.pick_place import ObjectRegistry, reset_scene, place_cube
+from src.pick import search_for_object
 from src.perception import rotation_with_yaw
 from src.world_sim import SimObjectWorld
 from src.kinematics_mujoco import MujocoKinematics

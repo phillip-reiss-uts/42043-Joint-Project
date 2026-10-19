@@ -24,12 +24,12 @@ from src.camera import RGBDCamera
 # Explicit rather than `import *`, so this file's dependence on the scene and
 # demonstration constants is legible at a glance.
 from src.config import (
-    ARM_DOF, GRIP_OPEN, PARK_POS, POOL_SIZE, RAPID, SYNC_STEPS,
+    ARM_DOF, GRIP_OPEN, GRIP_CLOSED, PARK_POS, POOL_SIZE, RAPID, SYNC_STEPS,
     USE_LQR, USE_OBSERVER, VERIFY_IK,
 )
 from src import config as cfg
 from src.model_loader import load_robot_model
-from src.perception import find_camera
+from src.camera import find_camera
 from src.arm import Arm
 # The simulation decides which providers the robot layer gets. Arm itself
 # imports neither of these.
@@ -148,10 +148,11 @@ def main(sensor_size=(320, 240)):
         # stepped from the physics loops.
         world = SimObjectWorld(model, data, camera, cam_id, reg)
 
-        print('[INFO] 6 = spawn cube, 7 = PICK UP now, 8 = pause, '
-              '9 = reset scene, . = object motion band')
+        print('[INFO] 6 = spawn cube, 7 = pick up / put down (toggle), '
+              '8 = pause, 9 = reset scene, . = object motion band')
         print('[STATE] WAIT  (scene empty; press 6 to spawn the cube. '
-              'The robot then tracks it automatically; 7 grabs it)')
+              'The robot then tracks it automatically; 7 grabs it and holds it '
+              'at home until 7 is pressed again)')
 
         def say(msg):
             print('[STATE] %s' % msg)
@@ -215,16 +216,12 @@ def main(sensor_size=(320, 240)):
             arm.detach_observer()
 
         def put_down():
-            # Set the held cube back down where it currently is. The xy comes
-            # from the object's own pose, not a random clear spot: the request
-            # was "place it down at wherever the cube is in the table xy".
-            # put_cube_down clamps it into the reachable+visible region and
-            # lowers gently rather than dropping.
-            active = world.active()
-            xy = None
-            if active:
-                p = world.pose(active[0])
-                xy = (float(p[0]), float(p[1]))
+            # Release the held cube onto the table beneath the gripper. The xy
+            # is the TOOL's, not the object's: the cube is in the jaws, so the
+            # gripper defines where it will land. (The object's true pose is a
+            # simulator-only quantity; the hardware front-end cannot ask for it.)
+            p_tool, _ = arm.kin.pose(data.qpos[:ARM_DOF])
+            xy = (float(p_tool[0]), float(p_tool[1]))
             return put_cube_down(model, data, arm, reg, rng, viewer=viewer,
                                  estop=estop, world=world, xy=xy,
                                  stop=stopped)
@@ -235,7 +232,7 @@ def main(sensor_size=(320, 240)):
         # the target's velocity estimate, and rebuilding it each frame would
         # throw that away and re-bootstrap from a single noisy look.
         from src.servo import PBVSServo
-        from src.pick_place import pick_one, search_for_object
+        from src.pick import pick_and_hold, search_for_object
         # Frame granularity for tracking.
         #
         # The chunk size no longer changes the result: servo() now persists its
@@ -323,10 +320,6 @@ def main(sensor_size=(320, 240)):
             if not active:
                 return False
             i = active[0]
-            # With the chute gone the object is simply released back on the
-            # table, short of the far edge so it stays in view.
-            drop_xy = (cfg.TABLE_CENTRE[0] + cfg.TABLE_HALF[0] - 0.10,
-                       cfg.TABLE_CENTRE[1])
             import time as _time
             # An explicit pickup must not turn into an indefinite chase. If the
             # object will not hold still, the servo would otherwise spend
@@ -348,8 +341,12 @@ def main(sensor_size=(320, 240)):
                 return (cmd.pending() or not viewer.is_running()
                         or _time.perf_counter() >= mission_deadline)
 
-            ok = pick_one(model, data, arm, world, i, drop_xy,
-                          viewer=viewer, aborted=give_up, estop=estop)
+            # Grasp, lift, and carry the cube to the home pose with the jaws
+            # still shut. It is deliberately NOT released here: the pickup
+            # command means "take it". The cube stays held at home until the
+            # key is pressed again (HOLD -> PUTDOWN -> put_down below).
+            ok = pick_and_hold(model, data, arm, world, i, home_q,
+                               viewer=viewer, aborted=give_up, estop=estop)
             if not ok and _time.perf_counter() >= mission_deadline:
                 print('[PICK] pick exceeded its wall-clock budget -- abandoning')
             return bool(ok)
@@ -383,14 +380,20 @@ def main(sensor_size=(320, 240)):
         # Latched arm pose for the WAIT hold, re-taken on each WAIT entry.
         # None means "capture on the next frame".
         wait_hold = [None]
+        # Same, for HOLD: the pose the arm waits in with the cube in its jaws.
+        held_hold = [None]
 
         while viewer.is_running():
 
             # The moving-target demo: decide WHICH object glides. The world
             # owns the mover and the physics loop steps it, so the robot is not
             # involved in the selection either.
+            #
+            # While the robot is HOLDING the cube there is nothing to glide: the
+            # only active object is the one in the jaws, and stepping its mover
+            # would drag it out of the gripper.
             act = world.active()
-            if act:
+            if act and not task.holding:
                 if demo_idx[0] != act[0]:
                     world.set_mover(TargetMover(model, data, reg, act[0]))
                     demo_idx[0] = act[0]
@@ -414,11 +417,25 @@ def main(sensor_size=(320, 240)):
                     arm.hold(GRIP_OPEN, wait_hold[0])
                     mujoco.mj_step(model, data)
                 viewer.sync()
+            elif task.mode == HOLD:
+                # Waiting with the cube in the jaws. The arm holds its latched
+                # pose with the fingers shut; the physics still runs so the
+                # viewer stays live and the grasp keeps being read back.
+                #
+                # No mover step here: the held cube must not be driven.
+                if held_hold[0] is None:
+                    held_hold[0] = arm.hold_pose()
+                for _ in range(SYNC_STEPS):
+                    arm.hold(GRIP_CLOSED, held_hold[0])
+                    mujoco.mj_step(model, data)
+                viewer.sync()
             else:
                 # TRACK and PICK drive the arm themselves (through the servo,
-                # which steps the world and syncs the viewer). Leaving WAIT
-                # drops the latched pose so the next entry captures a fresh one.
+                # which steps the world and syncs the viewer). Leaving these
+                # modes drops the latched poses so the next entry captures a
+                # fresh one.
                 wait_hold[0] = None
+                held_hold[0] = None
 
             if not task.step():
                 break

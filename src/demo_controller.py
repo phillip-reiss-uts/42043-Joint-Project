@@ -66,7 +66,7 @@ def main():
             data.xfrc_applied[GRIP] = ([force, 0.0, 0.0, 0.0, 0.0, 0.0]
                                        if k >= push_at else [0.0] * 6)
             mujoco.mj_step(model, data)
-            obs.update(enc.read(data))
+            obs.update(enc.read(data.qpos[:ARM_DOF]))
 
             if k >= n_steps - 100:            # settled under the load
                 defl.append(np.linalg.norm(data.qpos[:ARM_DOF] - q_ref))

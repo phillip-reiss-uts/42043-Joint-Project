@@ -103,11 +103,29 @@ class MujocoBackend(RobotBackend):
 
     # ---- gripper readback ----
     def gripper_state(self):
+        # The jaw registers, from the two finger driver joints and the gripper
+        # actuator. A URBackend returns the same trio from the 2F-85's Modbus
+        # registers, which is what lets Arm.grasp_state be identical on both.
         return {
-            'q': float('nan'),          # filled by Arm from its finger joints
-            'v': float('nan'),
+            'q': self._finger_mean('q'),
+            'v': self._finger_mean('v'),
             'force': float(self.data.actuator_force[self._grip_act]),
         }
+
+    def _finger_mean(self, which):
+        # Mean position or velocity of the two driver joints, or NaN if they
+        # are not in this model.
+        import mujoco
+        vals = []
+        for name in ('gripper/right_driver_joint', 'gripper/left_driver_joint'):
+            j = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if j < 0:
+                continue
+            if which == 'q':
+                vals.append(float(self.data.qpos[self.model.jnt_qposadr[j]]))
+            else:
+                vals.append(float(self.data.qvel[self.model.jnt_dofadr[j]]))
+        return float(np.mean(vals)) if vals else float('nan')
 
     def joint_addresses(self, name):
         import mujoco

@@ -158,7 +158,7 @@ def run_sim(h):
     from src.arm_dynamics import ArmDynamics, _JOINT_NAMES
     from src.kinematics_mujoco import MujocoKinematics
     from src.camera import RGBDCamera
-    from src.perception import find_camera
+    from src.camera import find_camera
     from src.config import (
         ARM_DOF, OBJECT_SIZE, GRASP_CLOSED_Q, GRASP_FORCE_MIN,
         GRASP_DRIVER_JOINTS, R_DOWN, TABLE_HEIGHT, SELF_FILTER, DEPTH_MAX,

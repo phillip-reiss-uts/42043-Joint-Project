@@ -435,3 +435,41 @@ DROP_RADIUS = 0.07        # scatter drops this far around the chute centre
 # debug flags
 VERIFY_IK = False         # run the IK self-test at startup
 VERBOSE = False           # per-stage [EXEC]/[PERCEPTION] logging
+
+# ---- hardware: UR3e + Robotiq 2F-85 + D435i -------------------------------
+#
+# Everything here is a property of the CELL, not of the simulator. The link
+# data is shipped separately, in models/ur3e/arm_dynamics.json, so the robot
+# build needs no MuJoCo.
+#
+# The values marked MEASURE are the ones that must be checked on the real cell
+# before the accuracy means anything; tests/test_hardware.py --real is the
+# checklist.
+
+UR_IP = '192.168.1.10'       # controller address
+UR_CYCLE_DT = 0.008          # s, servoj period (125 Hz control loop)
+UR_LOOKAHEAD_TIME = 0.1      # s, servoj lookahead
+UR_SERVO_GAIN = 300          # servoj gain (controller-side)
+UR_GRIPPER_UNIT = 9          # Modbus unit id of the 2F-85
+UR_TRACK_CHUNK = 250         # servo iterations per operator-paced track step
+
+# Identified servo gains for the observer/linearisation.
+# PLACEHOLDER: these are the SIMULATED actuator's numbers, not the real
+# controller's. Identify them from a step response (see --real) before trusting
+# anything derived from A_cl.
+UR_SERVO_KP = 1000.0
+UR_SERVO_KV = 200.0
+
+# Home configuration, matching models/ur3e/ur3e.xml's 'home' keyframe.
+UR_HOME_Q = (-0.366, -1.619, 0.976, -0.928, -1.571, -0.366)
+
+# Mount: wrist_3_link -> gripper base (the frame the robot controls).
+# MEASURE on the gripper; these are the composed model's values.
+TOOL_MOUNT_POS = (1.0e-06, -3.0e-06, -1.08e-02)
+TOOL_MOUNT_QUAT = (0.7071068, -0.0001, 0.0002, 0.7071068)
+
+# Camera mount: gripper base -> D435i optical frame (4x4). MEASURE with a
+# checkerboard; the values below are the simulation's bracket placement and are
+# only a starting point.
+CAM_MOUNT_POS = (0.05, 0.0, -0.03)
+CAM_MOUNT_QUAT = (0.0, 0.707, 0.707, 0.0)
