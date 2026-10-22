@@ -13,13 +13,15 @@ pipeline deprojects to the wrong point.
 This harness turns every hardcoded assumption into an explicit, individually
 reported check. It is written to run in two modes:
 
-    python tests/test_hardware.py --sim          # validates against MuJoCo
-    python tests/test_hardware.py --real         # validates against the arm
+    python tests/test_hardware.py                # sim (default)
+    python tests/test_hardware.py --sim          # same, explicit
+    python tests/test_hardware.py --real         # the physical arm
     python tests/test_hardware.py --real --robot-ip 192.168.1.10
 
---sim mode is the regression guard: the simulator must pass every check, which
-proves the harness is wired up correctly. --real mode is the acceptance test:
-whatever fails there is a real porting decision, not a bug hunt.
+sim mode is the regression guard and the default: the simulator must pass every
+check, which proves the harness is wired up correctly. --real mode is the
+acceptance test: whatever fails there is a real porting decision, not a bug
+hunt. On macOS sim mode renders a depth image, so run it under `mjpython`.
 
 DESIGN NOTE
 -----------
@@ -691,17 +693,21 @@ def run_real(h, robot_ip):
 def main():
     ap = argparse.ArgumentParser(description='Validate model assumptions '
                                             'against the real arm.')
-    g = ap.add_mutually_exclusive_group(required=True)
+    # --sim is the default: running this with no arguments is the regression
+    # guard, which is what you want 95% of the time. --real is the deliberate
+    # choice that needs the cell.
+    g = ap.add_mutually_exclusive_group(required=False)
     g.add_argument('--sim', action='store_true',
-                   help='validate against the MuJoCo model (regression guard)')
+                   help='validate against the MuJoCo model (default)')
     g.add_argument('--real', action='store_true',
                    help='validate against the physical arm')
     ap.add_argument('--robot-ip', default='192.168.1.10',
                    help='UR controller address (real mode)')
     args = ap.parse_args()
 
-    h = Harness('sim' if args.sim else 'real')
-    if args.sim:
+    h = Harness('real' if args.real else 'sim')
+    if not args.real:
+        print('[INFO] mode: sim (default; pass --real for the cell)')
         run_sim(h)
     else:
         print('  target: %s' % args.robot_ip)
