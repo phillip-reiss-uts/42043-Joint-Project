@@ -39,7 +39,7 @@ from src.pick_place import (ObjectRegistry, reset_scene, place_cube,
                             put_cube_down, clear_table)
 from src.world_sim import SimObjectWorld
 from src.overlay import Overlay
-from src.task import Commands, TaskStateMachine, WAIT
+from src.task import Commands, TaskStateMachine, WAIT, HOLD
 from src import target_motion
 from src.target_motion import TargetMover
 
