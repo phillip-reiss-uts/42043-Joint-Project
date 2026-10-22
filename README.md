@@ -18,6 +18,13 @@ MuJoCo and on the real robot from the same robot code.
 Simulation keys: `6` spawn, `7` pick up / put down (toggle), `8` pause,
 `9` reset, `.` object speed. On macOS use `mjpython main.py`.
 
+For a fixed camera, calibrate the extrinsics before running:
+
+    python tools/calibrate_camera.py --touch    # robot touches the cube at N spots
+    python tools/calibrate_camera.py --aruco    # printed marker + solvePnP (OpenCV)
+
+Both print the `FIXED_CAM_POS/TARGET/UP` lines to paste into `src/config.py`.
+
 ## Tests
 
     python tests/test_layering.py        # robot/world + provider separation
@@ -25,6 +32,8 @@ Simulation keys: `6` spawn, `7` pick up / put down (toggle), `8` pause,
     python tests/test_dynamics.py        # analytic M(q)/g(q) vs MuJoCo
     python tests/test_ur_kinematics.py   # hardware chain vs MuJoCo
     python tests/test_ur_backend.py      # RTDE/Modbus plumbing, no robot
+    python tests/test_fixed_camera.py    # eye-to-hand world, offline
+    python tests/test_calibration_camera.py  # extrinsic solvers, synthetic
     python tests/test_hardware.py --sim  # hardware assumptions
 
 ## Architecture
@@ -40,6 +49,10 @@ chosen by the entry point and injected into the robot layer.
 
 `src/pick.py`, `src/servo.py`, `src/arm.py` and `src/task.py` contain no MuJoCo
 and no device driver. `tests/test_layering.py` enforces it.
+
+The hardware world has two camera modes, chosen by `CAMERA_MODE` in
+`src/config.py`: `'wrist'` (eye-in-hand, the default) and `'fixed'`
+(eye-to-hand, for a camera on a stand). See the full notes for the trade-offs.
 
 ## Full notes
 

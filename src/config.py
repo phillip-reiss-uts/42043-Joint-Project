@@ -473,3 +473,18 @@ TOOL_MOUNT_QUAT = (0.7071068, -0.0001, 0.0002, 0.7071068)
 # only a starting point.
 CAM_MOUNT_POS = (0.05, 0.0, -0.03)
 CAM_MOUNT_QUAT = (0.0, 0.707, 0.707, 0.0)
+
+# ---- camera mode -----------------------------------------------------------
+# 'wrist'  eye-in-hand: the camera is bolted to the gripper, so its pose is
+#          FK(q) @ CAM_MOUNT and it moves with the arm.
+# 'fixed'  eye-to-hand: the camera is on a stand or the cell frame, looking at
+#          the table. Its pose in the base frame is constant and comes from the
+#          three values below, not from the arm.
+CAMERA_MODE = 'wrist'
+
+# Fixed camera: where it sits and what it looks at, in the ROBOT BASE frame.
+# MEASURE both with a tape measure and a target on the table, then refine by
+# comparing a detected cube against a ruler. FIXED_CAM_UP only sets the roll.
+FIXED_CAM_POS = (0.0, -0.35, 0.75)
+FIXED_CAM_TARGET = (0.275, 0.035, 0.02)
+FIXED_CAM_UP = (0.0, 0.0, 1.0)

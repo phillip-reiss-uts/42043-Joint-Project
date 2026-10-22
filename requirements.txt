@@ -35,3 +35,9 @@ matplotlib>=3.11.1
 # ---- deliberately NOT used -------------------------------------------------
 # mink: tried for IK and rejected. arm.solve_ik uses damped least squares, which
 # converges to the solution nearest the seed; mink's QP finds *a* solution.
+
+# ---- optional: camera calibration tool -------------------------------------
+# Only tools/calibrate_camera.py --aruco needs this; --touch (the robot-as-ruler
+# method) is numpy/scipy only. Neither the simulation nor the robot pick path
+# imports OpenCV.
+# opencv-contrib-python>=4.8   # aruco + solvePnP

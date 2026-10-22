@@ -644,6 +644,11 @@ def run_real(h, robot_ip):
              'direct bias in every deprojected centre -- the same failure the\n'
              'servo occlusion notes describe. Calibrate, do not assume\n'
              'CAM_POS/CAM_QUAT from the simulator.'),
+            ('fixed camera: measure FIXED_CAM_POS / TARGET (only if CAMERA_MODE="fixed")',
+             'The wrist-mount entries above do not apply in eye-to-hand mode.\n'
+             'Measure where the camera sits and what it aims at in the base\n'
+             'frame, then check a detected cube against a ruler: a wrong aim\n'
+             'shows up as a scale or rotation bias that grows across the table.'),
             ('verify depth_scale and units from the device',
              'RealSense reports a depth_scale (usually 0.001). Confirm the\n'
              'uint16 stream is really millimetres after scaling.'),
