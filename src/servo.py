@@ -712,6 +712,49 @@ class PBVSServo:
         self.arm.move(q, GRIP_OPEN, rate=rate, viewer=viewer, estop=estop,
                       stop=aborted, step_hook=hook)
 
+    def _cartesian_descent(self, p_des, R_des, v_cart, viewer=None, estop=None,
+                           aborted=None, watch=None):
+        # Drive the tool in a straight line to p_des, holding R_des.
+        #
+        # The commit used to call arm.move() on a JOINT-space target: the
+        # joints interpolate linearly, the tool does not, and the pads swing
+        # out and back on the way down. Measured on the harness scenes: up to
+        # 25 mm of lateral swing during the descent and 6-7 mm at the cube's
+        # top face -- enough to put a pad against the cube before the jaws
+        # close, which is what "the gripper drifts forward and hits it" is.
+        #
+        # Here the TOOL path is the interpolated quantity and the joints are
+        # solved per step, so the pads come down the line the camera aimed at.
+        # The IK is warm-started from the previous solution, so it costs a few
+        # iterations per step rather than a full solve.
+        backend = self.arm.backend
+        p0, _ = self.world.gripper_pose()
+        p0 = np.asarray(p0, float)
+        p_des = np.asarray(p_des, float)
+        dist = float(np.linalg.norm(p_des - p0))
+        steps = max(1, int(dist / max(float(v_cart), 1e-6) / backend.dt))
+        q = np.array(backend.joint_positions(), float)
+
+        for i in range(steps):
+            if aborted is not None and aborted():
+                return
+            a = (i + 1) / steps
+            a = a * a * a * (a * (a * 6.0 - 15.0) + 10.0)
+            p = (1.0 - a) * p0 + a * p_des
+            q = self.arm.solve_ik(p, q, R_target=R_des)
+            backend.command(q, GRIP_OPEN)
+            self._step_world()
+            if watch is not None and i % self.perceive_every == 0:
+                watch()
+            backend.step()
+            while estop is not None and estop():
+                backend.command(q, GRIP_OPEN)
+                backend.step()
+                if viewer is not None:
+                    viewer.sync()
+            if viewer is not None and i % SYNC_STEPS == 0:
+                viewer.sync()
+
     def retreat(self, viewer=None, estop=None, aborted=None, v_cart=None):
         # Back straight up in steps until the object is whole in view again.
         # Each step is a planned move, so the retreat itself is open loop; only
@@ -774,16 +817,12 @@ class PBVSServo:
         self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
                              else self.best_yaw)
         p_des, R_des = self.desired_pose(0.0)
-        q = self.arm.solve_ik(p_des, self.arm.backend.joint_positions(), R_target=R_des)
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_target(p_des, R_des)
         push(viewer, 'occlusion',
              'open-loop commit to %6.3f %6.3f' % (self.best_p[0], self.best_p[1]),
              'from the fullest view, span %.4f' % self.best_span)
-        # same pacing again, so the open-loop descent matches the servo it replaces
-        d_cart = float(np.linalg.norm(p_des - np.array(self.world.gripper_pose()[0],
-                                                       float)))
 
         # Watch for the target moving during the descent, on the camera only.
         self.target_moved = False
@@ -799,8 +838,9 @@ class PBVSServo:
             return ((aborted is not None and aborted()) or self.target_moved)
 
         watch_step_ = watch_step if watch else None
-        self._paced_move(q, d_cart, self.retreat_v, viewer=viewer, estop=estop,
-                         aborted=stop_now, watch=watch_step_)
+        self._cartesian_descent(p_des, R_des, self.retreat_v, viewer=viewer,
+                                estop=estop, aborted=stop_now,
+                                watch=watch_step_)
         if self.target_moved:
             return False, 0
         if aborted is not None and aborted():
