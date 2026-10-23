@@ -49,16 +49,29 @@ def step1_list(rs):
         return False
     # Any attribute access on a device can fail even when it is listed --
     # that is the macOS power-state failure, and it is worth reporting
-    # separately from "not listed at all".
+    # separately from "not listed at all". Not every librealsense version
+    # exposes every camera_info field (usb_type is newer than some builds),
+    # so a missing FIELD is skipped rather than treated as a device fault.
     d = devs[0]
+    missing = []
     for key in ('name', 'serial_number', 'usb_type', 'firmware_version',
                 'physical_port'):
+        field = getattr(rs.camera_info, key, None)
+        if field is None:
+            missing.append(key)
+            continue
         try:
-            print('  %-18s %s' % (key, d.get_info(getattr(rs.camera_info, key))))
+            print('  %-18s %s' % (key, d.get_info(field)))
         except Exception as exc:
             print('  %-18s ERROR %s' % (key, exc))
             print('  FAIL: the device is listed but cannot be queried.')
             return False
+    if missing:
+        print('  (this librealsense build does not expose: %s)'
+              % ', '.join(missing))
+        if 'usb_type' in missing:
+            print('  Check the link speed outside Python instead:'
+                  ' system_profiler SPUSBDataType | grep -A 12 -i 435i')
     return True
 
 
@@ -76,15 +89,21 @@ def step2_pipeline(rs, w=W, h=H, fps=FPS):
         print('  FAIL: %s' % exc)
         print('  If this is macOS "failed to set power state", try a lower')
         print('  resolution/fps, or a libusb-backed librealsense build.')
-        return None, None
+        return None
     try:
         scale = float(prof.get_device().first_depth_sensor()
                       .get_depth_scale())
+        print('  started. depth_scale %.6f m/unit' % scale)
+    except Exception as exc:
+        print('  started, but depth_scale unavailable: %s' % exc)
+    try:
         intr = (prof.get_stream(rs.stream.depth)
                 .as_video_stream_profile().get_intrinsics())
-        print('  started. depth_scale %.6f m/unit' % scale)
         print('  intrinsics fx %.2f fy %.2f cx %.2f cy %.2f'
               % (intr.fx, intr.fy, intr.ppx, intr.ppy))
+    except Exception as exc:
+        print('  intrinsics unavailable: %s' % exc)
+    try:
         # A started pipeline that returns no frames is not a working camera.
         for _ in range(5):
             frames = pipe.wait_for_frames()
@@ -101,7 +120,7 @@ def step2_pipeline(rs, w=W, h=H, fps=FPS):
                   ' millimetres, which is what _to_millimetres expects.')
     finally:
         pipe.stop()
-    return intr.fx, intr.fy
+    return True
 
 
 def step3_project_source(rs):
@@ -149,8 +168,7 @@ def main():
 
     if not step1_list(rs):
         return 1
-    fx, fy = step2_pipeline(rs)
-    if fx is None:
+    if step2_pipeline(rs) is not True:
         return 1
     ok = step3_project_source(rs)
 
