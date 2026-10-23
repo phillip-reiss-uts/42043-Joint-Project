@@ -1,22 +1,18 @@
-import numpy as np
-from rtde_receive import RTDEReceiveInterface
-
-r = RTDEReceiveInterface('192.168.0.194')
-q  = np.array(r.getActualQ())
-tcp = np.array(r.getActualTCPPose()[:3])
-r.disconnect()
-
-from src.arm_dynamics import ArmDynamics
-from src.kinematics_ur import URKinematics
+from src.robot_backend_ur import connect
 from src import config as cfg
+import numpy as np, time
 
-dyn = ArmDynamics.from_file('models/ur3e/arm_dynamics.json')
-kin = URKinematics(dyn, (np.full(6, cfg.UR_SERVO_KP), np.full(6, cfg.UR_SERVO_KV)),
-                   tool_pos=cfg.TOOL_MOUNT_POS, tool_quat=cfg.TOOL_MOUNT_QUAT)
+b = connect(cfg.UR_IP, activate_gripper=False)
+b._gripper = None
+q0 = b.joint_positions()
+tgt = q0.copy(); tgt[0] += np.radians(2)
+q = [float(v) for v in tgt]
 
-p, R = kin.pose(q)                      # gripper base, base frame
-print('q      :', np.round(q, 4))
-print('TCP    :', np.round(tcp*1000, 1), 'mm')      # flange
-print('FK     :', np.round(p*1000, 1), 'mm')        # gripper base
-print('d      :', np.round((p - tcp)*1000, 1), 'mm')
-print('|d|    : %.1f mm' % (np.linalg.norm(p - tcp)*1000))
+# try the positional form by hand and print what it returns
+fn = b._control.servoJ
+t0 = time.monotonic()
+r = fn(q, 0.0, 0.0, 0.008, 0.1, 300.0)
+print('servoJ returned:', r, 'after %.1f ms' % ((time.monotonic()-t0)*1000))
+time.sleep(0.2)
+print('q now:', np.round(np.degrees(b.joint_positions()), 2))
+b.close()

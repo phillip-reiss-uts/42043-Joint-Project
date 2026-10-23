@@ -221,12 +221,43 @@ class URBackend(RobotBackend):
 
     def step(self):
         # One control cycle: stream the target and block for the cycle time.
-        # servoj's time argument is the period the controller should take.
-        self._control.servoj([float(v) for v in self._q_cmd],
-                             time=self._dt,
-                             lookahead_time=self.lookahead_time,
-                             gain=self.gain)
+        #
+        # Two binding differences bite here, so both are absorbed rather than
+        # assumed:
+        #
+        #   name   `servoJ` on the ur_rtde build used here; `servoj` in
+        #          URScript and on older bindings.
+        #   args   this build takes six POSITIONAL arguments only, and the
+        #          order is NOT the natural one -- from the binding's own
+        #          docstring:
+        #              servoJ(q, speed, acceleration, time,
+        #                     lookahead_time, gain)
+        #          `speed` and `acceleration` are documented as "NOT used in
+        #          current version", so they go in as 0. Their real slot is
+        #          2nd and 3rd, which is why passing time there raises
+        #          "not within [0.03;0.2]" (that range is lookahead_time's).
+        #          gain's range is [100, 2000]; lookahead_time's is [0.03, 0.2].
+        #
+        # PACING. servoJ's docstring says it blocks for `time`, but this build
+        # returns in ~0.1 ms and the arm keeps travelling afterwards. Measured
+        # on the real UR3e (2026-10-23): 125 calls completed with a mean step of
+        # 0.0 ms and the joint did not move at all, while ONE call moved it
+        # 0.47 deg. So the cycle time is slept out here instead of assumed.
+        # Without this, Arm.move's step count (dist / rate / dt) finishes before
+        # the arm has moved, and the pick races ahead of the hardware.
+        fn = getattr(self._control, 'servoJ', None) \
+            or getattr(self._control, 'servoj')
+        q = [float(v) for v in self._q_cmd]
+        t_start = time.monotonic()
+        try:
+            fn(q, time=self._dt, lookahead_time=self.lookahead_time,
+               gain=self.gain)
+        except TypeError:
+            fn(q, 0.0, 0.0, self._dt, self.lookahead_time, self.gain)
         self._gripper_send()
+        rest = self._dt - (time.monotonic() - t_start)
+        if rest > 0.0:
+            time.sleep(rest)
 
     # ---- gripper readback ----
     def gripper_state(self):
