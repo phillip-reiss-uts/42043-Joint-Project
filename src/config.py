@@ -26,10 +26,21 @@ import numpy as np
 # If you switch back to the UR5e, restore:
 #     TABLE_CENTRE = [-0.134, 0.492]   TABLE_HALF = [0.35, 0.35]
 #     CHUTE_X = (0.216, 0.566)         CHUTE_Y = (0.142, 0.492)
-TABLE_HEIGHT = 0.02
+# MEASURED ON THE REAL CELL (2026-10-23), not the old simulated workcell.
+# The table was moved relative to the robot: it now sits BEHIND the base in -y,
+# not in front, and it is rectangular, axis-aligned with the robot's x/y (the
+# long edge measured along x to 0.000 deg).
+#
+#   far edge walked with the tool:  A (-0.2200, -0.4200) -> B (+0.2200, -0.4200)
+#   long edge 440 mm, depth 300 mm, so the centre is 150 mm in from that edge.
+#
+# The flange touches the surface at z = 0.2423; TOOL_MOUNT puts the gripper base
+# 10.8 mm below the flange, so TABLE_HEIGHT (the plane objects rest on, and the
+# one TIP_OFFSET is measured against) is 0.2423 - 0.0108.
+TABLE_HEIGHT = 0.2315
 TABLE_THICK = 0.02
-TABLE_CENTRE = [0.275, 0.035]
-TABLE_HALF = [0.20, 0.20]
+TABLE_CENTRE = [0.0, -0.270]
+TABLE_HALF = [0.22, 0.15]
 
 OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
@@ -383,8 +394,8 @@ SERVO_COMMIT_TRIES = 5        # abandon-and-retrack cycles before giving up
 GRASP_DRIVER_JOINTS = ('gripper/right_driver_joint', 'gripper/left_driver_joint')
 # Measured on this model: closing on nothing drives the driver joints to 0.77
 # (range 0..0.8) with the actuator force at -0.13 as the linkage bottoms out.
-# Closing on the 30 mm cube stalls them at 0.25 with the force saturated at
-# +5.0 and the finger velocity at ~0.
+# Closing on the 60 mm cube (OBJECT_SIZE above: half-extents of 0.03) stalls
+# them at 0.25 with the force saturated at +5.0 and the finger velocity at ~0.
 GRASP_CLOSED_Q = 0.60         # above this the jaws plainly closed on nothing
 GRASP_FORCE_MIN = 1.0         # force needed to call it gripped, not just touched
 GRASP_VEL_TOL = 0.02          # rad/s; below this the fingers count as stalled
@@ -446,7 +457,7 @@ VERBOSE = False           # per-stage [EXEC]/[PERCEPTION] logging
 # before the accuracy means anything; tests/test_hardware.py --real is the
 # checklist.
 
-UR_IP = '192.168.1.10'       # controller address
+UR_IP = '192.168.0.194'       # controller address
 UR_CYCLE_DT = 0.008          # s, servoj period (125 Hz control loop)
 UR_LOOKAHEAD_TIME = 0.1      # s, servoj lookahead
 UR_SERVO_GAIN = 300          # servoj gain (controller-side)
@@ -460,13 +471,25 @@ UR_TRACK_CHUNK = 250         # servo iterations per operator-paced track step
 UR_SERVO_KP = 1000.0
 UR_SERVO_KV = 200.0
 
-# Home configuration, matching models/ur3e/ur3e.xml's 'home' keyframe.
-UR_HOME_Q = (-0.366, -1.619, 0.976, -0.928, -1.571, -0.366)
+# Home configuration. MEASURED: the arm hand-guided to its true home on the real
+# cell, read back with getActualQ() on 2026-10-23. This no longer matches
+# models/ur3e/ur3e.xml's 'home' keyframe -- the simulated keyframe is now the
+# OLD home. Joint 1 is +1.571, not -0.366: the base is swung ~111 deg round from
+# the model, and the table was moved to match (see TABLE_* above).
+UR_HOME_Q = (1.5708, -1.6299, 0.9853, -0.9276, -1.5708, 0.0)
 
 # Mount: wrist_3_link -> gripper base (the frame the robot controls).
 # MEASURE on the gripper; these are the composed model's values.
 TOOL_MOUNT_POS = (1.0e-06, -3.0e-06, -1.08e-02)
 TOOL_MOUNT_QUAT = (0.7071068, -0.0001, 0.0002, 0.7071068)
+
+# Root yaw: the model's base frame -> the CELL's base frame.
+# MEASURED (2026-10-23, Test 1). Five hand-guided poses, FK vs getActualTCPPose:
+# the chain came out at -(TCP.x, TCP.y) every time, z unchanged, so the real
+# cell is turned 180 deg about the base z axis from models/ur3e. This is the
+# same swing that showed up in UR_HOME_Q (joint 1 = +1.571, not -0.366) and put
+# the table at -y. The link lengths were already right; only the heading was not.
+UR_ROOT_YAW = 3.141592653589793
 
 # Camera mount: gripper base -> D435i optical frame (4x4). MEASURE with a
 # checkerboard; the values below are the simulation's bracket placement and are

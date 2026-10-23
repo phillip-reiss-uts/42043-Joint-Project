@@ -165,7 +165,8 @@ def main(argv=None):
     kin = URKinematics(dyn, (np.full(ARM_DOF, cfg.UR_SERVO_KP),
                              np.full(ARM_DOF, cfg.UR_SERVO_KV)),
                        tool_pos=cfg.TOOL_MOUNT_POS,
-                       tool_quat=cfg.TOOL_MOUNT_QUAT)
+                       tool_quat=cfg.TOOL_MOUNT_QUAT,
+                       root_yaw=cfg.UR_ROOT_YAW)
     arm = Arm(None, None, kinematics=kin, backend=backend)
 
     try:

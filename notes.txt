@@ -1,0 +1,55 @@
+from rtde_receive import RTDEReceiveInterface
+r = RTDEReceiveInterface('192.168.0.194')   
+print(r.getActualQ())
+
+# RTDE print statement
+# [1.5707768201828003, -1.6299015484251917, 0.9853084723102015, -0.9275666040233155, -1.570796314870016, -5.547200338185121e-06]
+
+
+
+python from pymodbus.client import ModbusTcpClient 
+from src.robot_backend_ur import Robotiq2F85 
+c = ModbusTcpClient('192.168.0.194', port=502) 
+g = Robotiq2F85(c, unit=9) print('gACT', g._read_one(g.gACT), 'gPO', g._read_one(g.gPO)) 
+c.close()
+
+
+python3 -c "
+from rtde_receive import RTDEReceiveInterface
+r = RTDEReceiveInterface('192.168.0.194')
+print('TCP:', r.getActualTCPPose())
+r.disconnect()"
+
+
+table center
+TCP: [-0.009480604299952875, -0.3101978777508936, 0.24229272736315144, -0.0228802824680981, -3.1415077267495937, 5.599524077767604e-06]
+
+table corner 1:
+TCP: [0.20798911597060943, -0.18264530887229125, 0.24229557546930217, -0.022855903377144993, -3.141486712237576, 5.1607162546283666e-05]
+
+table corner 2:
+TCP: [-0.22198802503765577, -0.4393295922547894, 0.24233792119980996, -0.02285828959783078, -3.1414410802031445, 0.00012827950834042522]
+
+
+table long A edge point 1
+>>> print('TCP:', r.getActualTCPPose())
+TCP: [-0.2120TCP: [-0.22000351143556113, -0.4199969355503942, 0.24223909229052623, 0.0755213938785061, 3.136996533358086, -0.024275311195087523]
+Table long edge A point 2
+TCP: [0.22000589028113887, -0.42000153755936054, 0.24221720740122923, 0.07541082466620262, 3.136899783994195, -0.024175685418196324]
+
+
+
+from pymodbus.client import ModbusTcpClient
+from src.robot_backend_ur import Robotiq2F85
+c = ModbusTcpClient('192.168.0.194', port=502)
+g = Robotiq2F85(c, unit=9)
+print('gACT', g._read_one(g.gACT), 'gPO', g._read_one(g.gPO), 'gCU', g._read_one(g.gCU))
+c.close()
+
+
+c = ModbusTcpClient('192.168.0.194', port=502)
+def rd(a):
+    r = c.read_holding_registers(a, 1, device_id=9)
+    return None if r.isError() else r.registers[0]
+print('gACT', rd(0x07D3), 'gPO', rd(0x07D7), 'gCU', rd(0x07D8))
+c.close()

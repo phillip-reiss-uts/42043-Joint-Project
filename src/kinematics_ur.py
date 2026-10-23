@@ -48,15 +48,23 @@ class ChainFrames:
     # where the gripper base actually is.
 
     def __init__(self, dyn, tool_pos=(0.0, 0.0, 0.0),
-                 tool_quat=(1.0, 0.0, 0.0, 0.0)):
+                 tool_quat=(1.0, 0.0, 0.0, 0.0), root_yaw=0.0):
         self.dyn = dyn
         self.tool_pos = np.asarray(tool_pos, float)
         self.tool_rot = rot_from_quat(tool_quat)
+        # Root rotation about base z: the model's base frame -> the cell's base
+        # frame. MEASURED on the real UR3e (2026-10-23): FK came out at
+        # -(TCP.x, TCP.y) at all five hand-guided poses, i.e. the cell's base is
+        # turned 180 deg from the model's. Identity by default, so the offline
+        # MuJoCo comparison in tests/test_ur_kinematics.py is unaffected.
+        c, s = np.cos(root_yaw), np.sin(root_yaw)
+        self.R_root = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
     def _tool(self, last):
-        # Tool pose from the last link's (R, p).
+        # Tool pose from the last link's (R, p), in the CELL's base frame.
         p = np.asarray(last['p'], float) + last['R'] @ self.tool_pos
-        return p, last['R'] @ self.tool_rot
+        R = last['R'] @ self.tool_rot
+        return self.R_root @ p, self.R_root @ R
 
     def pose(self, q):
         return self._tool(self.dyn.frames(np.asarray(q, float))[-1])
@@ -65,14 +73,18 @@ class ChainFrames:
         # Geometric Jacobian, base frame: J = [z_i x (p_tool - p_i); z_i].
         #
         # The angular part is the link z axis: the tool is rigidly attached to
-        # the last link, so it turns with it.
+        # the last link, so it turns with it. The root rotation is rigid about
+        # the base z axis, so it rotates both the positions and the axes, and
+        # the whole Jacobian is premultiplied by diag(R_root, R_root).
         f = self.dyn.frames(np.asarray(q, float))
         p_tool, _ = self._tool(f[-1])
         n = self.dyn.n
         J = np.zeros((6, n))
         for i, fi in enumerate(f):
-            J[:3, i] = np.cross(fi['z'], p_tool - fi['p'])
-            J[3:, i] = fi['z']
+            p_i = self.R_root @ fi['p']
+            z_i = self.R_root @ fi['z']
+            J[:3, i] = np.cross(z_i, p_tool - p_i)
+            J[3:, i] = z_i
         return J
 
 
@@ -82,7 +94,9 @@ class URKinematics(AnalyticKinematics):
     # `dyn` is an ArmDynamics built from the arm + payload link data.
     # `servo_gains` is the identified (Kp, Kv) of the real controller.
     # `tool_pos`/`tool_quat` are the gripper mount, wrist_3_link -> gripper base.
+    # `root_yaw` turns the model's base frame onto the cell's; see ChainFrames.
 
     def __init__(self, dyn, servo_gains, tool_pos=(0.0, 0.0, 0.0),
-                 tool_quat=(1.0, 0.0, 0.0, 0.0)):
-        super().__init__(ChainFrames(dyn, tool_pos, tool_quat), dyn, servo_gains)
+                 tool_quat=(1.0, 0.0, 0.0, 0.0), root_yaw=0.0):
+        super().__init__(ChainFrames(dyn, tool_pos, tool_quat, root_yaw),
+                         dyn, servo_gains)
