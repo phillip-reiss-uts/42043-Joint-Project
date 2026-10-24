@@ -291,7 +291,20 @@ SERVO_RETREAT_V = 0.03
 # direction, so the estimate feeds back into the gripper and walks off centre.
 # At 200 mm the bias is independent of offset (fully visible), so acquire and
 # hold there and commit from that estimate.
-SERVO_STANDOFF = 0.20
+#
+# RAISED to 350 mm for the wrist-mounted camera. Intel's ideal range for the
+# D435i is 0.3-3 m, and a camera clamped to the palm sits closer to the target
+# than the tool point does, so a 200 mm standoff put the camera below the band at
+# the only moment perception runs. 350 mm is PROVISIONAL: chosen so that
+# camera-to-cube lands inside the band, NOT measured on the cell. todo D4 settles
+# it; if depth is still marginal at hover, raise further -- occlusion margin and
+# FOV both improve with height, so nothing argues against going up.
+#
+# Cost: the transit leg scales with this distance. At 200 mm the hover leg needed
+# ~3100 steps against SERVO_MAX_ITERS = 8000; 350 mm is ~1.75x, so ~5400. Inside
+# the budget, with less margin. Both step counts are arithmetic from the figure
+# above, not measured.
+SERVO_STANDOFF = 0.35
 
 # ---- moving target (robustness demonstration) ----
 # The object glides on the table while the arm servos, so the servo has to
