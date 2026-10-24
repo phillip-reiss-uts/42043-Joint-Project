@@ -29,8 +29,9 @@ UNVERIFIED
 ----------
 This module has never run against a robot. Every hardware-specific number is
 either taken from a published document (register map) or marked as needing
-identification (`servo_gains`). `tests/test_hardware.py --real` is the
-acceptance checklist; `tests/test_ur_backend.py` proves the plumbing.
+identification (`servo_gains`). `tests/test_arm_control.py` is the
+acceptance checklist; `tests/test_ur_backend.py` proves the plumbing
+and `tests/test_gripper_backend.py` proves the RG2 client.
 """
 
 import socket
@@ -292,6 +293,20 @@ class URBackend(RobotBackend):
         # tool pose through ObjectWorld.gripper_pose() instead.
         return -1
 
+    # ---- optional capability ----
+    def grip_detected(self):
+        # True/False if the gripper can say whether its jaws met an object,
+        # None if it cannot. ADVISORY ONLY -- nothing branches on it, and it is
+        # not part of the RobotBackend contract (that is why MujocoBackend has
+        # no such method). The pick logs it as free evidence at the bench.
+        fn = getattr(self._gripper, 'grip_detected', None)
+        if fn is None:
+            return None
+        try:
+            return fn()
+        except Exception:
+            return None
+
     # ---- lifecycle ----
     def close(self):
         try:
@@ -390,6 +405,16 @@ def _dashboard(host, command, port=None, timeout=5.0):
             return ''
 
 
+def _xmlrpc_call(host, method, *params):
+    # The URCap speaks plain XML-RPC on RG2_XMLRPC_PORT. The onRobot package only
+    # wraps a couple of methods, so anything else goes direct through stdlib --
+    # no pycurl needed. Injected in tests, like the client and the dashboard.
+    import xmlrpc.client
+    uri = 'http://%s:%d' % (host, int(_cfg.RG2_XMLRPC_PORT))
+    with xmlrpc.client.ServerProxy(uri) as proxy:
+        return getattr(proxy, method)(*params)
+
+
 class RG2:
     # OnRobot RG2 v2: XML-RPC control and readback, dashboard as last resort.
     #
@@ -399,7 +424,7 @@ class RG2:
     def __init__(self, host, grip_id=0, open_width_mm=None, close_width_mm=None,
                  force_n=None, min_step_mm=None, stroke_time=None,
                  dashboard_fallback=True, dashboard_timeout=5.0,
-                 client=None, dashboard=None):
+                 client=None, dashboard=None, call=None):
         self.host = host
         self._grip_id = int(grip_id)
         self.open_width_mm = (float(_cfg.RG2_OPEN_WIDTH_MM)
@@ -418,6 +443,7 @@ class RG2:
         self._allow_dashboard = bool(dashboard_fallback)
         # Injected for tests, the same way URBackend takes its RTDE clients.
         self._dashboard_fn = dashboard or _dashboard
+        self._read_raw = call          # raw XML-RPC transport, lazily defaulted
         self._rg = client            # onRobot RG instance, or False once failed
         self._route = 'xmlrpc' if client is not None else None
         self._warned = False
@@ -542,18 +568,14 @@ class RG2:
     def grip_detected(self):
         # Optional extra: the URCap exposes rg_get_grip_detected, but the
         # onRobot package never wired it. Same envelope as rg_get_width -- one
-        # int param -- so stdlib xmlrpc.client can make the call without
-        # pycurl.
+        # int param -- so it goes direct through the raw XML-RPC transport.
         #
-        # Returns True/False, or None if the URCap does not answer. Nothing in
-        # the pipeline branches on it: the pickup is open loop, and this exists
-        # so the bench can ask the gripper directly whether it is holding
-        # something (todo B4).
+        # Returns True/False, or None if the URCap does not answer. Nothing
+        # branches on it: the pickup is open loop, and this exists so the bench
+        # can ask the gripper directly whether it is holding something.
         try:
-            import xmlrpc.client
-            uri = 'http://%s:%d' % (self.host, int(_cfg.RG2_XMLRPC_PORT))
-            with xmlrpc.client.ServerProxy(uri) as proxy:
-                return bool(proxy.rg_get_grip_detected(self._grip_id))
+            call = self._read_raw or (lambda m, *p: _xmlrpc_call(self.host, m, *p))
+            return bool(call('rg_get_grip_detected', self._grip_id))
         except Exception:
             return None
 

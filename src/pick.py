@@ -179,6 +179,24 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
           f'vel {g["vel"]:+.4f}')
     push(viewer, 'gripper', 'grasp %s' % g['state'],
          'q %.3f  f %+.2f' % (g['q'], g['force']))
+
+    # Advisory only, never a gate (todo C3): the gripper can sometimes say
+    # whether its jaws met an object (RG2 XML-RPC rg_get_grip_detected). It is
+    # logged because it is free evidence at the bench; the pickup proceeds
+    # regardless of the answer. Backends without the capability return None and
+    # this prints nothing.
+    _detect = getattr(arm.backend, 'grip_detected', None)
+    if _detect is not None:
+        try:
+            detected = _detect()
+        except Exception:
+            detected = None
+        if detected is not None:
+            print('[GRASP] gripper reports %s'
+                  % ('an object' if detected else 'nothing between the jaws'))
+            push(viewer, 'gripper', 'detected %s'
+                 % ('object' if detected else 'nothing'))
+
     if g['state'] == 'unknown':
         print('[GRASP] no gripper feedback -- open loop, carrying on')
     elif not g['held']:

@@ -247,6 +247,41 @@ def main():
                           grip.grip_detected() in (True, False, None),
                           str(grip.grip_detected()))
 
+    class DetectingRG(FakeRG):
+        def __init__(self, answer):
+            FakeRG.__init__(self)
+            self.answer = answer
+
+        def grip_detected(self):
+            return self.answer
+
+    recv = FakeReceive([0.0] * 6)
+    ctrl = FakeControl(recv)
+    be = URBackend(ctrl, recv, RG2('127.0.0.1', client=FakeRG()), dt=0.008)
+    failures += not check('URBackend exposes grip_detected as advisory',
+                          hasattr(be, 'grip_detected'))
+    failures += not check('None when the gripper cannot answer',
+                          be.grip_detected() is None, str(be.grip_detected()))
+
+    always = lambda *a: True       # noqa: E731
+    never = lambda *a: False       # noqa: E731
+    be2 = URBackend(FakeControl(recv), recv,
+                    RG2('127.0.0.1', client=FakeRG(), call=always), dt=0.008)
+    failures += not check('delegates True from the gripper',
+                          be2.grip_detected() is True, str(be2.grip_detected()))
+    be3 = URBackend(FakeControl(recv), recv,
+                    RG2('127.0.0.1', client=FakeRG(), call=never), dt=0.008)
+    failures += not check('delegates False from the gripper',
+                          be3.grip_detected() is False, str(be3.grip_detected()))
+
+    def boom(*a):
+        raise RuntimeError('urcap down')
+
+    be4 = URBackend(FakeControl(recv), recv,
+                    RG2('127.0.0.1', client=FakeRG(), call=boom), dt=0.008)
+    failures += not check('a failing transport is None, not an exception',
+                          be4.grip_detected() is None)
+
     print()
     print('=' * 74)
     if failures:

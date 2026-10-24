@@ -30,7 +30,7 @@ WHAT MUST COME FROM THE ROBOT
 `servo_gains()` is the one quantity the link data cannot give you: it is a
 property of the controller, not the arm. It has no default here, for the same
 reason `AnalyticKinematics` has none -- passing the simulated 1000/200 would
-silently describe the wrong plant. `tests/test_hardware.py --real` describes how
+silently describe the wrong plant. `tests/test_arm_control.py` describes how
 to identify it from a step response.
 """
 

@@ -503,7 +503,7 @@ VERBOSE = False           # per-stage [EXEC]/[PERCEPTION] logging
 # build needs no MuJoCo.
 #
 # The values marked MEASURE are the ones that must be checked on the real cell
-# before the accuracy means anything; tests/test_hardware.py --real is the
+# before the accuracy means anything; tests/test_arm_control.py is the
 # checklist.
 
 UR_IP = '192.168.0.194'       # controller address

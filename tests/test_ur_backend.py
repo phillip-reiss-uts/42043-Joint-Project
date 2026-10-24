@@ -10,7 +10,7 @@
 #
 # What this proves: the plumbing (servoj pacing, joint readback, the gripper
 # throttle, the register map, the grasp trio). What it cannot prove: that the
-# real controller accepts these calls -- that is `test_hardware.py --real`.
+# real controller accepts these calls -- that is `tests/test_arm_control.py`.
 #
 # Run: python tests/test_ur_backend.py
 
@@ -231,7 +231,7 @@ def main():
         return 1
     print('  All checks passed. The hardware backend plumbing is sound.')
     print('  This does NOT verify that a real UR3e accepts these calls:')
-    print('  run `python tests/test_hardware.py --real` against the arm.')
+    print('  run `python tests/test_arm_control.py` against the arm.')
     print('=' * 74)
     return 0
 

@@ -169,7 +169,7 @@ class FakeDepthSource(DepthSource):
     #
     # Renders a 30 mm cube on a table so detection has something real to find.
     # This is scaffolding for the test suite, not a substitute for hardware
-    # validation (see tests/test_hardware.py --real).
+    # validation (see tests/test_camera_enum.py and tests/test_camera_ruler.py).
 
     def __init__(self, width=320, height=240, cam_height=0.62, table_z=0.02,
                  object_h=0.03):
@@ -408,7 +408,7 @@ def camera_transform(pos, forward, up_hint=(0.0, 0.0, 1.0)):
     return T
 
 
-# VALIDATION HELPERS (used by tests/test_hardware.py --real)
+# VALIDATION HELPERS (used by tests/test_camera_enum.py)
 def check_intrinsics(depth_source):
     # The sim's camera.py forces fx == |fy| and a centred principal point.
     # The real device will not. Report the difference rather than hiding it.

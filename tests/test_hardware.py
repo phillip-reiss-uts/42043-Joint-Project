@@ -11,17 +11,18 @@ servo converges to the wrong place, the grasp reports "held" on air, the depth
 pipeline deprojects to the wrong point.
 
 This harness turns every hardcoded assumption into an explicit, individually
-reported check. It is written to run in two modes:
+reported check, and runs against the model only:
 
-    python tests/test_hardware.py                # sim (default)
+    python tests/test_hardware.py                # sim
     python tests/test_hardware.py --sim          # same, explicit
-    python tests/test_hardware.py --real         # the physical arm
-    python tests/test_hardware.py --real --robot-ip 192.168.1.10
+    python tests/test_hardware.py --selfcheck    # prove the harness can fail
 
-sim mode is the regression guard and the default: the simulator must pass every
-check, which proves the harness is wired up correctly. --real mode is the
-acceptance test: whatever fails there is a real porting decision, not a bug
-hunt. On macOS sim mode renders a depth image, so run it under `mjpython`.
+It used to have a --real mode. That mode listed hardware checks as TODOs and
+recorded every one as SKIP, so it could never fail and a green run was not
+evidence. It was deleted rather than left looking like acceptance coverage. The
+real acceptance tests are tests/test_arm_control.py (arm) and
+tests/test_camera_enum.py (camera). On macOS sim mode renders a depth image, so
+run it under `mjpython`.
 
 DESIGN NOTE
 -----------
@@ -573,145 +574,21 @@ def run_sim(h):
         r.set(ok, 'q_home = %s' % np.round(q_home, 3))
 
 
-# =====================================================================
-# REAL HARDWARE MODE
-# =====================================================================
-def run_real(h, robot_ip):
-    print()
-    print('  Real-hardware mode. This needs drivers that do not exist yet:')
-    print('    * UR RTDE client for joint state and movej/servoj')
-    print('    * Robotiq 2F-85 Modbus client for the jaw registers')
-    print('    * pyrealsense2 for intrinsics and frames')
-    print()
-    print('  Each check below states what it will verify once those exist.')
-    print('  They are recorded as SKIP so the report is complete rather than')
-    print('  silently passing.')
-    print()
-
-    TODO = {
-        'KINEMATICS': [
-            ('joint order returned by RTDE matches _JOINT_NAMES',
-             'getActualJointPositions returns base..wrist in order. Verify by\n'
-             'moving one joint at a time and watching which position changes.'),
-            ('tool frame offset matches the physical flange',
-             'Drive the arm to a marked pose and measure TCP position with a\n'
-             'caliper/pointer. Compare to FK(q). Any mismatch is a flange\n'
-             'offset error, not a calibration detail.'),
-        ],
-        'DYNAMICS': [
-            ('measured M(q) diagonal is plausible against the analytic model',
-             'Move joint i with a known torque and observe acceleration. The\n'
-             'ratio gives M_ii; compare to ArmDynamics. Expect agreement to\n'
-             'within the payload uncertainty, not to 1e-15.'),
-            ('gravity torque sign and magnitude are right at several poses',
-             'Hold the arm still at several poses and read getTargetTorques.\n'
-             'Compare to gravity_torque(q). A sign flip means g(q) is inverted.'),
-            ('rotor inertia is non-zero (identify it)',
-             'Apply a torque pulse at a wrist joint and measure the immediate\n'
-             'acceleration; that gives reflected inertia directly. The 0.1 in\n'
-             'the sim model is a guess and must not be assumed.'),
-        ],
-        'SERVO': [
-            ('slow pole Kp/Kv measured from a step response',
-             'Command a small step (e.g. 2 deg) with movej and log actual\n'
-             'position at RTDE rate. Fit the slow time constant. Compare to\n'
-             'the 5 rad/s in the model. THIS IS THE ONE MEASUREMENT that the\n'
-             'whole gain parameterisation rests on.'),
-            ('servo is overdamped (no resonance in the step response)',
-             'If the measured response overshoots or rings, the two-real-pole\n'
-             'assumption behind A_cl is false and the LQR design is invalid.'),
-            ('Kp/Kv is the same for every joint',
-             'Repeat the step test on all six joints. The model assumes one\n'
-             'time constant; if joints differ, store six.'),
-        ],
-        'GRIPPER': [
-            ('which endpoint/register the gripper actually is',
-             'The code assumes the gripper is the last actuator in one command\n'
-             'vector. On hardware it is a separate Modbus device with its own\n'
-             'address; confirm the mapping explicitly.'),
-            ('jaw position on empty close vs on grasp',
-             'Close on air and on the object, log the position register for\n'
-             'both. GRASP_CLOSED_Q must sit strictly between them.'),
-            ('force threshold vs achievable squeeze',
-             'Set the 2F-85 force register to the config value and confirm the\n'
-             'reported force exceeds GRASP_FORCE_MIN when holding the object.'),
-        ],
-        'CAMERA': [
-            ('measure the true table plane and update TABLE_HEIGHT',
-             'Put a flat object or the gripper tip on the surface, deproject it,\n'
-             'and read world z. TABLE_HEIGHT is the only thing separating the\n'
-             'object from the table in the height filter.'),
-            ('measure T_flange_cam (camera mount offset)',
-             'Camera pose is FK(q) @ T_flange_cam. A few mm of mount error is a\n'
-             'direct bias in every deprojected centre -- the same failure the\n'
-             'servo occlusion notes describe. Calibrate, do not assume\n'
-             'CAM_POS/CAM_QUAT from the simulator.'),
-            ('fixed camera: measure FIXED_CAM_POS / TARGET (only if CAMERA_MODE="fixed")',
-             'The wrist-mount entries above do not apply in eye-to-hand mode.\n'
-             'Measure where the camera sits and what it aims at in the base\n'
-             'frame, then check a detected cube against a ruler: a wrong aim\n'
-             'shows up as a scale or rotation bias that grows across the table.'),
-            ('verify depth_scale and units from the device',
-             'RealSense reports a depth_scale (usually 0.001). Confirm the\n'
-             'uint16 stream is really millimetres after scaling.'),
-            ('run RealObjectWorld against the real camera and compare to a ruler',
-             'Place the cube at a measured position and check the TargetView\n'
-             'centre. This is the end-to-end acceptance test for the whole\n'
-             'perception path.'),
-            ('use the device intrinsics, not the pinhole assumption',
-             'Query pyrealsense2 for the actual intrinsics. Expect fx != fy and\n'
-             'cx,cy off centre. The current BGR==RGB and fx==-fy conventions\n'
-             'must be replaced with the real values.'),
-            ('colour channel order matches the detector',
-             'The sim renders RGB. A RealSense gives BGR. The detector threshold\n'
-             'and the overlay colours both assume RGB.'),
-            ('depth units and alignment to colour',
-             'MuJoCo depth is metres, z-forward. RealSense is millimetres and\n'
-             'may not be aligned to the colour stream. Confirm both.'),
-            ('extrinsics: camera pose in the flange frame',
-             'The sim attaches the camera at CAM_POS/CAM_QUAT. Measure or\n'
-             'calibrate the real mount offset -- a few mm of error is a direct\n'
-             'bias in every deprojected centre.'),
-        ],
-        'LIMITS': [
-            ('joint limits and max velocity match the controller',
-             'Read them from the UR and compare to the model. The IK clips to\n'
-             'a symmetric max_joint, which is not the real envelope.'),
-            ('payload: gripper + camera vs the UR3e 3 kg rating',
-             'Weigh the tool. If the total approaches the limit, the dynamics\n'
-             'model and the safety limits both need revisiting.'),
-        ],
-    }
-
-    for group, items in TODO.items():
-        for name, why in items:
-            with h.check(group, name, why) as r:
-                r.skipped = True
-                r.detail = 'needs the hardware drivers'
-
 
 def main():
     ap = argparse.ArgumentParser(description='Validate model assumptions '
-                                            'against the real arm.')
-    # --sim is the default: running this with no arguments is the regression
-    # guard, which is what you want 95% of the time. --real is the deliberate
-    # choice that needs the cell.
-    g = ap.add_mutually_exclusive_group(required=False)
-    g.add_argument('--sim', action='store_true',
-                   help='validate against the MuJoCo model (default)')
-    g.add_argument('--real', action='store_true',
-                   help='validate against the physical arm')
-    ap.add_argument('--robot-ip', default='192.168.1.10',
-                   help='UR controller address (real mode)')
-    args = ap.parse_args()
+                                            'against the MuJoCo model.')
+    # This harness only ever runs against the model. The --real mode that used to
+    # live here listed hardware checks as TODOs and recorded every one as SKIP:
+    # it could not fail, so a green run was not evidence. It was deleted rather
+    # than left looking like acceptance coverage. The real acceptance tests are
+    # tests/test_arm_control.py (arm) and tests/test_camera_enum.py (camera).
+    ap.add_argument('--sim', action='store_true',
+                    help='validate against the MuJoCo model (the only mode)')
+    ap.parse_args()
 
-    h = Harness('real' if args.real else 'sim')
-    if not args.real:
-        print('[INFO] mode: sim (default; pass --real for the cell)')
-        run_sim(h)
-    else:
-        print('  target: %s' % args.robot_ip)
-        run_real(h, args.robot_ip)
+    h = Harness('sim')
+    run_sim(h)
     return h.report()
 
 

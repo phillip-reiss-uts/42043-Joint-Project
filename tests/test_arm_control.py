@@ -3,9 +3,10 @@
 #
 # WHY A SEPARATE FILE FROM test_hardware.py
 # -----------------------------------------
-# tests/test_hardware.py --real is a stub: it lists what should be checked and
-# records every item as SKIP. It cannot fail. This is the opposite: a small
-# number of checks that really run against the controller and really fail.
+# test_hardware.py used to carry a --real mode that was a stub: it listed what
+# should be checked and recorded every item as SKIP, so it could not fail. That
+# mode has been deleted. This file is the opposite: a small number of checks
+# that really run against the controller and really fail.
 #
 # The config check comes FIRST and is not advisory. Every measurement taken in
 # this session -- the 180 deg root yaw, the table centre at -y, the true home --
