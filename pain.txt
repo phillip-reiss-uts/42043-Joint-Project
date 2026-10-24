@@ -1,4 +1,0 @@
-cd ~/ur_rtde/build 2>/dev/null || (mkdir -p ~/ur_rtde/build && cd ~/ur_rtde/build)
-cmake .. -DPYTHON_BINDINGS=ON \
-         -DPYTHON_EXECUTABLE=$(which python3) \
-         -DCMAKE_BUILD_TYPE=Release
