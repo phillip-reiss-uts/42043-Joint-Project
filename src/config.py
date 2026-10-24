@@ -400,6 +400,55 @@ GRASP_CLOSED_Q = 0.60         # above this the jaws plainly closed on nothing
 GRASP_FORCE_MIN = 1.0         # force needed to call it gripped, not just touched
 GRASP_VEL_TOL = 0.02          # rad/s; below this the fingers count as stalled
 GRASP_LIFT_RECHECK = 0.04     # m; lift clear and re-read after a failed check
+
+# ---- gripper: OnRobot RG2 (hardware) --------------------------------------
+# The pickup on hardware is OPEN LOOP: command the jaws, wait, lift. The RG2
+# takes force as a WRITE-ONLY input and reports only jaw opening in mm, so
+# there is no force to test against and the simulation's GRASP_FORCE_MIN above
+# does not apply (see notes/RG2-GRIPPER-XMLRPC.txt).
+#
+# OPERATIVE constant: seconds for one full open->close stroke. MEASURE it at
+# the bench with a stopwatch. None means unmeasured, so nothing can silently
+# treat it as a real timing. STEPS_CLOSE/STEPS_RELEASE are control cycles and
+# do not describe hardware time (24 s / 16 s at 125 Hz, far slower than real).
+GRIP_STROKE_TIME_S = None
+#
+# OPTIONAL instrumentation, NOT a gate. If get_rg_width() answers, these let
+# the pickup report where the jaws actually finished -- useful for the report
+# and for diagnosing a missed pick -- but no decision branches on them.
+# Closing on the 60 mm cube leaves the jaws near the cube side; closing on air
+# drives them to the inner limit near zero, so the two are far apart.
+OBJECT_SIDE_MM = OBJECT_HEIGHT * 1e3         # 60.0 -- derived from OBJECT_SIZE
+GRASP_WIDTH_MARGIN_MM = 10.0                 # jaw padding, slop, cube tolerance
+GRASP_WIDTH_MIN_MM = OBJECT_SIDE_MM - GRASP_WIDTH_MARGIN_MM   # 50.0
+
+# ---- gripper: RG2 interface ----------------------------------------------
+# PRIMARY control AND readback: the OnRobot URCap's XML-RPC on port 41414,
+# through the `onRobot` package -- the method the lab example uses
+# (UR3_RG2_rosbridge/examples/15_real_gripper_control.py):
+#       RG(host, id).rg_grip(width_mm, force_N)     .get_rg_width()
+# It is proportional (target width in mm) and it is the only route that reports
+# width at all.
+#
+# LAST RESORT: trigger UR programs that were built on the pendant, over the
+# dashboard server. Discrete open/close only, no readback, and it carries three
+# quirks (report 5.2). Used automatically only when XML-RPC is unavailable.
+UR_DASHBOARD_PORT = 29999
+RG2_XMLRPC_PORT = 41414
+RG2_OPEN_PROGRAM = '/programs/rg_open.urp'
+RG2_CLOSE_PROGRAM = '/programs/rg_close.urp'
+# The pipeline commands grip as GRIP_OPEN..GRIP_CLOSED (0..255); the RG2 wants
+# a target width in mm, so the command is interpolated between these.
+RG2_OPEN_WIDTH_MM = 110.0    # RG2 full stroke, from the datasheet
+RG2_CLOSE_WIDTH_MM = 10.0    # fully closed without slamming; the example uses 10
+RG2_GRIP_FORCE_N = 20.0      # write-only input; never readable
+RG2_MIN_STEP_MM = 2.0        # skip commands smaller than this
+# Width -> the simulation's driver-joint convention. The sim reads HIGH q as
+# CLOSED (closing on air drives its joints to 0.77), while the RG2 reports jaw
+# opening in mm, so the map has to invert: wider jaws -> smaller q. Keeping the
+# direction means no existing threshold silently flips meaning.
+GRIP_WIDTH_FULL_MM = RG2_OPEN_WIDTH_MM
+GRIP_Q_FULL = 0.8             # sim driver-joint range, for the monotone map
 # Yaw blend gain, separate from the position blend. The top face is square, so
 # the calipers can label the same orientation as yaw or yaw+90. With the raw
 # reading the label flipped every look, commanding a ~90 deg wrist swing and
@@ -491,11 +540,22 @@ TOOL_MOUNT_QUAT = (0.7071068, -0.0001, 0.0002, 0.7071068)
 # the table at -y. The link lengths were already right; only the heading was not.
 UR_ROOT_YAW = 3.141592653589793
 
-# Camera mount: gripper base -> D435i optical frame (4x4). MEASURE with a
-# checkerboard; the values below are the simulation's bracket placement and are
-# only a starting point.
-CAM_MOUNT_POS = (0.05, 0.0, -0.03)
-CAM_MOUNT_QUAT = (0.0, 0.707, 0.707, 0.0)
+# ---- camera mount: WRIST (eye-in-hand) ------------------------------------
+# Transform gripper base -> D435i optical frame. The printed clamp goes on the
+# RG2 PALM, so the camera will NOT sit where the simulator's bracket did. The
+# numbers below ARE that bracket, kept so imports work: they are NOT measured.
+#
+# CAM_MOUNT_MEASURED stays False until hand-eye calibration (todo D5) has
+# produced real numbers. Anything consuming the mount must not claim accuracy
+# while this is False.
+#
+# Sanity bounds for the measured values: expect the camera body roughly 40-100
+# mm from the gripper base, optical axis near -z, quaternion components inside
+# [-1, 1] and near unit norm. A translation in the hundreds of mm, or a
+# non-unit quaternion, means a frame or units error, not a bad calibration.
+CAM_MOUNT_MEASURED = False
+CAM_MOUNT_POS = (0.05, 0.0, -0.03)             # PLACEHOLDER -- sim bracket
+CAM_MOUNT_QUAT = (0.0, 0.707, 0.707, 0.0)      # PLACEHOLDER -- sim bracket
 
 # ---- camera mode -----------------------------------------------------------
 # 'wrist'  eye-in-hand: the camera is bolted to the gripper, so its pose is
@@ -505,9 +565,13 @@ CAM_MOUNT_QUAT = (0.0, 0.707, 0.707, 0.0)
 #          three values below, not from the arm.
 CAMERA_MODE = 'wrist'
 
-# Fixed camera: where it sits and what it looks at, in the ROBOT BASE frame.
-# MEASURE both with a tape measure and a target on the table, then refine by
-# comparing a detected cube against a ruler. FIXED_CAM_UP only sets the roll.
-FIXED_CAM_POS = (0.0, -0.35, 0.75)
-FIXED_CAM_TARGET = (0.275, 0.035, 0.02)
+# Fixed camera (the fallback): where it sits and what it looks at, in the ROBOT
+# BASE frame. MEASURE both with a tape measure and a target on the table, then
+# refine by comparing a detected cube against a ruler. FIXED_CAM_UP only sets
+# the roll.
+# The target is DERIVED from TABLE_CENTRE. It used to be (0.275, 0.035, 0.02),
+# the OLD simulated table -- which now points at where the table is not.
+FIXED_CAM_MEASURED = False
+FIXED_CAM_POS = (0.0, -0.35, 0.75)                             # PLACEHOLDER
+FIXED_CAM_TARGET = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT)
 FIXED_CAM_UP = (0.0, 0.0, 1.0)

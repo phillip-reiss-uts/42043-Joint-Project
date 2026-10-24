@@ -10,7 +10,8 @@ travelling to the cell. With the camera unplugged and the UR3e off the network:
 
 It checks everything that can be checked offline:
 
-  1. the four hardware modules import into ONE interpreter
+  1. the four hardware modules import into ONE interpreter, plus the RG2
+     gripper library (onRobot) and its undeclared pycurl dependency
   2. ur_rtde exposes the methods src/robot_backend_ur.py actually calls, under
      the name that build really uses (servoJ vs servoj -- this bit twice)
   3. tests/test_ur_backend.py passes: the backend plumbing, against fakes
@@ -36,6 +37,10 @@ import traceback
 
 RESULTS = []
 NOTES = []
+
+ONROBOT_INSTALL = ('pip install "git+https://github.com/RianPolMacCionaoith/'
+                   'onRobot.git@main#subdirectory=onRobot"')
+PYCURL_INSTALL = "pip install pycurl"
 
 
 def record(name, ok, detail=""):
@@ -88,6 +93,32 @@ def check_imports():
             record("import %s" % name, True)
         except Exception:
             record("import %s" % name, False, last_line(sys.exc_info()[1]))
+
+    # RG2 gripper. The lab's onRobot package imports pycurl at module level but
+    # declares install_requires=[], so pip does NOT pull pycurl in. Checking
+    # both means the import cannot fail for a reason we did not name.
+    try:
+        import pycurl  # noqa: F401
+        record("import pycurl", True, pkg_version("pycurl"))
+    except Exception:
+        record("import pycurl", False,
+               "onRobot needs it and does not declare it -- %s" % PYCURL_INSTALL)
+    try:
+        gmod = importlib.import_module("onRobot.gripper")
+        record("import onRobot.gripper", True,
+               getattr(gmod, "__file__", "builtin"))
+        rg = getattr(gmod, "RG", None)
+        record("onRobot.gripper.RG exists", rg is not None)
+        if rg is not None:
+            for meth in ("rg_grip", "get_rg_width"):
+                record("  RG.%s()" % meth, hasattr(rg, meth))
+            note("RG.rg_get_grip_detected: %s -- see notes/RG2-GRIPPER-XMLRPC.txt"
+                 % ("present" if hasattr(rg, "rg_get_grip_detected")
+                    else "absent (unimplemented upstream)"))
+    except Exception:
+        record("import onRobot.gripper", False,
+               "install: %s" % ONROBOT_INSTALL)
+
     note("ur_rtde %s | opencv %s | pyrealsense2 %s" % (
         pkg_version("ur-rtde"),
         getattr(mods.get("cv2"), "__version__", "?"),

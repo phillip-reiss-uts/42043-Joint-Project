@@ -33,10 +33,12 @@ identification (`servo_gains`). `tests/test_hardware.py --real` is the
 acceptance checklist; `tests/test_ur_backend.py` proves the plumbing.
 """
 
+import socket
 import time
 
 import numpy as np
 
+from src import config as _cfg
 from src.robot_backend import RobotBackend
 
 UR_JOINT_NAMES = ('shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
@@ -44,6 +46,14 @@ UR_JOINT_NAMES = ('shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
 
 
 class Robotiq2F85:
+    # DEPRECATED -- WRONG DEVICE. This cell has an OnRobot RG2 v2, not a Robotiq
+    # 2F-85; every Modbus read against the RG2 returns Illegal Data Address
+    # (report 5.1). Nothing in the hardware path constructs this any more -- see
+    # RG2 below. Kept only so the register-map test keeps exercising it until
+    # review item todo E1 deletes both.
+    #
+    # Historical intent follows.
+    #
     # The Robotiq 2F-85 over Modbus RTU/TCP.
     #
     # Register map from the 2F-85 instruction manual (0-based holding
@@ -292,21 +302,286 @@ class URBackend(RobotBackend):
             self._gripper.close()
 
 
-def connect(ip, gripper_unit=9, dt=0.008, lookahead_time=0.1, gain=300,
-            activate_gripper=True):
+# ---------------------------------------------------------------------------
+# GRIPPER: OnRobot RG2 v2 -- what is actually on this cell
+# ---------------------------------------------------------------------------
+#
+# CONTROL is the PROVEN route. Python triggers UR programs that were built on
+# the pendant, over the dashboard server:
+#
+#     load /programs/rg_close.urp   ->   play
+#
+# It is DISCRETE: those programs open or close the jaws, they do not position
+# them. So move() edge-triggers -- a 0..255 ramp fires one program at the
+# crossing, not one program per control cycle.
+#
+# move() deliberately does NOT block. Waiting inside step() would stall servoJ
+# streaming, and the caller already gives the jaws time: Arm.close_gripper ramps
+# over STEPS_CLOSE cycles (24 s at 125 Hz) against a roughly 1 s stroke. If that
+# ramp is ever shortened, set GRIP_STROKE_TIME_S and move() will wait the
+# program out before returning.
+#
+# READBACK is the UNPROVEN route: jaw width comes from the URCap's XML-RPC on
+# port 41414 via the `onRobot` package, never yet run on this cell. If it is
+# absent or fails, state() returns NaN and the pipeline reads "unknown" -- which
+# is what an open-loop pickup expects anyway.
+#
+# Quirks that cost time before (report 5.2):
+#   * the load FILENAME is limited to ~15 characters on this controller
+#   * one command per connection; replies get swallowed otherwise
+#   * 'play' is refused unless the pendant is in Remote with the slider correct
+
+
+def _dashboard(host, command, port=None, timeout=5.0):
+    # One connection per command, by design: the controller swallows replies
+    # when several commands share one connection.
+    port = _cfg.UR_DASHBOARD_PORT if port is None else int(port)
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        sock.sendall((command + '\n').encode('ascii'))
+        try:
+            return sock.recv(1024).decode('utf-8', 'replace').strip()
+        except socket.timeout:
+            # A swallowed reply is not a failure; callers check for 'Failed'.
+            return ''
+
+
+# ---------------------------------------------------------------------------
+# GRIPPER: OnRobot RG2 v2 -- what is actually on this cell
+# ---------------------------------------------------------------------------
+#
+# PRIMARY: the OnRobot URCap's XML-RPC on port 41414, used exactly as the lab
+# example does it (UR3_RG2_rosbridge/examples/15_real_gripper_control.py):
+#
+#     RG(host, grip_id).rg_grip(width_mm, force_N)      .get_rg_width()
+#
+# That route is PROPORTIONAL -- it commands a target jaw width in mm -- and it
+# is the only one that reports width, which is why it comes first. Force is a
+# write-only input there: nothing ever reads it back.
+#
+# LAST RESORT: trigger UR programs built on the pendant over the dashboard
+# server (`load /programs/rg_close.urp` -> `play`). Discrete open/close only,
+# no readback at all. Selected automatically, once, if XML-RPC is unavailable
+# or a call fails.
+#
+# move() deliberately does NOT block on the XML-RPC route: the URCap returns
+# when it has accepted the command. The caller already gives the jaws time --
+# Arm.close_gripper ramps over STEPS_CLOSE cycles (24 s at 125 Hz) against a
+# roughly 1 s stroke. If that ramp is shortened, set GRIP_STROKE_TIME_S and the
+# dashboard fallback will wait the program out.
+#
+# Dashboard quirks that cost time before (report 5.2):
+#   * the load FILENAME is limited to ~15 characters on this controller
+#   * one command per connection; replies get swallowed otherwise
+#   * 'play' is refused unless the pendant is in Remote with the slider correct
+
+
+def _dashboard(host, command, port=None, timeout=5.0):
+    # One connection per command, by design: the controller swallows replies
+    # when several commands share one connection.
+    port = _cfg.UR_DASHBOARD_PORT if port is None else int(port)
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        sock.sendall((command + '\n').encode('ascii'))
+        try:
+            return sock.recv(1024).decode('utf-8', 'replace').strip()
+        except socket.timeout:
+            # A swallowed reply is not a failure; callers check for 'Failed'.
+            return ''
+
+
+class RG2:
+    # OnRobot RG2 v2: XML-RPC control and readback, dashboard as last resort.
+    #
+    # Mirrors the lab example's calls: construct RG(host, id) once, then
+    # rg_grip(width_mm, force_N) and get_rg_width().
+
+    def __init__(self, host, grip_id=0, open_width_mm=None, close_width_mm=None,
+                 force_n=None, min_step_mm=None, stroke_time=None,
+                 dashboard_fallback=True, dashboard_timeout=5.0):
+        self.host = host
+        self._grip_id = int(grip_id)
+        self.open_width_mm = (float(_cfg.RG2_OPEN_WIDTH_MM)
+                              if open_width_mm is None else float(open_width_mm))
+        self.close_width_mm = (float(_cfg.RG2_CLOSE_WIDTH_MM)
+                               if close_width_mm is None
+                               else float(close_width_mm))
+        self.force_n = (float(_cfg.RG2_GRIP_FORCE_N)
+                        if force_n is None else float(force_n))
+        self.min_step_mm = (float(_cfg.RG2_MIN_STEP_MM)
+                            if min_step_mm is None else float(min_step_mm))
+        # Only the dashboard route needs a stroke time.
+        self.stroke_time = (_cfg.GRIP_STROKE_TIME_S
+                            if stroke_time is None else stroke_time)
+        self._timeout = float(dashboard_timeout)
+        self._allow_dashboard = bool(dashboard_fallback)
+        self._rg = None            # onRobot RG instance, or False once failed
+        self._route = None         # 'xmlrpc' | 'dashboard' | None
+        self._warned = False
+        self._sent_width = None
+        self._closed = None        # dashboard-route state
+        self._last_q = None
+        self._last_t = None
+
+    # ---- route selection --------------------------------------------------
+    def _xmlrpc(self):
+        if self._rg is not None:
+            return self._rg or None
+        try:
+            from onRobot.gripper import RG as _RG    # noqa: N813
+            self._rg = _RG(self.host, self._grip_id)
+            self._route = 'xmlrpc'
+        except Exception as exc:
+            self._rg = False
+            self._route = 'dashboard' if self._allow_dashboard else None
+            self._warn(exc)
+        return self._rg or None
+
+    def _warn(self, exc):
+        if self._warned:
+            return
+        self._warned = True
+        if self._route == 'dashboard':
+            print('[HW] RG2 XML-RPC unavailable (%s); falling back to the '
+                  'dashboard programs -- discrete open/close, no width' % exc)
+        else:
+            print('[HW] RG2 control unavailable (%s); the gripper will not '
+                  'move and grasp state will read "unknown"' % exc)
+
+    # ---- control ----------------------------------------------------------
+    def _width_for(self, position):
+        # GRIP_OPEN..GRIP_CLOSED (normally 0..255) -> jaw width in mm.
+        lo, hi = float(_cfg.GRIP_OPEN), float(_cfg.GRIP_CLOSED)
+        span = hi - lo
+        frac = (0.0 if span <= 0.0
+                else (min(max(float(position), lo), hi) - lo) / span)
+        return self.open_width_mm + (self.close_width_mm - self.open_width_mm) * frac
+
+    def move(self, position):
+        if self._route is None and self._xmlrpc() is None:
+            return
+        if self._route == 'xmlrpc':
+            self._move_xmlrpc(position)
+        elif self._route == 'dashboard':
+            self._move_dashboard(position)
+
+    def _move_xmlrpc(self, position):
+        width = self._width_for(position)
+        if (self._sent_width is not None
+                and abs(width - self._sent_width) < self.min_step_mm):
+            return
+        try:
+            self._rg.rg_grip(width, self.force_n)
+            self._sent_width = width
+        except Exception as exc:
+            # One failure is enough to stop trusting the route.
+            self._rg = False
+            self._route = 'dashboard' if self._allow_dashboard else None
+            self._warn(exc)
+            if self._route == 'dashboard':
+                self._move_dashboard(position)
+
+    def _move_dashboard(self, position):
+        # Discrete jaws: act only when the command crosses the midpoint.
+        mid = (float(_cfg.GRIP_OPEN) + float(_cfg.GRIP_CLOSED)) / 2.0
+        want_closed = float(position) >= mid
+        if self._closed is None:
+            self._closed = not want_closed      # make the first command act
+        if want_closed == self._closed:
+            return
+        self._run_program(_cfg.RG2_CLOSE_PROGRAM if want_closed
+                          else _cfg.RG2_OPEN_PROGRAM)
+        self._closed = want_closed
+
+    def _run_program(self, program):
+        reply = _dashboard(self.host, 'load %s' % program,
+                           _cfg.UR_DASHBOARD_PORT, self._timeout)
+        if 'Failed' in reply:
+            raise RuntimeError(
+                'gripper program load failed (%r) -- the load filename is '
+                'capped at ~15 characters on this controller' % reply)
+        reply = _dashboard(self.host, 'play', _cfg.UR_DASHBOARD_PORT,
+                           self._timeout)
+        if 'Failed' in reply:
+            raise RuntimeError(
+                'gripper play refused (%r) -- the pendant must be in Remote '
+                'with the slider correct; a successful load does not imply '
+                'play will work' % reply)
+        if self.stroke_time:
+            self._wait_done()
+
+    def _wait_done(self):
+        # Ask the pendant instead of sleeping blindly. Bounded either way.
+        deadline = time.monotonic() + float(self.stroke_time)
+        while time.monotonic() < deadline:
+            state = _dashboard(self.host, 'programState',
+                               _cfg.UR_DASHBOARD_PORT, self._timeout)
+            if 'PLAYING' not in state.upper():
+                return
+            time.sleep(0.05)
+
+    # ---- readback ---------------------------------------------------------
+    def _read_width(self):
+        rg = self._xmlrpc()
+        if rg is None:
+            return None
+        try:
+            return float(rg.get_rg_width())
+        except Exception as exc:
+            self._rg = False
+            self._route = 'dashboard' if self._allow_dashboard else None
+            self._warn(exc)
+            return None
+
+    def state(self):
+        # The (q, v, force) trio Arm.grasp_state consumes.
+        #
+        # q maps jaw OPENING onto the sim's driver-joint convention, where q
+        # RISES as the jaws CLOSE; config explains the inversion.
+        # force has no measurement at all -- the RG2 takes it as a write-only
+        # input. NaN is honest and makes grasp_state say "unknown".
+        width = self._read_width()
+        if width is None:
+            return {'q': float('nan'), 'v': float('nan'), 'force': float('nan')}
+        width = min(max(width, 0.0), _cfg.GRIP_WIDTH_FULL_MM)
+        q = _cfg.GRIP_Q_FULL * (1.0 - width / _cfg.GRIP_WIDTH_FULL_MM)
+        now = time.monotonic()
+        v = 0.0
+        if self._last_q is not None and self._last_t is not None:
+            dt = now - self._last_t
+            if dt > 1e-6:
+                v = (q - self._last_q) / dt
+        self._last_q, self._last_t = q, now
+        return {'q': float(q), 'v': float(v), 'force': float('nan')}
+
+    def close(self):
+        # No connection is held open and no program is left running.
+        pass
+
+
+def connect(ip, dt=0.008, lookahead_time=0.1, gain=300,
+            activate_gripper=True, gripper_unit=None, grip_id=0,
+            open_width_mm=None, close_width_mm=None, force_n=None,
+            min_step_mm=None, stroke_time=None, dashboard_fallback=True):
     # Build a URBackend against a real controller.
     #
-    # This is the only function that needs ur_rtde and pymodbus installed.
+    # Only this function needs ur_rtde. The gripper needs nothing beyond the
+    # lazily imported `onRobot` package, with dashboard sockets as last resort.
+    #
+    # gripper_unit and activate_gripper are kept for call-site compatibility:
+    # they were the Robotiq 2F-85's Modbus unit and activation handshake.
+    # gripper_unit is ignored now; activate_gripper still means "no gripper at
+    # all", which is what run_hardware.py --no-gripper relies on.
     from rtde_control import RTDEControlInterface
     from rtde_receive import RTDEReceiveInterface
-    from pymodbus.client import ModbusTcpClient
 
     control = RTDEControlInterface(ip)
     receive = RTDEReceiveInterface(ip)
-    client = ModbusTcpClient(ip, port=502)
-    gripper = Robotiq2F85(client, unit=gripper_unit)
-    if activate_gripper and not gripper.activate():
-        print('[HW] gripper did not report activated; grasp checks will say '
-              '"unknown"')
+    gripper = None
+    if activate_gripper:
+        gripper = RG2(ip, grip_id=grip_id, open_width_mm=open_width_mm,
+                      close_width_mm=close_width_mm, force_n=force_n,
+                      min_step_mm=min_step_mm, stroke_time=stroke_time,
+                      dashboard_fallback=dashboard_fallback)
     return URBackend(control, receive, gripper, dt=dt,
                      lookahead_time=lookahead_time, gain=gain)
