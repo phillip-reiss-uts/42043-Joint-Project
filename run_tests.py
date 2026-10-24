@@ -201,6 +201,32 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     ok = bool(ok_approach and g['held'] and lifted_ok)
     s = rec.series()
 
+    # A trial that aborts before the servo ever syncs records nothing, and an
+    # empty series is 1-D, so the norm below raised IndexError and hid the real
+    # outcome. Report the empty trial instead of crashing the whole harness.
+    if s['t'].size == 0:
+        print('  %-5d %-6s %-4s  ABORTED before any observation '
+              '(approach_ok=%s)' % (seed, TM.band_names()[band],
+                                    'on' if use_kf else 'off', ok_approach))
+        nan = float('nan')
+        return dict(
+            seed=seed, band=TM.band_names()[band], kf=bool(use_kf),
+            ok=False, sabotage_mm=float(sabotage_mm),
+            approach_ok=bool(ok_approach), grasp_state=g['state'],
+            grasp_held=bool(g['held']), rechecked=bool(rechecked),
+            lifted=bool(lifted_ok),
+            grasp_q=float(g['q']), grasp_force=float(g['force']),
+            grasp_vel=float(g['vel']),
+            iters=0, wall_s=wall, wall_approach_s=nan,
+            grasp_gap_mm=nan, obj_shift_mm=nan, obj_path_mm=0.0,
+            obj_turns=0, occluded=False, recovered=False,
+            kf_updates=0, kf_rejects=0,
+            est_err_mean_mm=nan, est_err_max_mm=nan,
+            raw_err_mean_mm=nan, raw_err_max_mm=nan,
+            dist_start_m=nan, dist_min_m=nan,
+            series=s,
+        )
+
     est_err = np.linalg.norm(s['est'][:, :2] - s['truth'][:, :2], axis=1)
     raw_err = np.linalg.norm(s['raw_est'][:, :2] - s['truth'][:, :2], axis=1)
     dist = np.linalg.norm(s['ee'] - s['obj'], axis=1)
@@ -236,6 +262,9 @@ def plot_paths(runs, outdir):
     fig, ax = plt.subplots(figsize=(7.5, 6))
     for r in runs:
         s = r['series']
+        if not len(s['t']):
+            # Trial aborted before any observation; nothing to draw.
+            continue
         lbl = '%s kf=%s seed %d' % (r['band'], 'on' if r['kf'] else 'off', r['seed'])
         ax.plot(s['ee'][:, 0], s['ee'][:, 1], '-', lw=1.4, label=lbl)
         ax.plot(s['obj'][0, 0], s['obj'][0, 1], 'o', ms=6, mfc='none',

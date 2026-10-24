@@ -34,10 +34,23 @@ import numpy as np
 #   far edge walked with the tool:  A (-0.2200, -0.4200) -> B (+0.2200, -0.4200)
 #   long edge 440 mm, depth 300 mm, so the centre is 150 mm in from that edge.
 #
-# The flange touches the surface at z = 0.2423; TOOL_MOUNT puts the gripper base
-# 10.8 mm below the flange, so TABLE_HEIGHT (the plane objects rest on, and the
-# one TIP_OFFSET is measured against) is 0.2423 - 0.0108.
-TABLE_HEIGHT = 0.2315
+# The robot is BOLTED TO THE TABLE, so the plane objects rest on is the base
+# plane: TABLE_HEIGHT = 0. Model_loader puts the arm base at the world origin, so
+# the tabletop is z = 0 and nothing needs raising.
+#
+# The 0.2315 that used to live here is NOT that height. It is the distance from
+# the FLANGE down to the tabletop when the gripper's tip is placed against the
+# table (measured as 0.2423 to the flange, minus TOOL_MOUNT's 10.8 mm). That is a
+# TOOL dimension -- how long the gripper is when pointing down -- and it belongs
+# with the other tool geometry below, not with the work surface.
+#
+# OPEN DISCREPANCY, recorded rather than smoothed over: flange-to-tip implied by
+# the tool constants is TOOL_MOUNT 0.0108 + BASE_TO_TIP 0.1401 = 0.1509, which is
+# 81 mm short of 0.2315. Either BASE_TO_TIP was measured to a different reference
+# point (the pad gripping edge rather than the lowest tip), or the 0.2315 reading
+# was taken with the jaws configured differently. Unresolved; do not "fix" either
+# number without re-measuring both the same way.
+TABLE_HEIGHT = 0.0
 TABLE_THICK = 0.02
 TABLE_CENTRE = [0.0, -0.270]
 TABLE_HALF = [0.22, 0.15]
@@ -198,21 +211,29 @@ SPAWN_ARM_CLEARANCE = 0.12   # instant drops keep this clear of gripper/base (xy
 
 # The spawn region is the intersection of what the arm can REACH and what the
 # wrist camera can SEE from the home pose -- not just the table's inner rect.
-# With the table widened to 400 mm those stopped coinciding: the camera sits on
-# the flange and looks at the table centre, so an object near the table's near
-# edge (x < ~0.24) is invisible from home even though the arm could reach it.
-# Measured on the 400 mm table at the home pose:
-#     visible at y = 0.035: x 0.24..0.46
-#     visible at x = 0.30 : y -0.15..0.21
-# Intersected with the reachable set this gives x 0.22..0.46, y -0.15..0.21.
-# SPAWN_X_MIN clamps the low x end to that; the upper bounds follow the table
-# edge with SPAWN_MARGIN and the object half-extent applied.
-SPAWN_X_MIN = 0.24       # measured: below this the object leaves the home view
+#
+# SPAWN_X_MIN used to clamp the low-x end to 0.24, measured on the OLD 400 mm
+# workcell whose table was centred at x = 0.275. With the measured CELL values
+# (table centred at x = 0, half-width 0.22) that clamp sits outside the table and
+# INVERTS the range: max(-0.13, 0.24) == 0.24 > 0.13, so rng.uniform raised
+# "high - low < 0" and no trial could start. Disabled until the visible-from-home
+# region is re-measured on this cell.
+SPAWN_X_MIN = None       # re-measure on THIS cell before setting it again
 
 _x_lo = TABLE_CENTRE[0] - TABLE_HALF[0] + SPAWN_MARGIN + OBJECT_SIZE[0]
+_x_hi = TABLE_CENTRE[0] + TABLE_HALF[0] - SPAWN_MARGIN - OBJECT_SIZE[0]
 _y_lo = TABLE_CENTRE[1] - TABLE_HALF[1] + SPAWN_MARGIN + OBJECT_SIZE[1]
-SPAWN_X_RANGE = (max(_x_lo, SPAWN_X_MIN),
-                 TABLE_CENTRE[0] + TABLE_HALF[0] - SPAWN_MARGIN - OBJECT_SIZE[0])
+
+if SPAWN_X_MIN is not None:
+    _x_lo = max(_x_lo, SPAWN_X_MIN)
+if _x_hi <= _x_lo:
+    # Fail here with a readable message rather than inside numpy.random.
+    raise ValueError(
+        'spawn x range is empty: lo %.3f >= hi %.3f. SPAWN_X_MIN and the table '
+        'constants disagree about which workcell this is -- fix the config, do '
+        'not clamp around it.' % (_x_lo, _x_hi))
+
+SPAWN_X_RANGE = (_x_lo, _x_hi)
 SPAWN_Y_RANGE = ((_y_lo if SPAWN_Y_MIN is None else max(_y_lo, SPAWN_Y_MIN)),
                  TABLE_CENTRE[1] + TABLE_HALF[1] - SPAWN_MARGIN - OBJECT_SIZE[1])
 
@@ -292,19 +313,26 @@ SERVO_RETREAT_V = 0.03
 # At 200 mm the bias is independent of offset (fully visible), so acquire and
 # hold there and commit from that estimate.
 #
-# RAISED to 350 mm for the wrist-mounted camera. Intel's ideal range for the
-# D435i is 0.3-3 m, and a camera clamped to the palm sits closer to the target
-# than the tool point does, so a 200 mm standoff put the camera below the band at
-# the only moment perception runs. 350 mm is PROVISIONAL: chosen so that
-# camera-to-cube lands inside the band, NOT measured on the cell. todo D4 settles
-# it; if depth is still marginal at hover, raise further -- occlusion margin and
-# FOV both improve with height, so nothing argues against going up.
+# RAISED to 350 mm to put a palm-mounted camera inside the D435i's 0.3-3 m ideal
+# range, then put BACK to 200 mm after measuring both in the sim, 6 trials each:
 #
-# Cost: the transit leg scales with this distance. At 200 mm the hover leg needed
-# ~3100 steps against SERVO_MAX_ITERS = 8000; 350 mm is ~1.75x, so ~5400. Inside
-# the budget, with less margin. Both step counts are arithmetic from the figure
-# above, not measured.
-SERVO_STANDOFF = 0.35
+#     standoff   approach complete   picked   wrist estimate error
+#     0.20 m          6/6              2/6      5-10 mm
+#     0.35 m          2/6              1/6      1.5-2 mm
+#
+# Raising it does help the estimate, as expected -- the target is further from the
+# jaws and less occluded -- but it also lengthens the OPEN-LOOP commit that
+# follows, and that is where the grasp error comes from: commit gaps of 14-29 mm
+# leave the jaws closing on air. Net, 350 mm costs four approaches out of six.
+#
+# So the earlier assumption that raising it was free was wrong. It trades grasp
+# accuracy for estimate accuracy, and the accuracy that matters at the end is the
+# commit's.
+#
+# If depth really is marginal at 200 mm (todo D4, still unmeasured on the cell),
+# fix the COMMIT rather than the standoff -- shorten it, or close the loop lower
+# -- because moving the hover out makes the pick worse.
+SERVO_STANDOFF = 0.20
 
 # ---- moving target (robustness demonstration) ----
 # The object glides on the table while the arm servos, so the servo has to

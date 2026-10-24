@@ -73,8 +73,15 @@ def main():
     mujoco.mju_mat2Quat(quat, (Rw.T @ Rg).reshape(-1))
 
     # Gains do not affect FK/Jacobian/M/g; any positive pair will do here.
+    #
+    # root_yaw: model_loader places the arm in the CELL frame, rotating the base
+    # by UR_ROOT_YAW so that the table and the measured home pose line up. The
+    # chain has to apply the same rotation or it describes the unrotated model
+    # and every pose is mirrored -- which is exactly the bug this test exists to
+    # catch, so it is not optional here.
+    from src.config import UR_ROOT_YAW
     ur = URKinematics(dyn, (np.full(6, 1000.0), np.full(6, 200.0)),
-                      tool_pos=tool_pos, tool_quat=quat)
+                      tool_pos=tool_pos, tool_quat=quat, root_yaw=UR_ROOT_YAW)
 
     rng = np.random.default_rng(0)
     configs = [np.array(data.qpos[:6])] + [rng.uniform(-2.5, 2.5, 6)

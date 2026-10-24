@@ -486,10 +486,10 @@ def run_sim(h):
                  'deprojection or detection maths is wrong.') as r:
         from src.world_real import FakeDepthSource, RealObjectWorld
         _src = FakeDepthSource(320, 240)
-        # The fake source renders a table 0.62 m below the camera, so the
-        # flange pose must put the camera there -- not at the origin, which
-        # would sit inside the table and see nothing above it.
-        _cam = np.array([0.0, 0.0, 0.62])
+        # The fake source renders a table 0.62 m below the camera; the world
+        # frame must put the camera there so the table deprojects onto
+        # TABLE_HEIGHT, which is what the detector filters on.
+        _cam = np.array([0.0, 0.0, _src.cam_world_z])
         _w = RealObjectWorld(_src, lambda: (_cam, np.eye(3)), np.eye(4))
         v = _w.perceive()
         if not v:

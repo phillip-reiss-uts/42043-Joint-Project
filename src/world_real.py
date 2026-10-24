@@ -171,10 +171,13 @@ class FakeDepthSource(DepthSource):
     # This is scaffolding for the test suite, not a substitute for hardware
     # validation (see tests/test_camera_enum.py and tests/test_camera_ruler.py).
 
-    def __init__(self, width=320, height=240, cam_height=0.62, table_z=0.02,
+    def __init__(self, width=320, height=240, cam_height=0.62, table_z=None,
                  object_h=0.03):
         self._w, self._h = width, height
-        self.table_z = float(table_z)
+        # The world frame has to put the table at the SAME height the detector
+        # filters on, or every point gets discarded. On this cell TABLE_HEIGHT is
+        # 0.2315, not the 0.02 the old workcell used.
+        self.table_z = float(TABLE_HEIGHT if table_z is None else table_z)
         self.cam_height = float(cam_height)   # camera distance above the table
         self.object_h = float(object_h)
         # A realistic-ish D435i intrinsic at 320x240 (fx != fy, off-centre).
@@ -185,6 +188,12 @@ class FakeDepthSource(DepthSource):
     @property
     def K(self):
         return self._K
+
+    @property
+    def cam_world_z(self):
+        # Where a world frame must place the camera for the rendered table to
+        # deproject onto table_z. Fixtures should use this, not a literal.
+        return self.table_z + self.cam_height
 
     @property
     def size(self):

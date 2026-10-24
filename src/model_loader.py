@@ -1,3 +1,4 @@
+import math
 import os
 
 import mujoco
@@ -17,6 +18,7 @@ from src.config import (
     ROBOT_ARM, ROBOT_GRIPPER, ROBOT_CAMERA,
     POOL_SIZE,
     PARK_POS,
+    UR_HOME_Q, UR_ROOT_YAW,
 )
 
 
@@ -87,28 +89,67 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     )
     print(f"[INFO] Added 'depth_cam' to {gripper_base.name}")
 
-    # 4. Ground plane
+    # 3b. Stand the arm in the CELL frame.
+    #
+    # The table, the spawn region and every pose in config are expressed in the
+    # CELL's base frame, and the cell's base is turned by UR_ROOT_YAW relative to
+    # the vendored model (UR_ROOT_YAW records this: FK vs getActualTCPPose came
+    # out at -(x, y) on every measured pose). Without this rotation the sim's
+    # home pose points at +y while the table sits at -y, so the table is never in
+    # view and the height filter keeps nothing.
+    #
+    # test_ur_kinematics.py passes the same yaw to URKinematics, so the model and
+    # the hardware chain stay in agreement.
+    if UR_ROOT_YAW:
+        _half = UR_ROOT_YAW / 2.0
+        _w1, _x1, _y1, _z1 = math.cos(_half), 0.0, 0.0, math.sin(_half)
+        for _body in arm.worldbody.bodies:
+            if _body.name != 'shoulder_link':
+                continue
+            _w0, _x0, _y0, _z0 = _body.quat
+            _body.quat = [
+                _w0 * _w1 - _x0 * _x1 - _y0 * _y1 - _z0 * _z1,
+                _w0 * _x1 + _x0 * _w1 + _y0 * _z1 - _z0 * _y1,
+                _w0 * _y1 - _x0 * _z1 + _y0 * _w1 + _z0 * _x1,
+                _w0 * _z1 + _x0 * _y1 - _y0 * _x1 + _z0 * _w1,
+            ]
+            print('[INFO] arm base rotated by UR_ROOT_YAW onto the cell frame')
+            break
+
+    # 4. Ground plane -- which is also the WORK SURFACE when the arm is bolted to
+    #    the table (TABLE_HEIGHT == 0). It used to sit 0.5 m below the base, which
+    #    was only harmless because a plinth filled the gap; with the base standing
+    #    on the table there is no gap to fill, and leaving it at -0.5 would hang
+    #    the robot in mid-air.
+    _flush_table = TABLE_HEIGHT <= TABLE_THICK + 1e-9
     floor_geom = arm.worldbody.add_geom()
     floor_geom.name = "floor"
     floor_geom.type = mujoco.mjtGeom.mjGEOM_PLANE
     floor_geom.size = [10, 10, 0.1]
-    floor_geom.pos = [0, 0, -0.50]
-    #floor_geom.pos = [0, 0, 0]
+    floor_geom.pos = [0, 0, 0.0 if _flush_table else -0.50]
 
-    plinth = arm.worldbody.add_geom()
-    plinth.name = "table_plinth"
-    plinth.type = mujoco.mjtGeom.mjGEOM_BOX
-    plinth.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], -0.25]
-    plinth.size = [TABLE_HALF[0], TABLE_HALF[1], 0.25]
-    plinth.rgba = [0.45, 0.38, 0.30, 1.0]
+    # 5. Raised work surface, only when there is one. The pedestal reaches the
+    #    UNDERSIDE of the slab: it used to be a fixed 0.5 m column topping out at
+    #    z = 0, which was right while TABLE_HEIGHT was 0.02 but left the surface
+    #    floating once the constant moved.
+    if not _flush_table:
+        _plinth_bottom = -0.50
+        _plinth_top = TABLE_HEIGHT - TABLE_THICK
+        plinth = arm.worldbody.add_geom()
+        plinth.name = "table_plinth"
+        plinth.type = mujoco.mjtGeom.mjGEOM_BOX
+        plinth.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1],
+                      (_plinth_top + _plinth_bottom) / 2.0]
+        plinth.size = [TABLE_HALF[0], TABLE_HALF[1],
+                       max(1e-3, (_plinth_top - _plinth_bottom) / 2.0)]
+        plinth.rgba = [0.45, 0.38, 0.30, 1.0]
 
-    # 5. Work surface. Top face lands exactly on TABLE_HEIGHT.
-    table_geom = arm.worldbody.add_geom()
-    table_geom.name = "table"
-    table_geom.type = mujoco.mjtGeom.mjGEOM_BOX
-    table_geom.size = [TABLE_HALF[0], TABLE_HALF[1], TABLE_THICK / 2.0]
-    table_geom.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT - TABLE_THICK / 2.0]
-    table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
+        table_geom = arm.worldbody.add_geom()
+        table_geom.name = "table"
+        table_geom.type = mujoco.mjtGeom.mjGEOM_BOX
+        table_geom.size = [TABLE_HALF[0], TABLE_HALF[1], TABLE_THICK / 2.0]
+        table_geom.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT - TABLE_THICK / 2.0]
+        table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
 
     # 6. No chute. There is one flat table and nothing else -- a picked object
     #    is set back down on the tabletop. The old sunk bin was a simulation
@@ -218,5 +259,25 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     grip_act = model.nu - 1
     model.actuator_forcerange[grip_act] = GRIP_FORCE_RANGE
     print(f"[INFO] gripper force range = {GRIP_FORCE_RANGE} N")
+
+    # 12. Stand the simulated arm at the CELL's home.
+    #
+    # The vendored MJCF ships the OLD workcell's keyframe (joint 1 = -0.366).
+    # The cell's measured home has joint 1 = +1.571 because the base is swung
+    # round and the table was moved to match -- and the table here is placed from
+    # those same cell constants just above. Leaving the simulated keyframe stale
+    # would aim the wrist camera at where the table used to be, which is why the
+    # TABLE_HEIGHT filter found nothing.
+    #
+    # Overwritten at load rather than edited into the MJCF: config is the single
+    # source of truth, and models/ur3e/ur3e.xml stays a vendored file.
+    if UR_HOME_Q is not None:
+        home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home')
+        if home_id >= 0:
+            n = min(len(UR_HOME_Q), model.nq)
+            model.key_qpos[home_id][:n] = UR_HOME_Q[:n]
+            print('[INFO] sim home keyframe := UR_HOME_Q (the measured cell home)')
+        else:
+            print('[WARN] no "home" keyframe to align with UR_HOME_Q')
 
     return model
