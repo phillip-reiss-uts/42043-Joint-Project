@@ -164,15 +164,24 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
     if stopped():
         return False, None, None
 
-    # Ask the jaws whether they got anything. Without this the result is
-    # inferred from the servo converging, which reports success after grasping
-    # empty air -- the arm reaches its committed pose either way.
+    # Ask the jaws whether they got anything -- but only when the gripper can
+    # actually answer. Without this the result is inferred from the servo
+    # converging, which reports success after grasping empty air: the arm
+    # reaches its committed pose either way.
+    #
+    # On this cell the RG2 has no force readback, so grasp_state() returns
+    # 'unknown'. The pickup is therefore OPEN LOOP by design (todo B5):
+    # 'unknown' means there is no evidence either way, so it proceeds; only an
+    # explicit 'empty' abandons the pick. With a gripper that reports force --
+    # the simulator, a Robotiq -- behaviour is unchanged.
     g = arm.grasp_state()
     print(f'[GRASP] {g["state"]}: finger {g["q"]:.3f}  force {g["force"]:+.2f}  '
           f'vel {g["vel"]:+.4f}')
     push(viewer, 'gripper', 'grasp %s' % g['state'],
          'q %.3f  f %+.2f' % (g['q'], g['force']))
-    if not g['held']:
+    if g['state'] == 'unknown':
+        print('[GRASP] no gripper feedback -- open loop, carrying on')
+    elif not g['held']:
         # Lift clear and read again. A first reading can be taken while the
         # fingers are still travelling, and if the cube was merely resting
         # between the jaws a lift shakes it out -- so a positive second reading
@@ -189,7 +198,8 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
               f'force {g["force"]:+.2f}  vel {g["vel"]:+.4f}')
         push(viewer, 'gripper', 'grasp recheck %s' % g['state'],
              'q %.3f  f %+.2f' % (g['q'], g['force']))
-        if not g['held']:
+        # Feedback can disappear mid-pick; that is 'unknown', not 'empty'.
+        if g['state'] != 'unknown' and not g['held']:
             # Nothing in the jaws. Put it down cleanly and let the caller retry
             # rather than carrying air to the release point and calling it a
             # success.

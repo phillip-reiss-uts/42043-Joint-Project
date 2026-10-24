@@ -398,7 +398,8 @@ class RG2:
 
     def __init__(self, host, grip_id=0, open_width_mm=None, close_width_mm=None,
                  force_n=None, min_step_mm=None, stroke_time=None,
-                 dashboard_fallback=True, dashboard_timeout=5.0):
+                 dashboard_fallback=True, dashboard_timeout=5.0,
+                 client=None, dashboard=None):
         self.host = host
         self._grip_id = int(grip_id)
         self.open_width_mm = (float(_cfg.RG2_OPEN_WIDTH_MM)
@@ -415,11 +416,14 @@ class RG2:
                             if stroke_time is None else stroke_time)
         self._timeout = float(dashboard_timeout)
         self._allow_dashboard = bool(dashboard_fallback)
-        self._rg = None            # onRobot RG instance, or False once failed
-        self._route = None         # 'xmlrpc' | 'dashboard' | None
+        # Injected for tests, the same way URBackend takes its RTDE clients.
+        self._dashboard_fn = dashboard or _dashboard
+        self._rg = client            # onRobot RG instance, or False once failed
+        self._route = 'xmlrpc' if client is not None else None
         self._warned = False
+        self._read_warned = False
         self._sent_width = None
-        self._closed = None        # dashboard-route state
+        self._closed = None          # dashboard-route state
         self._last_q = None
         self._last_t = None
 
@@ -494,14 +498,13 @@ class RG2:
         self._closed = want_closed
 
     def _run_program(self, program):
-        reply = _dashboard(self.host, 'load %s' % program,
-                           _cfg.UR_DASHBOARD_PORT, self._timeout)
+        reply = self._dashboard_fn('load %s' % program,
+                                   _cfg.UR_DASHBOARD_PORT, self._timeout)
         if 'Failed' in reply:
             raise RuntimeError(
                 'gripper program load failed (%r) -- the load filename is '
                 'capped at ~15 characters on this controller' % reply)
-        reply = _dashboard(self.host, 'play', _cfg.UR_DASHBOARD_PORT,
-                           self._timeout)
+        reply = self._dashboard_fn('play', _cfg.UR_DASHBOARD_PORT, self._timeout)
         if 'Failed' in reply:
             raise RuntimeError(
                 'gripper play refused (%r) -- the pendant must be in Remote '
@@ -514,8 +517,8 @@ class RG2:
         # Ask the pendant instead of sleeping blindly. Bounded either way.
         deadline = time.monotonic() + float(self.stroke_time)
         while time.monotonic() < deadline:
-            state = _dashboard(self.host, 'programState',
-                               _cfg.UR_DASHBOARD_PORT, self._timeout)
+            state = self._dashboard_fn('programState', _cfg.UR_DASHBOARD_PORT,
+                                       self._timeout)
             if 'PLAYING' not in state.upper():
                 return
             time.sleep(0.05)
@@ -528,9 +531,30 @@ class RG2:
         try:
             return float(rg.get_rg_width())
         except Exception as exc:
-            self._rg = False
-            self._route = 'dashboard' if self._allow_dashboard else None
-            self._warn(exc)
+            # A failed READ does not invalidate CONTROL: rg_grip may still work,
+            # so the route is left alone and only the readback is given up.
+            if not self._read_warned:
+                print('[HW] gripper width read failed (%s); grasp state will '
+                      'read "unknown"' % exc)
+                self._read_warned = True
+            return None
+
+    def grip_detected(self):
+        # Optional extra: the URCap exposes rg_get_grip_detected, but the
+        # onRobot package never wired it. Same envelope as rg_get_width -- one
+        # int param -- so stdlib xmlrpc.client can make the call without
+        # pycurl.
+        #
+        # Returns True/False, or None if the URCap does not answer. Nothing in
+        # the pipeline branches on it: the pickup is open loop, and this exists
+        # so the bench can ask the gripper directly whether it is holding
+        # something (todo B4).
+        try:
+            import xmlrpc.client
+            uri = 'http://%s:%d' % (self.host, int(_cfg.RG2_XMLRPC_PORT))
+            with xmlrpc.client.ServerProxy(uri) as proxy:
+                return bool(proxy.rg_get_grip_detected(self._grip_id))
+        except Exception:
             return None
 
     def state(self):
