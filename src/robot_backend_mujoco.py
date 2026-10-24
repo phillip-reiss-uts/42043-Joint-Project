@@ -25,6 +25,7 @@ exactly once.**
 import numpy as np
 
 from src.robot_backend import RobotBackend
+from src.config import GRIP_STROKE_PER_FINGER_MM
 
 
 # One scratch MjData per model, so the gravity evaluation does not mutate the
@@ -77,6 +78,10 @@ class MujocoBackend(RobotBackend):
         # assumption `Arm.grip_act` made, kept here instead so the robot layer
         # does not encode it.
         self._grip_act = model.nu - 1
+        # Finger travel in metres. The hardware speaks a 0..255 command space; the
+        # simulated RG2's actuator is a real slide joint. Conversion lives here so
+        # the actuator keeps gear=1 and a physical stiffness.
+        self._grip_stroke = GRIP_STROKE_PER_FINGER_MM / 1000.0
 
     # ---- state ----
     def joint_positions(self):
@@ -95,7 +100,8 @@ class MujocoBackend(RobotBackend):
     # ---- commands ----
     def command(self, q_arm, grip):
         self.data.ctrl[:self._n] = np.asarray(q_arm, float)
-        self.data.ctrl[self._grip_act] = float(grip)
+        # 0..255 (0 = open, as on the hardware) onto 0..stroke in metres.
+        self.data.ctrl[self._grip_act] = (float(grip) / 255.0) * self._grip_stroke
         gravity_feedforward(self.model, self.data, self._n)
 
     def step(self):
@@ -104,11 +110,16 @@ class MujocoBackend(RobotBackend):
     # ---- gripper readback ----
     def gripper_state(self):
         # The jaw registers, from the two finger driver joints and the gripper
-        # actuator. A URBackend returns the same trio from the 2F-85's Modbus
-        # registers, which is what lets Arm.grasp_state be identical on both.
+        # actuator. A URBackend returns the same trio from the RG2's XML-RPC
+        # width, which is what lets Arm.grasp_state be identical on both.
+        #
+        # q is reported as a 0..1 FRACTION of stroke, not metres, so thresholds
+        # like GRASP_CLOSED_Q keep their meaning across gripper models.
+        q = self._finger_mean('q')
+        q = q / self._grip_stroke if self._grip_stroke else float('nan')
         return {
-            'q': self._finger_mean('q'),
-            'v': self._finger_mean('v'),
+            'q': q,
+            'v': self._finger_mean('v') / self._grip_stroke if self._grip_stroke else float('nan'),
             'force': float(self.data.actuator_force[self._grip_act]),
         }
 

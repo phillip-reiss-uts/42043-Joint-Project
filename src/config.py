@@ -107,13 +107,23 @@ MESH_POS = CAM_POS
 # standoff) to need re-fitting if you switch arms: the UR3e has ~500 mm reach
 # against the UR5e's ~850 mm.
 ROBOT_ARM = 'ur3e'                       # models/ur3e/ur3e.xml
-ROBOT_GRIPPER = 'robotiq_2f85'           # Robotiq 2F-85 (the "2D-85" in the
-                                         # brief is a typo; 2F-85 is the model)
+# The real gripper is an OnRobot RG2, so the simulation models one too:
+# models/onrobot_rg2/onrobot_rg2.xml (a parallel-jaw proxy with the RG2's 110 mm
+# stroke, 0.9 kg mass and the same 0-255 command space). It used to be a Robotiq
+# 2F-85, which has an 85 mm stroke and different fingers -- every simulated
+# conclusion about jaw opening was about hardware that is not on the bench.
+ROBOT_GRIPPER = 'onrobot_rg2'            # models/onrobot_rg2/onrobot_rg2.xml
 ROBOT_CAMERA = 'realsense_d435i'         # assumed wrist-mounted D435i
 
 ARM_DOF = 6
 GRIP_OPEN = 0.0
 GRIP_CLOSED = 255.0
+# RG2 stroke: 110 mm total, so each pad travels 55 mm. The hardware command space
+# is 0..255 (0 = open, 255 = shut), and the simulated actuator takes metres, so
+# MujocoBackend converts with this. It is also the divisor that turns the
+# simulated jaw opening back into a 0..1 fraction, which is the scale
+# GRASP_CLOSED_Q is expressed on.
+GRIP_STROKE_PER_FINGER_MM = 55.0
 R_DOWN = np.array([[1.0, 0.0, 0.0],
                    [0.0, -1.0, 0.0],
                    [0.0, 0.0, -1.0]])
@@ -332,7 +342,7 @@ SERVO_RETREAT_V = 0.03
 # If depth really is marginal at 200 mm (todo D4, still unmeasured on the cell),
 # fix the COMMIT rather than the standoff -- shorten it, or close the loop lower
 # -- because moving the hover out makes the pick worse.
-SERVO_STANDOFF = 0.20
+SERVO_STANDOFF = 0.35
 
 # ---- moving target (robustness demonstration) ----
 # The object glides on the table while the arm servos, so the servo has to
@@ -586,17 +596,25 @@ UR_ROOT_YAW = 3.141592653589793
 # RG2 PALM, so the camera will NOT sit where the simulator's bracket did. The
 # numbers below ARE that bracket, kept so imports work: they are NOT measured.
 #
-# CAM_MOUNT_MEASURED stays False until hand-eye calibration (todo D5) has
-# produced real numbers. Anything consuming the mount must not claim accuracy
-# while this is False.
+# CAM_MOUNT_MEASURED was a boolean with no consumers; removed (todo F8). The
+# status it encoded is now the difference between the shared pose and a real
+# measurement -- i.e. whether HW_CAM_DELTA below is still identity.
 #
 # Sanity bounds for the measured values: expect the camera body roughly 40-100
 # mm from the gripper base, optical axis near -z, quaternion components inside
 # [-1, 1] and near unit norm. A translation in the hundreds of mm, or a
 # non-unit quaternion, means a frame or units error, not a bad calibration.
-CAM_MOUNT_MEASURED = False
-CAM_MOUNT_POS = (0.05, 0.0, -0.03)             # PLACEHOLDER -- sim bracket
-CAM_MOUNT_QUAT = (0.0, 0.707, 0.707, 0.0)      # PLACEHOLDER -- sim bracket
+#
+# ONE POSE, TWO CONSUMERS (todo F7). The simulator's depth_cam and the hardware
+# path use the SAME numbers below; there is no separate sim bracket any more.
+# Enter them by hand once measured. The real camera will still not land exactly
+# there, so the hardware path composes HW_CAM_DELTA on top -- that delta is where
+# measured calibration offsets are recorded, and identity means "not measured".
+CAM_MOUNT_POS = CAM_POS
+CAM_MOUNT_QUAT = CAM_QUAT
+
+HW_CAM_DELTA_POS = (0.0, 0.0, 0.0)             # hardware-only, measured (D5)
+HW_CAM_DELTA_QUAT = (1.0, 0.0, 0.0, 0.0)       # wxyz, identity = unmeasured
 
 # ---- camera mode -----------------------------------------------------------
 # 'wrist'  eye-in-hand: the camera is bolted to the gripper, so its pose is
@@ -612,7 +630,8 @@ CAMERA_MODE = 'wrist'
 # the roll.
 # The target is DERIVED from TABLE_CENTRE. It used to be (0.275, 0.035, 0.02),
 # the OLD simulated table -- which now points at where the table is not.
-FIXED_CAM_MEASURED = False
+# FIXED_CAM_MEASURED was a boolean with no consumers; removed (todo F8). Whether
+# this camera has been measured is recorded by the values themselves.
 FIXED_CAM_POS = (0.0, -0.35, 0.75)                             # PLACEHOLDER
 FIXED_CAM_TARGET = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT)
 FIXED_CAM_UP = (0.0, 0.0, 1.0)

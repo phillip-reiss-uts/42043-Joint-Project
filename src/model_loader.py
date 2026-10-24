@@ -41,6 +41,22 @@ def _load_arm_spec(arm_model):
             f"available in mujoco_menagerie: {e}")
 
 
+def _load_gripper_spec(gripper_model):
+    # Same resolution rule as the arm: a local MJCF wins, menagerie is the
+    # fallback. The RG2 is not in menagerie, and the real cell has an RG2 -- so
+    # models/onrobot_rg2/onrobot_rg2.xml is the model the grasp needs.
+    local = os.path.join(_MODELS_DIR, gripper_model, gripper_model + '.xml')
+    if os.path.isfile(local):
+        print(f"[INFO] gripper model: local MJCF {local}")
+        return mujoco.MjSpec.from_file(local)
+    try:
+        return mm.get(gripper_model).spec(gripper_model.split('_')[-1])
+    except Exception as e:
+        raise RuntimeError(
+            f"gripper model '{gripper_model}' not found locally at {local} and "
+            f"not available in mujoco_menagerie: {e}")
+
+
 def load_robot_model(with_calibration_board=False, arm_model=None,
                      gripper_model=None, camera_model=None):
     # Compose <arm> + <gripper> + <wrist camera> + table + chute + object pool.
@@ -55,7 +71,7 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     camera_model = camera_model or ROBOT_CAMERA
     try:
         arm = _load_arm_spec(arm_model)
-        gripper = mm.get(gripper_model).spec(gripper_model.split('_')[-1])
+        gripper = _load_gripper_spec(gripper_model)
         camera = mm.get(camera_model).spec(camera_model.split('_')[-1])
     except Exception as e:
         print(f"[ERROR] Failed to load models: {e}")

@@ -202,8 +202,16 @@ class Arm:
         if viewer is not None and on_step is None:
             on_step = viewer.sync
         q_start = self.backend.joint_positions()
-        dist = float(np.linalg.norm(np.asarray(q_target)[:ARM_DOF]
-                                    - np.asarray(q_start)[:ARM_DOF]))
+        # Take the SHORTEST way round. IK returns an angle tuple, not a path, so a
+        # target of -3.0 where the arm sits at +3.0 is the same pose but a 6 rad
+        # sweep: the wrist and base visibly rotate the long way round, which is
+        # what "the camera swings all the way around" was. Every joint here is
+        # revolute, so shifting by whole turns is free and lands on the same pose.
+        q_target = np.array(q_target, float).copy()
+        n = min(ARM_DOF, len(q_target))
+        q_target[:n] = q_start[:n] + (
+            (q_target[:n] - q_start[:n] + np.pi) % (2.0 * np.pi) - np.pi)
+        dist = float(np.linalg.norm(q_target[:ARM_DOF] - q_start[:ARM_DOF]))
         floor = FEED_MIN_STEPS if rate <= FEED else RAPID_MIN_STEPS
         steps = max(floor, int(dist / rate / self.backend.dt))
 

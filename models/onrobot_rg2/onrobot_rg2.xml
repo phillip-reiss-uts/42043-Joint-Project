@@ -1,0 +1,81 @@
+﻿<mujoco model="onrobot_rg2">
+  <!-- OnRobot RG2 two-finger adaptive gripper: a PARALLEL-JAW proxy.
+
+       Why this model exists: the simulation used to mount a Robotiq 2F-85 while
+       the real cell has an RG2. Different stroke (85 vs 110 mm), different finger
+       geometry and a different closing mechanism, so every simulated conclusion
+       about jaw opening and grasp width was about hardware that is not on the
+       bench. The real gripper is definitive (todo F3).
+
+       Geometry, in the flange frame (local +z points down the approach):
+         - palm / housing box, 110 x 84 x 40 mm, mass 0.80 kg
+         - two solid pads that translate symmetrically along x
+         - PAD GAP 110 mm fully open, 0 mm fully closed, i.e. the RG2's stroke
+         - total mass 0.90 kg, matching the RG2 datasheet
+
+       This is a proxy, not a CAD export: it captures stroke, pad geometry and
+       compliance, which is what a grasp depends on. It does NOT model the RG2's
+       adaptive finger linkage.
+
+       Joint convention (important for the backend): both driver joints are
+       POSITIVE and equal, each travelling 0..55 mm INWARD, and an equality
+       constraint ties them so the jaws stay symmetric about the wrist axis. That
+       lets MujocoBackend._finger_mean('q') keep working, and it means q is a
+       clean 0..stroke opening rather than a mirrored pair that averages to zero.
+  -->
+  <compiler angle="radian"/>
+
+  <default>
+    <geom friction="1.2" solimp="0.95 0.99 0.001" solref="0.004 1"/>
+  </default>
+
+  <worldbody>
+    <body name="base" pos="0 0 0">
+      <inertial pos="0 0 0.022" mass="0.80" diaginertia="1.4e-3 1.1e-3 9.0e-4"/>
+
+      <!-- mounting plate against the flange -->
+      <geom name="flange_plate" type="box" pos="0 0 -0.003"
+            size="0.034 0.034 0.005" rgba="0.55 0.55 0.58 1"/>
+
+      <!-- palm / housing; 110 mm across so the fingers run alongside it -->
+      <geom name="palm" type="box" pos="0 0 0.020"
+            size="0.055 0.042 0.020" rgba="0.16 0.16 0.18 1"/>
+
+      <!-- LEFT finger: starts at -67 mm, axis +x, travels inward 0..55 mm -->
+      <body name="left_finger" pos="-0.061 0 0.040">
+        <joint name="left_driver_joint" type="slide" axis="1 0 0"
+               range="0 0.055" damping="3"/>
+        <inertial pos="0 0 0.021" mass="0.05" diaginertia="1.0e-5 1.0e-5 2.0e-5"/>
+        <geom name="left_pad" type="box" pos="0.006 0 0.021"
+              size="0.006 0.013 0.023" rgba="0.10 0.10 0.11 1"/>
+      </body>
+
+      <!-- RIGHT finger: mirrored body, axis -x, SAME positive range so the two
+           driver joints read the same opening and can be averaged. -->
+      <body name="right_finger" pos="0.061 0 0.040">
+        <joint name="right_driver_joint" type="slide" axis="-1 0 0"
+               range="0 0.055" damping="3"/>
+        <inertial pos="0 0 0.021" mass="0.05" diaginertia="1.0e-5 1.0e-5 2.0e-5"/>
+        <geom name="right_pad" type="box" pos="-0.006 0 0.021"
+              size="0.006 0.013 0.023" rgba="0.10 0.10 0.11 1"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <!-- left = right keeps the jaws symmetric about the wrist axis, so one
+         actuator drives both pads and the gap stays centred. -->
+    <joint name="finger_symmetry" joint1="left_driver_joint"
+           joint2="right_driver_joint" polycoef="0 1 0 0 0"/>
+  </equality>
+
+  <actuator>
+    <!-- ctrl is the finger travel in METRES: 0 = wide open, 0.055 = fully shut.
+         MujocoBackend maps the hardware's 0..255 command space onto this, so the
+         actuator keeps gear=1 and its stiffness is a real N/m figure (kp=800),
+         rather than kp*gear^2 collapsing to nothing. forcerange is replaced at
+         load by GRIP_FORCE_RANGE. -->
+    <position name="fingers_actuator" joint="left_driver_joint"
+              kp="800" kv="20" ctrlrange="0 0.055" forcerange="-5 5"/>
+  </actuator>
+</mujoco>
