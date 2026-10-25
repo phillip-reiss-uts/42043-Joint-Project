@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Hardware validation harness: check the model's assumptions against a real arm.
 
 WHY THIS EXISTS
@@ -375,15 +375,19 @@ def run_sim(h):
         r.set(True, 'sim: actuator index %d of %d (%s)'
               % (model.nu - 1, model.nu, mid))
 
-    with h.check('GRIPPER', 'jaw driver joints resolve',
-                 'grasp_state reads these two joints. A missing name means the\n'
-                 'grasp verdict is "unknown" and every pick is abandoned.') as r:
-        found = []
-        for nm in GRASP_DRIVER_JOINTS:
-            j = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, nm)
-            found.append(j >= 0)
-        r.set(all(found), 'found %d/%d of %s'
-              % (sum(found), len(found), list(GRASP_DRIVER_JOINTS)))
+    with h.check('GRIPPER', 'jaw readback resolves',
+                 'grasp_state reads this through the backend. If it does not\n'
+                 'resolve, the grasp verdict is "unknown" and every pick is\n'
+                 'abandoned.') as r:
+        # Model-agnostic on purpose: name the joints and this fails on a correct
+        # model. The RG2 is a four-bar linkage driven through one knuckle joint
+        # and has none of the per-side driver joints an earlier proxy exposed.
+        _b = MujocoBackend(model, data, ARM_DOF)
+        st = _b.gripper_state()
+        ok = np.isfinite(st['q'])
+        r.set(ok, 'q = %s via %r'
+              % (('%.3f' % st['q']) if ok else 'NaN',
+                 getattr(_b, '_grip_joint', None)))
 
     with h.check('GRIPPER', 'grasp thresholds separate empty from held',
                  'An empty close drives the drivers to ~0.77 and a grasp stalls\n'

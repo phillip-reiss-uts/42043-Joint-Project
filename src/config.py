@@ -1,4 +1,4 @@
-# src/config.py
+﻿# src/config.py
 """Single source of truth for scene and task constants."""
 
 import numpy as np
@@ -44,12 +44,16 @@ import numpy as np
 # TOOL dimension -- how long the gripper is when pointing down -- and it belongs
 # with the other tool geometry below, not with the work surface.
 #
-# OPEN DISCREPANCY, recorded rather than smoothed over: flange-to-tip implied by
-# the tool constants is TOOL_MOUNT 0.0108 + BASE_TO_TIP 0.1401 = 0.1509, which is
-# 81 mm short of 0.2315. Either BASE_TO_TIP was measured to a different reference
-# point (the pad gripping edge rather than the lowest tip), or the 0.2315 reading
-# was taken with the jaws configured differently. Unresolved; do not "fix" either
-# number without re-measuring both the same way.
+# RESOLVED 2026-10-25: the tool is 231.5 mm from the flange to the LOWEST PAD,
+# which is the 0.2315 above. BASE_TO_TIP (0.1401) was measured to the pad's
+# gripping edge rather than the fingertip, so it is a shorter number describing a
+# different point. Both are right; they were never measuring the same thing. The
+# simulated RG2 is now built to 231.5 mm.
+#
+# NOT YET ACTED ON: TIP_OFFSET is tuned against grasp heights that were derived
+# while the tool was modelled at 149 mm. It has NOT been retuned for a 231.5 mm
+# tool, so expect the commit to sit high until it is -- and that is a measurement
+# at the cell, not a guess here.
 TABLE_HEIGHT = 0.0
 TABLE_THICK = 0.02
 TABLE_CENTRE = [0.0, -0.270]
@@ -118,12 +122,21 @@ ROBOT_CAMERA = 'realsense_d435i'         # assumed wrist-mounted D435i
 ARM_DOF = 6
 GRIP_OPEN = 0.0
 GRIP_CLOSED = 255.0
-# RG2 stroke: 110 mm total, so each pad travels 55 mm. The hardware command space
-# is 0..255 (0 = open, 255 = shut), and the simulated actuator takes metres, so
-# MujocoBackend converts with this. It is also the divisor that turns the
-# simulated jaw opening back into a 0..1 fraction, which is the scale
-# GRASP_CLOSED_Q is expressed on.
-GRIP_STROKE_PER_FINGER_MM = 55.0
+# RG2 linkage. The official URDF's driven quantity is finger_width, an OPENING
+# width of 0..0.110 m (0 = SHUT), and the knuckle angle follows it through
+#   finger_joint = 0.785398 - 10.38471 * finger_width
+# so the knuckle sweeps -0.35692 rad (open) .. +0.785398 rad (shut).
+#
+# MEASURED on the composed model with the real meshes (mj_geomDistance between the
+# two finger pads): 97.3 mm at the open end, 0 mm at the shut end. The URDF's own
+# "110 mm" is the width parameter, not the clear pad gap.
+#
+# Note the direction: finger_width 0 is SHUT, the opposite of the hardware command
+# space (0 = open). MujocoBackend does that inversion so GRASP_CLOSED_Q keeps
+# meaning "fraction of the way closed" on both paths.
+GRIP_FINGER_OPEN_ANGLE = -0.35692
+GRIP_FINGER_SHUT_ANGLE = 0.785398
+GRIP_FINGER_MIMIC_GAIN = 10.38471     # rad of knuckle per metre of width
 R_DOWN = np.array([[1.0, 0.0, 0.0],
                    [0.0, -1.0, 0.0],
                    [0.0, 0.0, -1.0]])
@@ -135,7 +148,12 @@ RAPID_MIN_STEPS = 200
 FEED_MIN_STEPS = 400
 
 # Gripper squeeze force limit (N), applied to the fingers actuator at build.
-GRIP_FORCE_RANGE = (-5.0, 5.0)
+#
+# The RG2 is rated to 40 N, and the official linkage needs that headroom: at the
+# old +/-5 N the actuator could not hold the mimic chain open, so the jaws sat at
+# an arbitrary half-open pose instead of following the command. The hardware path
+# uses RG2_GRIP_FORCE_N for the real gripper, so this only bounds the simulation.
+GRIP_FORCE_RANGE = (-40.0, 40.0)
 
 # Viewer frame pacing: sync once per ~16 ms of simulated time (~60 Hz).
 SYNC_DT = 0.016
@@ -439,9 +457,13 @@ SERVO_COMMIT_TRIES = 5        # abandon-and-retrack cycles before giving up
 
 # ---- grasp verification ----
 # Read the jaws back after closing, instead of assuming a completed approach
-# means a completed grasp. These are the gripper's own registers -- finger
-# position and actuator force, the same pair a real 2F-85 reports over Modbus --
-# so nothing here depends on knowing where the object is.
+# means a completed grasp. These are the gripper's own registers -- jaw position
+# and actuator force -- so nothing here depends on knowing where the object is.
+#
+# The RG2 is a four-bar linkage driven through ONE knuckle joint, so there is no
+# per-side driver pair to name any more; MujocoBackend reads whichever joint the
+# model exposes. GRASP_DRIVER_JOINTS is retained only for the older proxy and is
+# no longer used by the harness.
 GRASP_DRIVER_JOINTS = ('gripper/right_driver_joint', 'gripper/left_driver_joint')
 # Measured on this model: closing on nothing drives the driver joints to 0.77
 # (range 0..0.8) with the actuator force at -0.13 as the linkage bottoms out.

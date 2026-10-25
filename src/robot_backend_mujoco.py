@@ -1,4 +1,4 @@
-"""MuJoCo implementation of the RobotBackend I/O seam.
+﻿"""MuJoCo implementation of the RobotBackend I/O seam.
 
 This module is the SIMULATION side of the "who owns the clock" boundary. It
 wraps `MjData`: joint targets go to `data.ctrl`, a control cycle is `mj_step`,
@@ -25,7 +25,7 @@ exactly once.**
 import numpy as np
 
 from src.robot_backend import RobotBackend
-from src.config import GRIP_STROKE_PER_FINGER_MM
+from src.config import (GRIP_FINGER_OPEN_ANGLE, GRIP_FINGER_SHUT_ANGLE)
 
 
 # One scratch MjData per model, so the gravity evaluation does not mutate the
@@ -78,10 +78,15 @@ class MujocoBackend(RobotBackend):
         # assumption `Arm.grip_act` made, kept here instead so the robot layer
         # does not encode it.
         self._grip_act = model.nu - 1
-        # Finger travel in metres. The hardware speaks a 0..255 command space; the
-        # simulated RG2's actuator is a real slide joint. Conversion lives here so
-        # the actuator keeps gear=1 and a physical stiffness.
-        self._grip_stroke = GRIP_STROKE_PER_FINGER_MM / 1000.0
+        # The official RG2 is driven through its four-bar linkage: one knuckle
+        # angle sweeps -0.35692 rad (open) to +0.785398 rad (shut), and the other
+        # five joints follow through equality constraints. The hardware speaks a
+        # 0..255 command space with 0 = OPEN, which is the opposite direction, so
+        # the inversion lives here rather than in the model.
+        self._grip_open = float(GRIP_FINGER_OPEN_ANGLE)
+        self._grip_shut = float(GRIP_FINGER_SHUT_ANGLE)
+        self._grip_span = self._grip_shut - self._grip_open
+        self._grip_joint = 'gripper/finger_joint'
 
     # ---- state ----
     def joint_positions(self):
@@ -100,8 +105,9 @@ class MujocoBackend(RobotBackend):
     # ---- commands ----
     def command(self, q_arm, grip):
         self.data.ctrl[:self._n] = np.asarray(q_arm, float)
-        # 0..255 (0 = open, as on the hardware) onto 0..stroke in metres.
-        self.data.ctrl[self._grip_act] = (float(grip) / 255.0) * self._grip_stroke
+        # 0..255 (0 = open, as on the hardware) onto the linkage knuckle angle.
+        f = float(grip) / 255.0                      # 0 = open, 1 = shut
+        self.data.ctrl[self._grip_act] = self._grip_open + f * self._grip_span
         gravity_feedforward(self.model, self.data, self._n)
 
     def step(self):
@@ -109,19 +115,34 @@ class MujocoBackend(RobotBackend):
 
     # ---- gripper readback ----
     def gripper_state(self):
-        # The jaw registers, from the two finger driver joints and the gripper
-        # actuator. A URBackend returns the same trio from the RG2's XML-RPC
-        # width, which is what lets Arm.grasp_state be identical on both.
+        # The jaw registers, from the gripper's own DOF and its actuator. A
+        # URBackend returns the same trio from the RG2's XML-RPC width, which is
+        # what lets Arm.grasp_state be identical on both.
         #
         # q is reported as a 0..1 FRACTION of stroke, not metres, so thresholds
         # like GRASP_CLOSED_Q keep their meaning across gripper models.
-        q = self._finger_mean('q')
-        q = q / self._grip_stroke if self._grip_stroke else float('nan')
+        q = (self._grip_pos('q') - self._grip_open) / self._grip_span
+        v = self._grip_pos('v') / self._grip_span
         return {
             'q': q,
-            'v': self._finger_mean('v') / self._grip_stroke if self._grip_stroke else float('nan'),
+            'v': v,
             'force': float(self.data.actuator_force[self._grip_act]),
         }
+
+    def _grip_pos(self, which):
+        # Position or velocity of the gripper's driven DOF, or NaN if the model
+        # has no gripper.
+        #
+        # The official RG2 exposes ONE prismatic joint, finger_width. The older
+        # proxy exposed a pair of driver joints, so fall back to their mean to keep
+        # this working for either model.
+        import mujoco
+        j = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, self._grip_joint)
+        if j >= 0:
+            if which == 'q':
+                return float(self.data.qpos[self.model.jnt_qposadr[j]])
+            return float(self.data.qvel[self.model.jnt_dofadr[j]])
+        return self._finger_mean(which)
 
     def _finger_mean(self, which):
         # Mean position or velocity of the two driver joints, or NaN if they

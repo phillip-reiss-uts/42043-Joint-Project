@@ -132,40 +132,52 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
             print('[INFO] arm base rotated by UR_ROOT_YAW onto the cell frame')
             break
 
-    # 4. Ground plane -- which is also the WORK SURFACE when the arm is bolted to
-    #    the table (TABLE_HEIGHT == 0). It used to sit 0.5 m below the base, which
-    #    was only harmless because a plinth filled the gap; with the base standing
-    #    on the table there is no gap to fill, and leaving it at -0.5 would hang
-    #    the robot in mid-air.
-    _flush_table = TABLE_HEIGHT <= TABLE_THICK + 1e-9
+    # 4. Floor. It sits a bench height below the work surface so the table reads
+    #    as a table and not as a painted rectangle on an infinite plane.
+    _FLOOR_Z = -0.50
     floor_geom = arm.worldbody.add_geom()
     floor_geom.name = "floor"
     floor_geom.type = mujoco.mjtGeom.mjGEOM_PLANE
     floor_geom.size = [10, 10, 0.1]
-    floor_geom.pos = [0, 0, 0.0 if _flush_table else -0.50]
+    floor_geom.pos = [0, 0, min(_FLOOR_Z, TABLE_HEIGHT - TABLE_THICK)]
 
-    # 5. Raised work surface, only when there is one. The pedestal reaches the
-    #    UNDERSIDE of the slab: it used to be a fixed 0.5 m column topping out at
-    #    z = 0, which was right while TABLE_HEIGHT was 0.02 but left the surface
-    #    floating once the constant moved.
-    if not _flush_table:
-        _plinth_bottom = -0.50
-        _plinth_top = TABLE_HEIGHT - TABLE_THICK
+    # 5. The bench, from the lab measurements.
+    #
+    #    MEASURED (2026-10-23): a 440 x 300 mm working rectangle with its long
+    #    edge walked as (-0.2200, -0.4200) -> (+0.2200, -0.4200), so the centre is
+    #    150 mm in from that edge: TABLE_CENTRE = [0.0, -0.270], TABLE_HALF =
+    #    [0.22, 0.15]. Top face exactly on TABLE_HEIGHT.
+    #
+    #    The rectangle is the WORKING AREA, not the whole bench: the base sits at
+    #    y = 0, which is 120 mm beyond the measured back edge. The arm is bolted to
+    #    the same bench, so the slab is extended under the base -- otherwise the
+    #    robot stands on air beside its own table, which is what looked wrong.
+    _bench_front = TABLE_CENTRE[1] - TABLE_HALF[1]          # -0.420
+    _bench_back = max(TABLE_CENTRE[1] + TABLE_HALF[1], 0.120)   # past the base
+    _bench_cy = 0.5 * (_bench_front + _bench_back)
+    _bench_hy = 0.5 * (_bench_back - _bench_front)
+    _bench_top = TABLE_HEIGHT - TABLE_THICK                 # underside of the slab
+    _slab_h = max(TABLE_THICK, 1e-3) / 2.0
+
+    table_geom = arm.worldbody.add_geom()
+    table_geom.name = "table"
+    table_geom.type = mujoco.mjtGeom.mjGEOM_BOX
+    table_geom.size = [TABLE_HALF[0], _bench_hy, _slab_h]
+    table_geom.pos = [TABLE_CENTRE[0], _bench_cy, TABLE_HEIGHT - _slab_h]
+    table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
+
+    # Pedestal from the floor to the underside of the slab, inset so the top edge
+    # reads as an overhang rather than a flush wall.
+    _ped_top = _bench_top
+    if _ped_top > _FLOOR_Z + 1e-3:
         plinth = arm.worldbody.add_geom()
         plinth.name = "table_plinth"
         plinth.type = mujoco.mjtGeom.mjGEOM_BOX
-        plinth.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1],
-                      (_plinth_top + _plinth_bottom) / 2.0]
-        plinth.size = [TABLE_HALF[0], TABLE_HALF[1],
-                       max(1e-3, (_plinth_top - _plinth_bottom) / 2.0)]
-        plinth.rgba = [0.45, 0.38, 0.30, 1.0]
-
-        table_geom = arm.worldbody.add_geom()
-        table_geom.name = "table"
-        table_geom.type = mujoco.mjtGeom.mjGEOM_BOX
-        table_geom.size = [TABLE_HALF[0], TABLE_HALF[1], TABLE_THICK / 2.0]
-        table_geom.pos = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT - TABLE_THICK / 2.0]
-        table_geom.rgba = [0.55, 0.45, 0.35, 1.0]
+        plinth.pos = [TABLE_CENTRE[0], _bench_cy,
+                      (_ped_top + _FLOOR_Z) / 2.0]
+        plinth.size = [TABLE_HALF[0] - 0.02, max(1e-3, _bench_hy - 0.02),
+                       (_ped_top - _FLOOR_Z) / 2.0]
+        plinth.rgba = [0.42, 0.36, 0.30, 1.0]
 
     # 6. No chute. There is one flat table and nothing else -- a picked object
     #    is set back down on the tabletop. The old sunk bin was a simulation

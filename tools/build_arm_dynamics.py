@@ -1,4 +1,4 @@
-"""Rebuild models/ur3e/arm_dynamics.json from the composed MuJoCo model.
+﻿"""Rebuild models/ur3e/arm_dynamics.json from the composed MuJoCo model.
 
 WHY THIS EXISTS
     URKinematics (the hardware chain) cannot call MuJoCo, so the arm's link
@@ -51,9 +51,16 @@ PATH = os.path.join(PROJECT, 'models', 'ur3e', 'arm_dynamics.json')
 
 LAST_LINK = 'wrist_3_link'
 MERGE = [
+    # The RG2's real links: palm plus four knuckles and two inner fingers. They
+    # are merged RIGIDLY at the open pose, which is an approximation -- the real
+    # linkage moves -- but the wrist load is what the chain needs.
     'gripper/base',
-    'gripper/left_finger',
-    'gripper/right_finger',
+    'gripper/left_outer_knuckle',
+    'gripper/left_inner_knuckle',
+    'gripper/left_inner_finger',
+    'gripper/right_outer_knuckle',
+    'gripper/right_inner_knuckle',
+    'gripper/right_inner_finger',
     'camera/d435i',
 ]
 

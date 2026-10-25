@@ -1,81 +1,175 @@
 ﻿<mujoco model="onrobot_rg2">
-  <!-- OnRobot RG2 two-finger adaptive gripper: a PARALLEL-JAW proxy.
+  <!-- OnRobot RG2, built from the OFFICIAL description's meshes and dimensions.
 
-       Why this model exists: the simulation used to mount a Robotiq 2F-85 while
-       the real cell has an RG2. Different stroke (85 vs 110 mm), different finger
-       geometry and a different closing mechanism, so every simulated conclusion
-       about jaw opening and grasp width was about hardware that is not on the
-       bench. The real gripper is definitive (todo F3).
+       Source: tonydle/OnRobot_ROS2_Description (MIT, Copyright (c) 2025 Tony Le),
+       cloned into the workspace by the user. The meshes are copied unmodified
+       into meshes/{collision,visual}/ and the licence sits alongside this file.
 
-       Geometry, in the flange frame (local +z points down the approach):
-         - palm / housing box, 110 x 84 x 40 mm, mass 0.80 kg
-         - two solid pads that translate symmetrically along x
-         - PAD GAP 110 mm fully open, 0 mm fully closed, i.e. the RG2's stroke
-         - total mass 0.90 kg, matching the RG2 datasheet
+       Earlier versions of this file were hand-authored boxes. They had the right
+       stroke, jaw axis and length but not the real shape, and the linkage was
+       faked as two sliding pads. This model uses the manufacturer's geometry and
+       the real four-bar linkage.
 
-       This is a proxy, not a CAD export: it captures stroke, pad geometry and
-       compliance, which is what a grasp depends on. It does NOT model the RG2's
-       adaptive finger linkage.
+       KINEMATICS, straight from urdf/rg2_macro.xacro + urdf/inc/rg_common.xacro
+       (link frame is base_link; +z runs down the approach; y is the jaw axis):
 
-       Joint convention (important for the backend): both driver joints are
-       POSITIVE and equal, each travelling 0..55 mm INWARD, and an equality
-       constraint ties them so the jaws stay symmetric about the wrist axis. That
-       lets MujocoBackend._finger_mean('q') keep working, and it means q is a
-       clean 0..stroke opening rather than a mirrored pair that averages to zero.
+         finger_width        prismatic  0 .. 0.110        THE DRIVEN DOF
+         finger_joint        revolute   at (0, -0.017178, 0.125797), axis -x
+                             range -0.558505 .. 0.785398, mimic of finger_width
+         inner_knuckle_joint revolute   at (0, -0.007678, 0.142297), axis +x
+                             range +/-0.785398, mimic of finger_joint x -1
+         inner_finger_joint  revolute   at (0, -0.039592, 0.038177) from the
+                             outer knuckle, axis +x, range +/-0.872665,
+                             mimic of finger_joint x +1
+         right_outer_knuckle_joint      rpy (0,0,pi), mimic of finger_joint x -1
+         gripper_tcp         fixed      at z = 0.218 from base_link
+
+       Mimic gains, verbatim from the xacro:
+         multiplier = 0.85 * ((-0.558505 - 0.785398) / 0.110) = -10.38471
+         offset     = 0.785398
+       so finger_joint = 0.785398 - 10.38471 * finger_width, and every other joint
+       follows from that. In MuJoCo those become equality constraints, because
+       MuJoCo has no mimic tags.
+
+       ctrl 0 = fully OPEN, 0.110 = fully SHUT, matching the hardware's 0..255
+       convention (MujocoBackend maps between them).
+
+       MASS: 0.78 base + 4 x 0.05 knuckle + 2 x 0.05 inner finger = 1.08 kg, as the
+       official URDF states. That supersedes the 0.9 kg datasheet figure -- the
+       URDF is the more specific statement about this assembly.
+
+       MOUNT FRAME unchanged: pos (0,0,0.0108) / quat -90 deg about z, which is
+       where the Robotiq model's base sat. The wrist camera hangs off this frame,
+       so moving it moves the camera.
   -->
-  <compiler angle="radian"/>
+  <compiler angle="radian" meshdir="meshes/"/>
+
+  <asset>
+    <mesh name="base_link_v" file="visual/base_link.stl"/>
+    <mesh name="base_link_c" file="collision/base_link.stl"/>
+    <mesh name="outer_knuckle_v" file="visual/outer_knuckle.stl"/>
+    <mesh name="outer_knuckle_c" file="collision/outer_knuckle.stl"/>
+    <mesh name="inner_knuckle_v" file="visual/inner_knuckle.stl"/>
+    <mesh name="inner_knuckle_c" file="collision/inner_knuckle.stl"/>
+    <mesh name="inner_finger_v" file="visual/inner_finger.stl"/>
+    <mesh name="inner_finger_c" file="collision/inner_finger.stl"/>
+  </asset>
 
   <default>
+    <default class="rg2geom">
+      <geom contype="2" conaffinity="1" group="3"/>
+    </default>
     <geom friction="1.2" solimp="0.95 0.99 0.001" solref="0.004 1"/>
+    <default class="visual">
+      <geom contype="0" conaffinity="0" group="0"/>
+    </default>
+    <default class="fingerpad">
+      <geom friction="1.6" solimp="0.97 0.995 0.001" solref="0.003 1"
+            contype="2" conaffinity="1" group="3"/>
+    </default>
   </default>
 
   <worldbody>
-    <body name="base" pos="0 0 0">
-      <inertial pos="0 0 0.022" mass="0.80" diaginertia="1.4e-3 1.1e-3 9.0e-4"/>
+    <body name="base" pos="0 0 0.0108" quat="0.70711 0 0 -0.70711">
+      <inertial pos="0 0 0.074" mass="0.78" diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
+      <geom name="base_link" type="mesh" mesh="base_link_c" rgba="0.16 0.16 0.18 1" class="rg2geom"/>
+      <geom name="base_link_vis" type="mesh" mesh="base_link_v" class="visual"
+            rgba="0.16 0.16 0.18 1"/>
 
-      <!-- mounting plate against the flange -->
-      <geom name="flange_plate" type="box" pos="0 0 -0.003"
-            size="0.034 0.034 0.005" rgba="0.55 0.55 0.58 1"/>
+      <!-- LEFT: outer knuckle, and the inner knuckle hanging off the base -->
+      <body name="left_outer_knuckle" pos="0 -0.017178 0.125797">
+        <joint name="finger_joint" type="hinge" axis="-1 0 0"
+               range="-0.558505 0.785398" damping="0.5"/>
+        <inertial pos="0 0 0.0146" mass="0.05" diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
+        <geom name="l_outer" type="mesh" mesh="outer_knuckle_c" rgba="0.22 0.22 0.24 1" class="rg2geom"/>
+        <geom name="l_outer_vis" type="mesh" mesh="outer_knuckle_v" class="visual"
+              rgba="0.22 0.22 0.24 1"/>
 
-      <!-- palm / housing; 110 mm across so the fingers run alongside it -->
-      <geom name="palm" type="box" pos="0 0 0.020"
-            size="0.055 0.042 0.020" rgba="0.16 0.16 0.18 1"/>
-
-      <!-- LEFT finger: starts at -67 mm, axis +x, travels inward 0..55 mm -->
-      <body name="left_finger" pos="-0.061 0 0.040">
-        <joint name="left_driver_joint" type="slide" axis="1 0 0"
-               range="0 0.055" damping="3"/>
-        <inertial pos="0 0 0.021" mass="0.05" diaginertia="1.0e-5 1.0e-5 2.0e-5"/>
-        <geom name="left_pad" type="box" pos="0.006 0 0.021"
-              size="0.006 0.013 0.023" rgba="0.10 0.10 0.11 1"/>
+        <body name="left_inner_finger" pos="0 -0.039592 0.038177">
+          <joint name="left_inner_finger_joint" type="hinge" axis="1 0 0"
+                 range="-0.872665 0.872665" damping="0.2"/>
+          <inertial pos="-0.0004 0.007 0.0239" mass="0.05"
+                    diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
+          <geom name="l_finger" type="mesh" mesh="inner_finger_c" class="fingerpad"
+                rgba="0.10 0.10 0.11 1"/>
+          <geom name="l_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
+                rgba="0.10 0.10 0.11 1"/>
+        </body>
       </body>
 
-      <!-- RIGHT finger: mirrored body, axis -x, SAME positive range so the two
-           driver joints read the same opening and can be averaged. -->
-      <body name="right_finger" pos="0.061 0 0.040">
-        <joint name="right_driver_joint" type="slide" axis="-1 0 0"
-               range="0 0.055" damping="3"/>
-        <inertial pos="0 0 0.021" mass="0.05" diaginertia="1.0e-5 1.0e-5 2.0e-5"/>
-        <geom name="right_pad" type="box" pos="-0.006 0 0.021"
-              size="0.006 0.013 0.023" rgba="0.10 0.10 0.11 1"/>
+      <body name="left_inner_knuckle" pos="0 -0.007678 0.142297">
+        <joint name="left_inner_knuckle_joint" type="hinge" axis="1 0 0"
+               range="-0.785398 0.785398" damping="0.2"/>
+        <inertial pos="-0.0004 -0.0196 0.019" mass="0.05"
+                  diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
+        <geom name="l_inner_knuckle" type="mesh" mesh="inner_knuckle_c"
+              rgba="0.22 0.22 0.24 1" class="rg2geom"/>
+        <geom name="l_inner_knuckle_vis" type="mesh" mesh="inner_knuckle_v"
+              class="visual" rgba="0.22 0.22 0.24 1"/>
+      </body>
+
+      <!-- RIGHT: same links, frames rotated pi about z as the URDF specifies -->
+      <body name="right_outer_knuckle" pos="0 0.017178 0.125797" quat="0 0 0 1">
+        <joint name="right_outer_knuckle_joint" type="hinge" axis="1 0 0"
+               range="-0.785398 0.785398" damping="0.5"/>
+        <inertial pos="0 0 0.0146" mass="0.05" diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
+        <geom name="r_outer" type="mesh" mesh="outer_knuckle_c" rgba="0.22 0.22 0.24 1" class="rg2geom"/>
+        <geom name="r_outer_vis" type="mesh" mesh="outer_knuckle_v" class="visual"
+              rgba="0.22 0.22 0.24 1"/>
+
+        <body name="right_inner_finger" pos="0 -0.039592 0.038177">
+          <joint name="right_inner_finger_joint" type="hinge" axis="1 0 0"
+                 range="-0.872665 0.872665" damping="0.2"/>
+          <inertial pos="-0.0004 0.007 0.0239" mass="0.05"
+                    diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
+          <geom name="r_finger" type="mesh" mesh="inner_finger_c" class="fingerpad"
+                rgba="0.10 0.10 0.11 1"/>
+          <geom name="r_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
+                rgba="0.10 0.10 0.11 1"/>
+        </body>
+      </body>
+
+      <body name="right_inner_knuckle" pos="0 0.007678 0.142297" quat="0 0 0 1">
+        <joint name="right_inner_knuckle_joint" type="hinge" axis="1 0 0"
+               range="-0.785398 0.785398" damping="0.2"/>
+        <inertial pos="-0.0004 -0.0196 0.019" mass="0.05"
+                  diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
+        <geom name="r_inner_knuckle" type="mesh" mesh="inner_knuckle_c"
+              rgba="0.22 0.22 0.24 1" class="rg2geom"/>
+        <geom name="r_inner_knuckle_vis" type="mesh" mesh="inner_knuckle_v"
+              class="visual" rgba="0.22 0.22 0.24 1"/>
       </body>
     </body>
   </worldbody>
 
   <equality>
-    <!-- left = right keeps the jaws symmetric about the wrist axis, so one
-         actuator drives both pads and the gap stays centred. -->
-    <joint name="finger_symmetry" joint1="left_driver_joint"
-           joint2="right_driver_joint" polycoef="0 1 0 0 0"/>
+    <!-- MuJoCo has no mimic tags, so the URDF's mimic chain becomes equalities:
+         joint1 = polycoef0 + polycoef1 * joint2. -->
+    <joint name="mimic_l_inner_knuckle" joint1="left_inner_knuckle_joint"
+           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+    <joint name="mimic_l_inner_finger" joint1="left_inner_finger_joint"
+           joint2="finger_joint" polycoef="0 1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+    <joint name="mimic_r_outer" joint1="right_outer_knuckle_joint"
+           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+    <joint name="mimic_r_inner_knuckle" joint1="right_inner_knuckle_joint"
+           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+    <joint name="mimic_r_inner_finger" joint1="right_inner_finger_joint"
+           joint2="finger_joint" polycoef="0 1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
   </equality>
 
   <actuator>
-    <!-- ctrl is the finger travel in METRES: 0 = wide open, 0.055 = fully shut.
-         MujocoBackend maps the hardware's 0..255 command space onto this, so the
-         actuator keeps gear=1 and its stiffness is a real N/m figure (kp=800),
-         rather than kp*gear^2 collapsing to nothing. forcerange is replaced at
-         load by GRIP_FORCE_RANGE. -->
-    <position name="fingers_actuator" joint="left_driver_joint"
-              kp="800" kv="20" ctrlrange="0 0.055" forcerange="-5 5"/>
+    <!-- Driven DOF: finger_joint, the LEFT OUTER KNUCKLE -- the joint the URDF
+         itself actuates. The xacro drives finger_width only as a mock prismatic
+         used as a mimic source; doing that here puts the actuator on a body with
+         no inertia, and six soft equalities then absorb the effort so the jaws
+         never move. Driving the real link works.
+
+         ctrl is the knuckle ANGLE, not width:
+             0.785398 rad  jaws fully OPEN   (finger_width = 0)
+            -0.35692  rad  jaws fully SHUT   (finger_width = 0.110)
+         MujocoBackend converts the hardware's 0..255 into this range.
+         forcerange is replaced at load time by GRIP_FORCE_RANGE. -->
+    <position name="fingers_actuator" joint="finger_joint"
+              kp="400" kv="20" ctrlrange="-0.35692 0.785398" forcerange="-40 40"/>
   </actuator>
 </mujoco>
