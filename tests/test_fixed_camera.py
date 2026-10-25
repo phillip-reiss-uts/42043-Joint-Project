@@ -1,5 +1,12 @@
 # Fixed-camera (eye-to-hand) tests: offline, no robot, no RealSense.
 #
+# STATUS: PENDING -- THE FEATURE IS NOT FINISHED. FixedCameraWorld exists and its
+# two properties are worth pinning (see below), but the detection path does not
+# currently find the cube the fake source renders, so this file FAILS. It is the
+# only red test in the suite and it is not a regression: nothing that used to
+# pass has broken. Treat a failure here as "not built yet" until someone picks up
+# the fixed-camera fallback (todo D6), then make it green.
+#
 # WHAT THIS PROVES
 # ----------------
 # `FixedCameraWorld` is the eye-to-hand counterpart of `RealObjectWorld`: the
@@ -100,16 +107,28 @@ def main():
     poses = [(np.zeros(3), np.eye(3)),
              (np.array([0.3, 0.2, 0.4]), np.eye(3)),
              (np.array([0.1, -0.1, 0.9]), np.eye(3))]
-    seen = [np.array(world.perceive()[0].centre) for _ in poses]
-    world._flange_pose = lambda: poses[0]   # noqa: SLF001 (test hook)
-    for pose in poses[1:]:
+    # Defensive on purpose: while the detection path is unfinished this returns
+    # nothing, and indexing straight into it crashed the run with an IndexError
+    # before it could report anything. A PENDING test has to fail as a check.
+    seen = []
+    for pose in poses:
         world._flange_pose = (lambda p: (lambda: p))(pose)
-        seen.append(np.array(world.perceive()[0].centre))
-    spread = float(np.max(np.linalg.norm(np.array(seen) - seen[0], axis=1)))
+        dets = world.perceive()
+        if not dets:
+            seen = None
+            break
+        seen.append(np.array(dets[0].centre))
     print('\nEYE-TO-HAND')
-    failures += not check(
-        'moving the arm does not move the estimate',
-        spread < 1e-12, 'max shift %.2e m over three arm poses' % spread)
+    if seen is None:
+        failures += not check(
+            'moving the arm does not move the estimate', False,
+            'no detection at all: FixedCameraWorld does not find the cube '
+            'FakeDepthSource renders (PENDING -- see the header)')
+    else:
+        spread = float(np.max(np.linalg.norm(np.array(seen) - seen[0], axis=1)))
+        failures += not check(
+            'moving the arm does not move the estimate',
+            spread < 1e-12, 'max shift %.2e m over three arm poses' % spread)
 
     # ---------------- equivalence with the wrist path ----------------
     # If the arm happens to hold a wrist camera exactly where the fixed one is,
@@ -132,7 +151,9 @@ def main():
     print()
     print('=' * 74)
     if failures:
-        print('  %d check(s) FAILED' % failures)
+        print('  %d check(s) FAILED -- PENDING, not a regression: the'
+              % failures)
+        print('  fixed-camera detection path is not finished (see the header).')
         print('=' * 74)
         return 1
     print('  Fixed-camera world: correct convention, pose-independent,')

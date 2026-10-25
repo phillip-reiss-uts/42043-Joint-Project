@@ -28,10 +28,11 @@
 #
 # Run:
 #     python tests/test_camera_ruler.py --truth 0.0,-0.27
-#     python tests/test_camera_ruler.py --truth 0.15,-0.15 --replay frame.npz
+#     python tests/test_camera_ruler.py --truth 0.15,-0.15 \
+#         --no-robot --cam-pos 0.1,-0.1,0.9 --cam-target 0.0,-0.27,0.0
 #
-# --replay reads a frame saved by tools/record_real_frame.py, so the analysis
-# can be repeated on the laptop with no camera attached.
+# A live D435i is the only depth source, so the camera must be attached.
+# --no-robot is for when the camera is here but the arm is not.
 
 import argparse
 import os
@@ -76,12 +77,9 @@ def main(argv=None):
         description='Test 5: compare a detected cube with a measured one.')
     ap.add_argument('--truth', default=None,
                     help='measured cube xy in the base frame, metres: x,y')
-    ap.add_argument('--replay', default=None,
-                    help='a .npz from tools/record_real_frame.py, instead of '
-                         'a live camera')
     ap.add_argument('--no-robot', action='store_true',
-                    help='with --replay: describe the camera pose yourself '
-                         'rather than reading it from the arm')
+                    help='describe the camera pose yourself rather than reading '
+                         'it from the arm')
     ap.add_argument('--cam-pos', default=None,
                     help='with --no-robot: camera position x,y,z (metres)')
     ap.add_argument('--cam-target', default=None,
@@ -96,14 +94,6 @@ def main(argv=None):
                                              'arm_dynamics.json'))
 
     # ---- depth source ----------------------------------------------------
-    # There is no replay source in this repo yet (the docstring in
-    # world_real.py mentions tools/record_real_frame.py, which does not exist),
-    # so a live camera is the only path. A saved .npz could be loaded by a
-    # small DepthSource here later.
-    if args.replay:
-        raise SystemExit('--replay needs a replay DepthSource; none exists in '
-                         'the repo yet. Use a live camera, or --no-robot with '
-                         'a saved frame once one is recorded.')
     from src.world_real import RealSenseSource
     depth = RealSenseSource()
     print('[camera] live D435i')

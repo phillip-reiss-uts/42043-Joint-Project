@@ -1,10 +1,10 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Hardware validation harness: check the model's assumptions against a real arm.
 
 WHY THIS EXISTS
 ---------------
 Everything in this project was developed against a simulator, and the simulator
-quietly satisfies assumptions a real UR3e + Robotiq 2F-85 + D435i will not. The
+quietly satisfies assumptions a real UR3e + OnRobot RG2 + D435i will not. The
 robot code itself is portable (see tests/test_layering.py), but *portable code
 running against a wrong assumption* fails silently and in confusing ways: the
 servo converges to the wrong place, the grasp reports "held" on air, the depth
@@ -239,19 +239,11 @@ def run_sim(h):
                  'is zero the model is wrong by ~40x on joints 4-6.') as r:
         r.set(np.all(dyn.rotor > 0), 'rotor = %s' % np.round(dyn.rotor, 4))
 
-    with h.check('DYNAMICS', 'analytic M/g reproduces the simulator',
-                 'This is the check that makes the analytic provider a valid\n'
-                 'replacement for querying the simulator.') as r:
-        worst_M = worst_g = 0.0
-        rng = np.random.default_rng(2)
-        for _ in range(6):
-            q = rng.uniform(-2.5, 2.5, ARM_DOF)
-            Mt, gt = mj.mass_gravity(q)
-            Mp, gp = dyn.mass_gravity(q)
-            worst_M = max(worst_M, float(np.max(np.abs(Mt - Mp))))
-            worst_g = max(worst_g, float(np.max(np.abs(gt - gp))))
-        r.set(worst_M < 1e-10 and worst_g < 1e-10,
-              'max |dM| = %.2e   max |dg| = %.2e' % (worst_M, worst_g))
+    # "analytic M/g reproduces the simulator" used to be asserted here as well.
+    # It is not any more: tests/test_dynamics.py owns that comparison from
+    # ArmDynamics.from_mujoco and tests/test_ur_kinematics.py owns it from
+    # ArmDynamics.from_file, which is the shipped data. A third copy here added
+    # nothing and made a payload failure report in three places.
 
     with h.check('DYNAMICS', 'gravity is compensated exactly once',
                  'The plant must carry its own weight, and the backend must feed\n'
@@ -370,7 +362,8 @@ def run_sim(h):
     # ---------------- GRIPPER ----------------
     with h.check('GRIPPER', 'gripper actuator identified',
                  'The code assumes the gripper is the last actuator in the\n'
-                 'model. On hardware it is a separate Modbus device.') as r:
+                 'model. On hardware it is the RG2, reached over XML-RPC, and\n'
+                 'there is no actuator in the arm model at all.') as r:
         mid = 'not exposed by AbstractKinematics'
         r.set(True, 'sim: actuator index %d of %d (%s)'
               % (model.nu - 1, model.nu, mid))
@@ -578,7 +571,7 @@ def run_sim(h):
         depth = cam.capture_depth(data)
         nominal = cam.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
                                      TABLE_HEIGHT + SURFACE_BAND)
-        # A plane 20 mm too high swallows a 30 mm cube almost entirely.
+        # A plane 20 mm too high swallows a 60 mm cube almost entirely.
         too_high = cam.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
                                       TABLE_HEIGHT + 0.020 + SURFACE_BAND)
         r.set(len(nominal) > 0 and len(too_high) < len(nominal),
