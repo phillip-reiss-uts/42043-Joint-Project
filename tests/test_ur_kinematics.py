@@ -33,7 +33,7 @@ TOL = 1e-10
 #
 # Measured, and both numbers matter:
 #     mujoco 3.15   worst |dM| 6.7e-16    worst |dg| 1.1e-14
-#     mujoco 3.10   worst |dM| 1.27e-09   (todo C1: version drift in how MuJoCo
+#     mujoco 3.10   worst |dM| 1.27e-09   (version drift in how MuJoCo
 #                                          assembles M, not a standing error)
 # TOL_M = 1e-8 covers the older build without hiding a real fault. What this
 # test actually caught was a STALE PAYLOAD -- arm_dynamics.json left behind by a

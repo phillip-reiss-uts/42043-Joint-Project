@@ -13,10 +13,17 @@ MuJoCo and on the real robot from the same robot code.
 ## Run
 
     python main.py                # simulation (default)
+    python main.py --lightweight  # simulation, no camera panels (older machines)
     python main.py --hardware --ip 192.168.0.194
 
 Simulation keys: `6` spawn, `7` pick up / put down (toggle), `8` pause,
 `9` reset, `.` object speed. On macOS use `mjpython main.py`.
+
+`--lightweight` drops the RGB-image and point-cloud panels. Each is its own GL
+render on top of the depth pass perception already does, so on a machine without
+a decent GPU they dominate the frame and a pick takes minutes of wall time
+instead of seconds. The 3D scene, the tool trail, the detections and the text
+panels all stay — the robot uses none of the panels.
 
 ## Camera calibration
 
@@ -94,16 +101,28 @@ and no device driver. `tests/test_layering.py` enforces it.
 
 The hardware world has two camera modes, chosen by `CAMERA_MODE` in
 `src/config.py`: `'wrist'` (eye-in-hand, the default) and `'fixed'`
-(eye-to-hand, for a camera on a stand). See the full notes for the trade-offs.
+(eye-to-hand, for a camera on a stand). The wrist mode is the one the hardware
+path is built and calibrated for; the fixed mode exists as a fallback for a
+constrained cell and its detection path is not finished (`tests/test_fixed_camera.py`
+is marked PENDING).
+
+## Credits
+
+This project vendors other people's descriptions and follows their methods.
+Every one is cited rather than silently copied:
+
+| source | used for | licence |
+|---|---|---|
+| [UTS-RI/UR3_RG2_rosbridge](https://github.com/UTS-RI/UR3_RG2_rosbridge) | the UR3e MJCF and its seven STL meshes (`models/ur3e/`), and the OnRobot XML-RPC method the RG2 backend is built on (`examples/15_real_gripper_control.py`) | MIT, © 2026 Robotics Institute, UTS |
+| [tonydle/OnRobot_ROS2_Description](https://github.com/tonydle/OnRobot_ROS2_Description) | the RG2 geometry: four-bar linkage dimensions and meshes (`models/onrobot_rg2/`) | MIT, © 2025 Tony Le |
+| [Osaka-University-Harada-Laboratory/onrobot](https://github.com/Osaka-University-Harada-Laboratory/onrobot) | upstream origin of the RG2 meshes, per the package above | MIT |
+
+The UR3e meshes are byte-for-byte copies, SHA-256 verified. What was changed in
+each description, and why, is recorded in [models/README.md](models/README.md);
+the licence texts sit beside the files they cover.
 
 ## Documentation
 
-This README is authoritative for how to run, calibrate, test and navigate the
-code. [README-assignment4-full.md](../README-assignment4-full.md) is
-authoritative for design rationale and the measurements behind it: control
-design, the gravity and integrator history, grasp accuracy, the porting
-checklist. `notes/HARDWARE-SESSION-2026-10-23.txt` is a dated log, not a
-description of the current tree — later sections in it supersede earlier ones.
-
-The generated "Vision-Guided Pick - Technical Reference.docx" was retired: it
-restated the three documents above and nothing regenerated it reliably.
+This README is authoritative. Design rationale and the measurements behind these
+constants live in comments at the point of use -- `src/config.py` in particular,
+where each cell constant records what it was measured from.

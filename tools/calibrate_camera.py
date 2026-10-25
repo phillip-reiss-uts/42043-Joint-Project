@@ -401,7 +401,7 @@ def _report_mount(X, dev_t, dev_r, n, X_nom, out_json=None):
     print('CAM_QUAT = (%.6f, %.6f, %.6f, %.6f)     # w, x, y, z' % tuple(quat))
     print()
     print('  CAM_MOUNT_POS/_QUAT alias these two, so this one edit moves the')
-    print('  simulator and the hardware together (todo F7). Leave')
+    print('  simulator and the hardware together. Leave')
     print('  HW_CAM_DELTA_* at identity: this IS the measurement it exists for.')
     print()
     print('  camera centre is %.1f mm from the tool frame' % (r * 1e3))

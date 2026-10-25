@@ -1,4 +1,25 @@
 <mujoco model="ur3e">
+  <!-- UR3e, vendored from the UTS Robotics Institute teaching platform.
+
+       Source: UTS-RI/UR3_RG2_rosbridge (MIT, Copyright (c) 2026 Robotics
+       Institute, University of Technology Sydney). Its models/ur3e_official/
+       carries the manufacturer's UR3e description -- link inertials, joint
+       ranges and the arm's mesh set. The seven STLs under assets/ are that
+       repository's files, copied unmodified and verified identical by SHA-256,
+       and the licence sits alongside this file as LICENSE.
+
+       WHY VENDORED RATHER THAN INSTALLED: mujoco_menagerie ships no UR3e, so
+       model_loader resolves 'ur3e' to this directory. Menagerie's UR5e is not a
+       substitute -- ~850 mm reach against ~500 mm -- and would put every tuned
+       workspace constant on the wrong arm.
+
+       LOCAL CHANGES are marked inline where they happen:
+         * wrist_3's joint range was added; the source omitted it (see below)
+         * the actuators are <position> servos with gains identified for this
+           model: the source is a plant description, this needs a controller
+         * the home keyframe is OVERWRITTEN at load from SIM_HOME_Q in
+           src/config.py, so the one in this file is not authoritative
+  -->
   <compiler angle="radian" meshdir="assets/"/>
 
   <asset>

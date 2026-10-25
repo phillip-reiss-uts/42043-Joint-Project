@@ -174,7 +174,7 @@ def main():
     # ---------------- 2F-85 register map: REMOVED ----------------
     #
     # This section drove Robotiq2F85 through a fake Modbus bus. That class and
-    # its register map are gone (todo E1, 2026-10-26): connect() builds an RG2,
+    # its register map are gone (2026-10-26): connect() builds an RG2,
     # no pymodbus client is ever opened, and nothing in the tree could construct
     # a 2F-85. The checks passed only because the class still existed -- green
     # coverage of a device this cell does not have.

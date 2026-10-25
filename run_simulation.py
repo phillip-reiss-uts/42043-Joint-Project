@@ -50,7 +50,7 @@ def _log(msg):
         print(msg)
 
 
-def main(sensor_size=(320, 240)):
+def main(sensor_size=(320, 240), lightweight=False):
     model = load_robot_model()
     if model is None:
         return 1
@@ -129,11 +129,19 @@ def main(sensor_size=(320, 240)):
 
         # Live overlays. Wraps viewer.sync, so every sync anywhere in the code
         # draws the overlay first -- no plumbing through the call chain.
-        overlay = Overlay(viewer, model, data, camera, cam_id, arm.base_id)
+        #
+        # lightweight drops the two camera panels, each of which is its own GL
+        # render per frame. The robot does not use them; on an old machine they
+        # are most of the wall time a pick takes.
+        overlay = Overlay(viewer, model, data, camera, cam_id, arm.base_id,
+                          lightweight=lightweight)
         overlay.set_info('mode', 'WAIT', 'scene empty')
         name, speed = target_motion.current_band()
         overlay.set_info('move', 'obj motion %s' % name,
                          '%.0f mm/s' % (speed * 1e3))
+        if lightweight:
+            print('[INFO] lightweight: camera image and point-cloud panels are '
+                  'off (two fewer GL renders per frame)')
         ui['overlay'] = overlay
         # Arm pushes diagnostics through whatever has .overlay; it does not
         # import the overlay layer itself.
@@ -327,15 +335,23 @@ def main(sensor_size=(320, 240)):
             # which reads as a hang. Bound the whole attempt by wall time and
             # let the caller treat it as a failed grip -- which re-homes and
             # searches, exactly the documented failed-grip path.
-            # The budget is WALL time, and the viewer makes a pick far slower
-            # than the headless measurement: a successful pick takes ~9.5 s of
-            # CPU, but every chunk also renders, so the same pick can take two
-            # or three times that on screen. 20 s was measured to abort genuine
-            # grasps on a perfectly stationary cube ("target would not hold
-            # still" with nothing moving). 120 s still bounds a real hang --
-            # the servo's own iteration cap is what normally terminates a
-            # fruitless chase -- without cutting off a legitimate attempt.
-            mission_deadline = _time.perf_counter() + 120.0
+            #
+            # THIS IS A HANG GUARD, NOT A PERFORMANCE TARGET, and it is WALL
+            # time, so the machine decides how much pick fits inside it. A
+            # successful pick is ~9.5 s of CPU headless, but every servo chunk
+            # also syncs the viewer, draws the camera image and (OVERLAY_CLOUD)
+            # does an extra depth pass for the point cloud. On the cell's
+            # ThinkPad 120 s expired just after the jaws closed on a perfect
+            # grasp -- [GRASP] held, then "pick exceeded its wall-clock budget"
+            # -- and the pick was abandoned and re-homed every time.
+            #
+            # So it lives in config as PICK_BUDGET_S and is generous by default.
+            # If a pick is abandoned, the message prints how long it took, which
+            # separates "slow machine" from "genuine hang" without guesswork.
+            # Lowering it is the wrong fix if picks are being cut off; the
+            # overlay is the expensive part, not the control loop.
+            t_pick = _time.perf_counter()
+            mission_deadline = t_pick + cfg.PICK_BUDGET_S
 
             def give_up():
                 return (cmd.pending() or not viewer.is_running()
@@ -348,7 +364,10 @@ def main(sensor_size=(320, 240)):
             ok = pick_and_hold(model, data, arm, world, i, home_q,
                                viewer=viewer, aborted=give_up, estop=estop)
             if not ok and _time.perf_counter() >= mission_deadline:
-                print('[PICK] pick exceeded its wall-clock budget -- abandoning')
+                print('[PICK] abandoned after %.1f s of a %.1f s budget -- this '
+                      'is the HANG GUARD, not a failed grasp; raise '
+                      'PICK_BUDGET_S in src/config.py if the grasp was held'
+                      % (_time.perf_counter() - t_pick, cfg.PICK_BUDGET_S))
             return bool(ok)
 
         def on_reset():

@@ -170,7 +170,7 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
     # reaches its committed pose either way.
     #
     # On this cell the RG2 has no force readback, so grasp_state() returns
-    # 'unknown'. The pickup is therefore OPEN LOOP by design (todo B5):
+    # 'unknown'. The pickup is therefore OPEN LOOP by design:
     # 'unknown' means there is no evidence either way, so it proceeds; only an
     # explicit 'empty' abandons the pick. With a gripper that reports force --
     # the simulator, a Robotiq -- behaviour is unchanged.
@@ -180,7 +180,7 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
     push(viewer, 'gripper', 'grasp %s' % g['state'],
          'q %.3f  f %+.2f' % (g['q'], g['force']))
 
-    # Advisory only, never a gate (todo C3): the gripper can sometimes say
+    # Advisory only, never a gate: the gripper can sometimes say
     # whether its jaws met an object (RG2 XML-RPC rg_get_grip_detected). It is
     # logged because it is free evidence at the bench; the pickup proceeds
     # regardless of the answer. Backends without the capability return None and

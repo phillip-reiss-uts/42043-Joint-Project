@@ -79,7 +79,8 @@ class Overlay:
                  trail_max=2600, trail_every=2, trail_draw_max=300,
                  image_every=6, frustum_depth=0.16, draw_frustum=True,
                  real_time=VIEWER_REAL_TIME, cloud=OVERLAY_CLOUD,
-                 cloud_every=OVERLAY_CLOUD_EVERY, cloud_max=20000):
+                 cloud_every=OVERLAY_CLOUD_EVERY, cloud_max=20000,
+                 lightweight=False):
         self.viewer = viewer
         self.model = model
         self.data = data
@@ -89,6 +90,25 @@ class Overlay:
         self.trail_max = trail_max
         self.trail_every = trail_every
         self.trail_draw_max = trail_draw_max
+        # LIGHTWEIGHT: no camera panels at all.
+        #
+        # Both of them are EXTRA GL RENDERS on top of the depth pass that
+        # perception already does: the RGB panel renders the camera view
+        # (image_every syncs) and the cloud panel renders a depth pass
+        # (cloud_every syncs). On a software-GL laptop those two dominate a
+        # frame, and in the viewer they are what turns a ~9.5 s pick into
+        # minutes of wall time -- enough to trip the pick hang guard.
+        #
+        # Dropping them costs nothing the robot needs: perception has its own
+        # camera, and the 3D scene, the trail, the detections and every text
+        # panel stay. Expressed as "no image panel, no cloud" rather than a
+        # flag threaded through draw(), so the two panel builders keep their
+        # existing single early-return. NOTE the ordering: these locals are
+        # normalised BEFORE they are assigned below, or the zeroing is lost.
+        if lightweight:
+            image_every = 0
+            cloud = False
+        self.lightweight = bool(lightweight)
         self.image_every = image_every
         self.frustum_depth = frustum_depth
         self.draw_frustum = draw_frustum

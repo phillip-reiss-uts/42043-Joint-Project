@@ -226,7 +226,7 @@ class URBackend(RobotBackend):
 # absent or fails, state() returns NaN and the pipeline reads "unknown" -- which
 # is what an open-loop pickup expects anyway.
 #
-# Quirks that cost time before (report 5.2):
+# Quirks that cost time at the cell:
 #   * the load FILENAME is limited to ~15 characters on this controller
 #   * one command per connection; replies get swallowed otherwise
 #   * 'play' is refused unless the pendant is in Remote with the slider correct
@@ -270,7 +270,7 @@ def _dashboard(host, command, port=None, timeout=5.0):
 # roughly 1 s stroke. If that ramp is shortened, set GRIP_STROKE_TIME_S and the
 # dashboard fallback will wait the program out.
 #
-# Dashboard quirks that cost time before (report 5.2):
+# Dashboard quirks that cost time at the cell:
 #   * the load FILENAME is limited to ~15 characters on this controller
 #   * one command per connection; replies get swallowed otherwise
 #   * 'play' is refused unless the pendant is in Remote with the slider correct

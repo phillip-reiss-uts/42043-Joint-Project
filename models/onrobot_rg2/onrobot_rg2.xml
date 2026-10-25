@@ -5,6 +5,11 @@
        cloned into the workspace by the user. The meshes are copied unmodified
        into meshes/{collision,visual}/ and the licence sits alongside this file.
 
+       That package's own README records where ITS meshes came from: the
+       Osaka-University-Harada-Laboratory/onrobot repository (also MIT), which is
+       where these RG2 shapes originate. Credited here because the citation is
+       the whole point of a vendored manufacturer model.
+
        Earlier versions of this file were hand-authored boxes. They had the right
        stroke, jaw axis and length but not the real shape, and the linkage was
        faked as two sliding pads. This model uses the manufacturer's geometry and

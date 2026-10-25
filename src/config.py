@@ -298,19 +298,26 @@ LQR_R = 5.0e-2           # command cost (rad^2); sets the overall gain level
 # the constraint it was protecting is at a different place.
 GRASP_HEIGHT_FRAC = 0.2       # kept for reference; no longer used by the offset
 # PAD CONTACT HEIGHT. The pad face is GRIPPER_PAD_HEIGHT_MM tall (measured 29.8 mm).
-#     pad TOP above the table    = OBJECT_HEIGHT                        = 60.0 mm
-#     pad bottom above the table = that - pad height                    = 30.2 mm
+#     pad TOP above the table    = OBJECT_HEIGHT - drop                  = 55.0 mm
+#     pad bottom above the table = that - pad height                     = 25.2 mm
 #
-# The pad's top edge is LEVEL WITH THE CUBE'S TOP EDGE, neither above nor below it.
-# An earlier version centred the pad on the cube (15.1-44.9 mm), which gripped the
-# middle. This grips the upper half with the top edges flush.
+# GRASP_DROP_BELOW_TOP_MM is how far below the cube's top edge the pad's top edge
+# sits. It was 0.0 -- top edges flush -- until 2026-10-26, when the owner asked
+# for the grasp 5 mm lower on the cube, closer to the table. It is a GRASP DEPTH
+# choice, not a measured cell constant, so it is one explicit number rather than a
+# tweak buried in the offset.
+#
+# 5 mm is safe against the contact gate: the new grasp pose is 254.9 mm and
+# z_floor is 222.7 mm, so there is 32 mm of headroom and the descent cannot clamp.
 #
 # GRASP_PAD_SAG_MM is computed above from the measured finger arc
 # (rg2_pad_drop_mm): closing the jaws lowers the pads, so the commanded base height
 # has to allow for it. It belongs to the GRASP POSE only -- the descent runs with
 # the jaws held open, which is the geometry GRIPPER_TO_PAD_MM describes.
 GRIPPER_PAD_HEIGHT_MM = 29.8
-GRASP_PAD_BOTTOM_MM = OBJECT_HEIGHT * 1000.0 - GRIPPER_PAD_HEIGHT_MM
+GRASP_DROP_BELOW_TOP_MM = 5.0
+GRASP_PAD_BOTTOM_MM = (OBJECT_HEIGHT * 1000.0 - GRIPPER_PAD_HEIGHT_MM
+                       - GRASP_DROP_BELOW_TOP_MM)
 TIP_OFFSET = ((GRASP_PAD_BOTTOM_MM + GRIPPER_TO_PAD_MM + GRASP_PAD_SAG_MM) / 1000.0
               - OBJECT_HEIGHT / 2.0)
 APPROACH_Z = 0.10
@@ -574,7 +581,7 @@ GRASP_DRIVER_JOINTS = ('gripper/right_driver_joint', 'gripper/left_driver_joint'
 # Hardware reports jaw width in millimetres and NO force at all (RG2 section
 # below), so GRASP_FORCE_MIN cannot be honoured there and the hardware pickup
 # runs open loop on 'unknown'. Giving both paths one threshold set that means
-# one thing is todo F5, and it is not a change to these numbers.
+# one thing is a separate decision, and it is not a change to these numbers.
 GRASP_CLOSED_Q = 0.60         # above this the jaws plainly closed on nothing
 GRASP_FORCE_MIN = 1.0         # SIM ONLY: force to call it gripped, not touched
 GRASP_VEL_TOL = 0.02          # rad/s; below this the fingers count as stalled
@@ -584,7 +591,7 @@ GRASP_LIFT_RECHECK = 0.04     # m; lift clear and re-read after a failed check
 # The pickup on hardware is OPEN LOOP: command the jaws, wait, lift. The RG2
 # takes force as a WRITE-ONLY input and reports only jaw opening in mm, so
 # there is no force to test against and the simulation's GRASP_FORCE_MIN above
-# does not apply (see notes/RG2-GRIPPER-XMLRPC.txt).
+# does not apply.
 #
 # OPERATIVE constant: seconds for one full open->close stroke. MEASURE it at
 # the bench with a stopwatch. None means unmeasured, so nothing can silently
@@ -593,8 +600,8 @@ GRASP_LIFT_RECHECK = 0.04     # m; lift clear and re-read after a failed check
 GRIP_STROKE_TIME_S = None
 #
 # OPTIONAL instrumentation, NOT a gate. If get_rg_width() answers, these let
-# the pickup report where the jaws actually finished -- useful for the report
-# and for diagnosing a missed pick -- but no decision branches on them.
+# the pickup report where the jaws actually finished -- useful for diagnosing
+# a missed pick -- but no decision branches on them.
 # Closing on the 60 mm cube leaves the jaws near the cube side; closing on air
 # drives them to the inner limit near zero, so the two are far apart.
 OBJECT_SIDE_MM = OBJECT_HEIGHT * 1e3         # 60.0 -- derived from OBJECT_SIZE
@@ -611,7 +618,7 @@ GRASP_WIDTH_MIN_MM = OBJECT_SIDE_MM - GRASP_WIDTH_MARGIN_MM   # 50.0
 #
 # LAST RESORT: trigger UR programs that were built on the pendant, over the
 # dashboard server. Discrete open/close only, no readback, and it carries three
-# quirks (report 5.2). Used automatically only when XML-RPC is unavailable.
+# quirks that cost time at the cell. Used automatically only when XML-RPC is unavailable.
 UR_DASHBOARD_PORT = 29999
 RG2_XMLRPC_PORT = 41414
 RG2_OPEN_PROGRAM = '/programs/rg_open.urp'
@@ -684,6 +691,22 @@ SEARCH_OFFSETS = (
 )
 
 DROP_RADIUS = 0.07        # scatter drops this far around the chute centre
+
+# ---- pick hang guard (simulation front-end) -------------------------------
+# Wall-clock budget for ONE explicit pickup, approach through to the cube being
+# carried home. It exists so a target that never holds still cannot look like a
+# hang; it is not a performance target.
+#
+# It was hardcoded at 120 s and that was measured to be too tight on the cell's
+# ThinkPad: the jaws closed on a perfect grasp ([GRASP] held, finger 0.483,
+# force 5.00) and the budget then cut the lift off, so every pickup was
+# abandoned and re-homed. The cause is rendering, not control: a pick is ~9.5 s
+# of CPU headless, but each servo chunk also syncs the viewer, draws the camera
+# image and (OVERLAY_CLOUD) renders a second depth pass for the point cloud.
+#
+# 300 s is deliberately much larger than any healthy pick so that a trip means
+# something. If it trips, the printed line says how long it took.
+PICK_BUDGET_S = 300.0
 
 # debug flags
 VERIFY_IK = False         # run the IK self-test at startup
@@ -767,7 +790,7 @@ R_DOWN = np.array([[_c_yaw, -_s_yaw, 0.0],
 # RG2 PALM, so the camera will NOT sit where the simulator's bracket did. The
 # numbers below ARE that bracket, kept so imports work: they are NOT measured.
 #
-# CAM_MOUNT_MEASURED was a boolean with no consumers; removed (todo F8). The
+# CAM_MOUNT_MEASURED was a boolean with no consumers; removed. The
 # status it encoded is now the difference between the shared pose and a real
 # measurement -- i.e. whether HW_CAM_DELTA below is still identity.
 #
@@ -776,7 +799,7 @@ R_DOWN = np.array([[_c_yaw, -_s_yaw, 0.0],
 # [-1, 1] and near unit norm. A translation in the hundreds of mm, or a
 # non-unit quaternion, means a frame or units error, not a bad calibration.
 #
-# ONE POSE, TWO CONSUMERS (todo F7). The simulator's depth_cam and the hardware
+# ONE POSE, TWO CONSUMERS. The simulator's depth_cam and the hardware
 # path use the SAME numbers below; there is no separate sim bracket any more.
 # Enter them by hand once measured. The real camera will still not land exactly
 # there, so the hardware path composes HW_CAM_DELTA on top -- that delta is where
@@ -801,7 +824,7 @@ CAMERA_MODE = 'wrist'
 # the roll.
 # The target is DERIVED from TABLE_CENTRE. It used to be (0.275, 0.035, 0.02),
 # the OLD simulated table -- which now points at where the table is not.
-# FIXED_CAM_MEASURED was a boolean with no consumers; removed (todo F8). Whether
+# FIXED_CAM_MEASURED was a boolean with no consumers; removed. Whether
 # this camera has been measured is recorded by the values themselves.
 FIXED_CAM_POS = (0.0, -0.35, 0.75)                             # PLACEHOLDER
 FIXED_CAM_TARGET = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT)

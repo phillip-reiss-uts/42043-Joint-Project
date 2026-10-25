@@ -5,7 +5,7 @@
 # currently find the cube the fake source renders, so this file FAILS. It is the
 # only red test in the suite and it is not a regression: nothing that used to
 # pass has broken. Treat a failure here as "not built yet" until someone picks up
-# the fixed-camera fallback (todo D6), then make it green.
+# the fixed-camera fallback, then make it green.
 #
 # WHAT THIS PROVES
 # ----------------

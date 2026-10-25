@@ -11,7 +11,7 @@
 # This one asserts the convention DIRECTLY, on the number a porting bug moves
 # first: the TCP pose. A 180 deg error in the base heading shows up here as a
 # plain sign flip on x and y, with no interpretation needed. That is the exact
-# bug todo F1 records -- the chain described the unrotated model while the cell
+# bug this project has already hit once -- the chain described the unrotated model while the cell
 # is turned half a turn -- and it survived several weeks because nothing checked
 # the pose itself.
 #

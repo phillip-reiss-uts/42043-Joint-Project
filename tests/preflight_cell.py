@@ -121,7 +121,7 @@ def check_imports():
         if rg is not None:
             for meth in ("rg_grip", "get_rg_width"):
                 record("  RG.%s()" % meth, hasattr(rg, meth))
-            note("RG.rg_get_grip_detected: %s -- see notes/RG2-GRIPPER-XMLRPC.txt"
+            note("RG.rg_get_grip_detected: %s"
                  % ("present" if hasattr(rg, "rg_get_grip_detected")
                     else "absent (unimplemented upstream)"))
     except Exception:

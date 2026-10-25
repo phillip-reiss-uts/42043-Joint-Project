@@ -334,7 +334,7 @@ class Arm:
         # both paths: the simulator reads its finger joints and actuator, while
         # a URBackend has RG2 jaw width for q and v and reports NaN for force.
         # NaN is what makes the verdict 'unknown' on hardware, which is the
-        # open-loop behaviour todo B5 chose. There is deliberately no read of
+        # open-loop behaviour chosen deliberately. There is deliberately no read of
         # `data` here, so this one verdict function runs on both.
         #
         # Measured on this model: closing on nothing drives the driver joints to

@@ -5,6 +5,9 @@
 #   python main.py --sim        -> simulation, explicit
 #   python main.py --hardware   -> real robot (run_hardware.py)
 #
+#   python main.py --lightweight   simulation with no camera panels; for older
+#                                  machines. See the flag's help.
+#
 # This file is deliberately minimal: it decides WHICH front-end runs and does
 # nothing else. All simulation concerns live in run_simulation.py; all hardware
 # concerns in run_hardware.py; all portable task logic lives in src/task.py.
@@ -29,6 +32,12 @@ def _parse(argv=None):
                    help='run the MuJoCo simulation (default)')
     g.add_argument('--hardware', '--real', dest='hardware', action='store_true',
                    help='run on the real robot (see run_hardware.py)')
+    ap.add_argument('--lightweight', action='store_true',
+                    help='simulation only: drop the camera image and '
+                         'point-cloud panels. Each is its own GL render per '
+                         'frame, so this is the big win on old hardware and it '
+                         'shortens a pick in wall time a lot. The 3D scene, '
+                         'trail, detections and text panels all stay.')
     # Anything else belongs to the chosen front-end (e.g. --ip, --no-gripper),
     # so it is collected here rather than rejected.
     args, rest = ap.parse_known_args(argv)
@@ -36,10 +45,10 @@ def _parse(argv=None):
     return args
 
 
-def run_simulation():
+def run_simulation(args=None):
     # Imported lazily so that --hardware does not pull in mujoco/the viewer.
     from run_simulation import main as sim_main
-    return sim_main()
+    return sim_main(lightweight=bool(getattr(args, 'lightweight', False)))
 
 
 def run_hardware(args):
@@ -54,7 +63,7 @@ def main(argv=None):
     if args.hardware:
         return run_hardware(args)
     # Default: simulation.
-    return run_simulation()
+    return run_simulation(args)
 
 
 if __name__ == '__main__':
