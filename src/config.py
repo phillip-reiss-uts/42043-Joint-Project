@@ -1,4 +1,4 @@
-﻿import math
+import math
 import numpy as np
 
 
@@ -68,6 +68,21 @@ TABLE_XY_BOUNDS = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HALF[0], TABLE_HALF[1
 
 OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
+# WEIGHED on the bench: 90 g. Set explicitly because the geom otherwise takes
+# MuJoCo's default density of 1000 kg/m3, which made this cube 216 g -- a solid
+# plastic block, more than twice the real one, and heavy enough that the simulated
+# grasp slipped where the real one holds.
+OBJECT_MASS_KG = 0.090
+# Friction, as the SLIDING coefficient. MuJoCo takes the element-wise max of the
+# two geoms in a contact, so the pad-cube contact runs at the larger of these.
+#
+# The pads were 1.6 and the cube was never set at all, i.e. MuJoCo's default 1.0 --
+# so the grip was relying on a number nobody had chosen. Both are explicit now.
+# Raising these is a legitimate model parameter, not a fudge: the real pad is a
+# rubberised face and the real cube is printed plastic, both grippier than MuJoCo's
+# default 1.0 implies.
+GRIP_PAD_FRICTION = 2.5
+OBJECT_FRICTION = 1.5
 
 # RG2 FINGER ARC, measured on the tool: the tips travel an arc of R = 55 mm, drop
 # 39.2 mm from fully open to fully closed, and the stroke is 110 mm.
@@ -198,11 +213,9 @@ FEED_MIN_STEPS = 400
 
 # Gripper squeeze force limit (N), applied to the fingers actuator at build.
 #
-# SET FROM RG2_GRIP_FORCE_N further down, so the simulation and the hardware cannot
-# disagree: the real gripper is told a force of RG2_GRIP_FORCE_N and the simulated
-# one is capped at the same number. It used to be a separate +/-40 N literal, i.e.
-# twice what the hardware is given, which made the sim press twice as hard as the
-# real gripper and look like it was crushing the cube.
+# SET FROM SIM_GRIP_FORCE_N, which is deliberately NOT the hardware's
+# RG2_GRIP_FORCE_N: the simulated actuator sits upstream of the four-bar and the
+# pads see only a fraction of it. Both live further down, next to RG2_GRIP_FORCE_N.
 
 # ---- contact guard for the descent ----------------------------------------
 # The lowest point of the gripper is the PAD BOTTOM, which sits GRIPPER_TO_PAD_MM
@@ -285,22 +298,19 @@ LQR_R = 5.0e-2           # command cost (rad^2); sets the overall gain level
 # the constraint it was protecting is at a different place.
 GRASP_HEIGHT_FRAC = 0.2       # kept for reference; no longer used by the offset
 # PAD CONTACT HEIGHT. The pad face is GRIPPER_PAD_HEIGHT_MM tall (measured 29.8 mm).
-# It should lie FULLY against the cube's side and not overhang it, so the pad is
-# centred on the object's height:
+#     pad TOP above the table    = OBJECT_HEIGHT                        = 60.0 mm
+#     pad bottom above the table = that - pad height                    = 30.2 mm
 #
-#     pad bottom above the table = (OBJECT_HEIGHT - pad height) / 2      = 15.1 mm
-#     pad top    above the table = that + pad height                     = 44.9 mm
-#
-# Both inside the cube's 0-60 mm, so every millimetre of pad face is in contact and
-# none of it hangs past the top or bottom edge.
+# The pad's top edge is LEVEL WITH THE CUBE'S TOP EDGE, neither above nor below it.
+# An earlier version centred the pad on the cube (15.1-44.9 mm), which gripped the
+# middle. This grips the upper half with the top edges flush.
 #
 # GRASP_PAD_SAG_MM is computed above from the measured finger arc
 # (rg2_pad_drop_mm): closing the jaws lowers the pads, so the commanded base height
 # has to allow for it. It belongs to the GRASP POSE only -- the descent runs with
 # the jaws held open, which is the geometry GRIPPER_TO_PAD_MM describes.
 GRIPPER_PAD_HEIGHT_MM = 29.8
-GRASP_PAD_BOTTOM_MM = (OBJECT_HEIGHT * 1000.0 - GRIPPER_PAD_HEIGHT_MM) / 2.0
-
+GRASP_PAD_BOTTOM_MM = OBJECT_HEIGHT * 1000.0 - GRIPPER_PAD_HEIGHT_MM
 TIP_OFFSET = ((GRASP_PAD_BOTTOM_MM + GRIPPER_TO_PAD_MM + GRASP_PAD_SAG_MM) / 1000.0
               - OBJECT_HEIGHT / 2.0)
 APPROACH_Z = 0.10
@@ -437,11 +447,14 @@ SERVO_RETREAT_V = 0.03
 #         = that, minus CAM_POS[2]     (CAM_POS z is measured DOWN the approach,
 #                                       so the camera sits CAM_POS[2] below the base)
 #
-# Solving for the standoff at a 320 mm camera height gives 252.6 mm.
+# Solving for the standoff at a 320 mm camera height: with the present
+# TIP_OFFSET (229.9 mm) and CAM_POS[2] (90 mm) that is 150.1 mm, giving a gripper
+# base at 410.0 mm above the table. Verified in the model: the depth camera comes
+# out at exactly 320.0 mm. The number moves whenever TIP_OFFSET or the camera
+# mount does -- that is the point of deriving it rather than hardcoding it.
 #
-# CAVEAT: this inherits TIP_OFFSET, which was tuned against an older tool model
-# and is still un-retuned for the 231.5 mm gripper. If TIP_OFFSET moves, this
-# standoff moves with it -- which is the point of deriving rather than hardcoding.
+# If TIP_OFFSET moves, this standoff moves with it, so the camera stays at 320 mm
+# without anyone re-fitting the hover. Nothing to re-measure by hand.
 CAM_HOVER_HEIGHT_MM = 320.0
 
 SERVO_STANDOFF = (CAM_HOVER_HEIGHT_MM / 1000.0
@@ -601,12 +614,22 @@ RG2_CLOSE_PROGRAM = '/programs/rg_close.urp'
 # a target width in mm, so the command is interpolated between these.
 RG2_OPEN_WIDTH_MM = 110.0    # RG2 full stroke, from the datasheet
 RG2_CLOSE_WIDTH_MM = 10.0    # fully closed without slamming; the example uses 10
+# HARDWARE force. This is what rg_grip(width_mm, force_N) is sent, and 5 N was
+# measured on the bench: winding the real gripper down to 3 N still held the cube
+# firmly. The real robot works, so this number does not change to suit the
+# simulation.
 RG2_GRIP_FORCE_N = 5.0       # write-only input; never readable
-# ONE force for both paths. The simulation's actuator is capped at the same value
-# the hardware is commanded with, so neither can press harder than the other.
-# 5 N was measured on the bench: winding the real gripper down to 3 N still held
-# the cube firmly, so 5 leaves margin without crushing it.
-GRIP_FORCE_RANGE = (-RG2_GRIP_FORCE_N, RG2_GRIP_FORCE_N)
+RG2_MIN_STEP_MM = 2.0        # skip commands smaller than this
+
+# The simulated actuator sits on the finger HINGE, so its forcerange is a TORQUE
+# (N·m), not the pad force. RG2_GRIP_FORCE_N is the force AT THE PADS, so the two
+# are related by the lever arm from the hinge to the pad face. Measured: 5 N·m of
+# actuator torque produced 105 N of pad normal force, i.e. a 47.6 mm lever. So the
+# sim cap is the hardware's pad force times that lever.
+GRIP_LEVER_MM = 47.6
+GRIP_FORCE_RANGE = (-RG2_GRIP_FORCE_N * GRIP_LEVER_MM / 1000.0,
+                     RG2_GRIP_FORCE_N * GRIP_LEVER_MM / 1000.0)
+
 # Width -> the simulation's driver-joint convention. The sim reads HIGH q as
 # CLOSED (closing on air drives its joints to 0.77), while the RG2 reports jaw
 # opening in mm, so the map has to invert: wider jaws -> smaller q. Keeping the
@@ -690,6 +713,20 @@ UR_SERVO_KV = 200.0
 # OLD home. Joint 1 is +1.571, not -0.366: the base is swung ~111 deg round from
 # the model, and the table was moved to match (see TABLE_* above).
 UR_HOME_Q = (1.5708, -1.6299, 0.9853, -0.9276, -1.5708, 0.0)
+
+# SIMULATED home. The cell's home (above) leaves the wrist camera looking off to
+# the side of the tabletop, so the simulation starts from a pose chosen to CENTRE
+# the camera instead: at this pose the camera sits at
+# (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + CAM_HOVER_HEIGHT_MM/1000)
+# looking straight down, with the table centre 0.0 deg off its optical axis.
+#
+# Solved with Arm.solve_ik against R_DOWN, from UR_HOME_Q as the seed; reachable
+# error 0.01 mm, so it is a legal pose for this arm, not an approximation.
+#
+# This is a VIEWING pose, not a measured one. Hardware still homes to UR_HOME_Q --
+# run_hardware.py uses that constant directly -- so the two are deliberately
+# separate and must not be conflated.
+SIM_HOME_Q = (1.2564, -1.6585, 1.0695, -0.9818, -1.5708, 1.2564)
 
 # Mount: wrist_3_link -> gripper base (the frame the robot controls).
 # MEASURE on the gripper; these are the composed model's values.

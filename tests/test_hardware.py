@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Hardware validation harness: check the model's assumptions against a real arm.
 
 WHY THIS EXISTS
@@ -165,7 +165,7 @@ def run_sim(h):
     from src.config import (
         ARM_DOF, OBJECT_SIZE, GRASP_CLOSED_Q, GRASP_FORCE_MIN,
         GRASP_DRIVER_JOINTS, R_DOWN, TABLE_HEIGHT, SELF_FILTER, DEPTH_MAX,
-        SURFACE_BAND, TABLE_XY_BOUNDS,
+        SURFACE_BAND, TABLE_XY_BOUNDS, GRIP_LEVER_MM, TABLE_CENTRE,
     )
 
     model = load_robot_model()
@@ -398,12 +398,17 @@ def run_sim(h):
               % GRASP_CLOSED_Q)
 
     with h.check('GRIPPER', 'force threshold below achievable squeeze',
-                 'GRASP_FORCE_MIN must be under the actuator force range, or\n'
-                 'nothing is ever reported as held.') as r:
+                 'GRASP_FORCE_MIN must be under the force the pads can actually\n'
+                 'deliver, or nothing is ever reported as held.') as r:
+        # The actuator sits on the finger HINGE, so its forcerange is a TORQUE.
+        # The backend converts it to the force at the PADS (torque / lever), and
+        # that is the number GRASP_FORCE_MIN is compared against -- so the check
+        # has to convert too, or it compares N against N.m.
         fr = model.actuator_forcerange[model.nu - 1]
-        r.set(0.0 < GRASP_FORCE_MIN < float(fr[1]),
-              'GRASP_FORCE_MIN = %.2f N, actuator range %s'
-              % (GRASP_FORCE_MIN, np.round(fr, 2)))
+        pad_n = float(fr[1]) / (GRIP_LEVER_MM / 1000.0)
+        r.set(0.0 < GRASP_FORCE_MIN < pad_n,
+              'GRASP_FORCE_MIN = %.2f N, actuator %.3f N.m = %.2f N at the pads'
+              % (GRASP_FORCE_MIN, float(fr[1]), pad_n))
 
     # ---------------- CAMERA ----------------
     cam_name, cam_id = find_camera(model)
@@ -493,15 +498,21 @@ def run_sim(h):
         # The fake source renders a table 0.62 m below the camera; the world
         # frame must put the camera there so the table deprojects onto
         # TABLE_HEIGHT, which is what the detector filters on.
-        _cam = np.array([0.0, 0.0, _src.cam_world_z])
+        #
+        # The camera goes over the TABLE, not over the world origin: the real
+        # depth path filters on the table footprint, so a cube planted at (0,0)
+        # is off the tabletop and is now (correctly) discarded.
+        _cam = np.array([TABLE_CENTRE[0], TABLE_CENTRE[1], _src.cam_world_z])
         _w = RealObjectWorld(_src, lambda: (_cam, np.eye(3)), np.eye(4))
         v = _w.perceive()
         if not v:
             r.set(False, 'no TargetViews returned')
         else:
-            xy_err = float(np.linalg.norm(v[0].xy))
+            xy_err = float(np.linalg.norm(
+                np.asarray(v[0].xy, float)
+                - np.array([TABLE_CENTRE[0], TABLE_CENTRE[1]])))
             r.set(len(v) == 1 and xy_err < 0.01,
-                  '%d view(s), centre xy error %.1f mm (cube on the optical axis)'
+                  '%d view(s), centre xy error %.1f mm from the table centre'
                   % (len(v), xy_err * 1e3))
 
     with h.check('CAMERA', 'RealObjectWorld flags fx != fy / off-centre pupil',

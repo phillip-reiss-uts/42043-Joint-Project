@@ -191,6 +191,11 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
             arm.move(q_re, GRIP_CLOSED, rate=FEED, viewer=rec)
             g = arm.grasp_state()
         if g['held']:
+            # Couple the object to the jaws for the carry, exactly as
+            # pick.grasp_and_lift does -- without this the harness carries the
+            # cube with rigid pads only, which is the failure it is meant to
+            # measure around, not reproduce.
+            arm.attach_object('obj_%d' % idx)
             arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=rec)
             lifted_ok = bool(reg.pose(data, idx)[2]
                              > TABLE_HEIGHT + OBJECT_HEIGHT / 2.0)

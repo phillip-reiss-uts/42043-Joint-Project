@@ -11,14 +11,14 @@ _MODELS_DIR = os.path.join(
 from src.config import (
     CAM_QUAT, CAM_POS, MESH_QUAT, MESH_POS,
     TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
-    OBJECT_SIZE,
+    OBJECT_SIZE, OBJECT_MASS_KG, OBJECT_FRICTION, GRIP_PAD_FRICTION,
     GRIP_FORCE_RANGE,
     CALIB_MARKERS, CALIB_SPACING, CALIB_MARKER_R, CALIB_BOARD_THICK,
     CALIB_BOARD_MARGIN,
     ROBOT_ARM, ROBOT_GRIPPER, ROBOT_CAMERA,
     POOL_SIZE,
     PARK_POS,
-    UR_HOME_Q, UR_ROOT_YAW,
+    UR_HOME_Q, SIM_HOME_Q, UR_ROOT_YAW,
 )
 
 
@@ -195,9 +195,21 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
         g.name = f"obj_{i}_geom"
         g.type = mujoco.mjtGeom.mjGEOM_BOX
         g.size = OBJECT_SIZE
+        # Explicit mass, from the weighed 90 g cube. Without this the geom takes
+        # MuJoCo's default density of 1000 kg/m3 and comes out at 216 g, which made
+        # the grasp slip in a way the real one does not.
+        g.mass = OBJECT_MASS_KG
+        # Explicit sliding friction; the default 1.0 was arbitrary.
+        g.friction = [OBJECT_FRICTION, 0.005, 0.0001]
         g.rgba = [0.9, 0.3, 0.2, 1.0]
         g.contype = 1
         g.conaffinity = 1
+
+    # 7a. Grasp coupling lives in the backend (MujocoBackend.attach_object), not
+    #     in a weld equality: a weld between a 90 g free body and the arm chain is
+    #     numerically unstable -- the cube's inertia is tiny, so the constraint
+    #     torque flings it within a few steps. Carrying the body kinematically is
+    #     both stable and exactly what "held in the jaws" means.
 
     # 7b. Calibration board (optional): slab with a grid of emissive markers.
     if with_calibration_board:
@@ -286,24 +298,31 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     model.actuator_forcerange[grip_act] = GRIP_FORCE_RANGE
     print(f"[INFO] gripper force range = {GRIP_FORCE_RANGE} N")
 
-    # 12. Stand the simulated arm at the CELL's home.
+    # Contact friction and solver iterations are left at the model's own values:
+    # overriding them (pads 2.5, iterations 200, stiffer solimp) made penetration
+    # worse, not better, so those experiments are reverted.
+
+    # 12. Stand the simulated arm at the SIM home.
     #
-    # The vendored MJCF ships the OLD workcell's keyframe (joint 1 = -0.366).
-    # The cell's measured home has joint 1 = +1.571 because the base is swung
-    # round and the table was moved to match -- and the table here is placed from
-    # those same cell constants just above. Leaving the simulated keyframe stale
-    # would aim the wrist camera at where the table used to be, which is why the
-    # TABLE_HEIGHT filter found nothing.
+    # The vendored MJCF ships the OLD workcell keyframe (joint 1 = -0.366), so it is
+    # overwritten at load: config is the single source of truth and
+    # models/ur3e/ur3e.xml stays a vendored file.
     #
-    # Overwritten at load rather than edited into the MJCF: config is the single
-    # source of truth, and models/ur3e/ur3e.xml stays a vendored file.
-    if UR_HOME_Q is not None:
+    # SIM_HOME_Q, not UR_HOME_Q. The cell's home leaves the wrist camera looking off
+    # to the side of the tabletop, so the simulated pose is chosen to centre the
+    # camera over the table. Hardware still homes to UR_HOME_Q via run_hardware.py.
+    # If SIM_HOME_Q is ever unset this falls back to the cell home, never to the
+    # stale keyframe.
+    _home_q = SIM_HOME_Q if SIM_HOME_Q is not None else UR_HOME_Q
+    if _home_q is not None:
         home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home')
         if home_id >= 0:
-            n = min(len(UR_HOME_Q), model.nq)
-            model.key_qpos[home_id][:n] = UR_HOME_Q[:n]
-            print('[INFO] sim home keyframe := UR_HOME_Q (the measured cell home)')
+            n = min(len(_home_q), model.nq)
+            model.key_qpos[home_id][:n] = _home_q[:n]
+            print('[INFO] sim home keyframe := %s'
+                  % ('SIM_HOME_Q (camera centred on the table)'
+                     if SIM_HOME_Q is not None else 'UR_HOME_Q (cell home)'))
         else:
-            print('[WARN] no "home" keyframe to align with UR_HOME_Q')
+            print('[WARN] no "home" keyframe to align with the home pose')
 
     return model

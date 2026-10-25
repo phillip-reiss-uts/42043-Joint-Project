@@ -1,4 +1,4 @@
-﻿"""RealSense-backed world: the hardware implementation of the ObjectWorld seam.
+"""RealSense-backed world: the hardware implementation of the ObjectWorld seam.
 
 WHAT THIS IS FOR
 ----------------
@@ -269,8 +269,9 @@ class DepthWorld(ObjectWorld):
         return world_points_from_depth(
             z16.astype(np.float64) * 1e-3, K, R_wc, p_cam_w,
             SELF_FILTER, DEPTH_MAX, TABLE_HEIGHT + SURFACE_BAND,
-            xy_bounds=(TABLE_CENTRE[0], TABLE_CENTRE[1],
-                       TABLE_HALF[0], TABLE_HALF[1]))
+            # The same footprint the simulator uses -- one definition, so the two
+            # paths cannot disagree about what counts as being on the tabletop.
+            xy_bounds=TABLE_XY_BOUNDS)
 
     # POINTS -> TargetViews
     def detect(self, points):

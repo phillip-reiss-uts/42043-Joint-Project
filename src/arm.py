@@ -65,6 +65,10 @@ class Arm:
         # Last commanded joint vector, for the observer's predict step.
         self._last_cmd = self.backend.joint_positions()
 
+        # Body currently coupled to the jaws by the parent attach_object().
+        # None means the jaws are empty as far as the sim coupling is concerned.
+        self._held_body = None
+
         # Robot geometry (FK, Jacobian, mass/gravity). Injected so the control
         # layer does not reach into the simulator directly.
         self.kin = kinematics
@@ -266,9 +270,31 @@ class Arm:
 
     def open_gripper(self, steps, viewer=None, estop=None, stop=None,
                      on_step=None):
-        # Ramp the fingers open while holding the present arm pose.
+        # Ramps open, so whatever the jaws were carrying is released first.
+        # Detaching here rather than at each call site means every release path
+        # -- pick, place, demo, abort -- uncouples automatically.
+        self.detach_object()
         self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop,
                         stop, on_step)
+
+    def attach_object(self, body_name):
+        # Couple an object to the jaws for the carry. Simulation only: the
+        # hardware backend has no such method and the real gripper needs none.
+        # A no-op on hardware rather than an error, so the pick flow stays one
+        # sequence on both.
+        fn = getattr(self.backend, 'attach_object', None)
+        if fn is None:
+            return False
+        ok = fn(body_name)
+        self._held_body = body_name if ok else None
+        return ok
+
+    def detach_object(self):
+        if self._held_body is None:
+            return False
+        fn = getattr(self.backend, 'detach_object', None)
+        self._held_body = None
+        return bool(fn()) if fn is not None else False
 
     def _ramp_grip(self, g_from, g_to, steps, viewer=None, estop=None,
                    stop=None, on_step=None):

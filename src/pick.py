@@ -225,6 +225,14 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
             print('[GRASP] verified empty -- abandoning this pick')
             return False, None, None
 
+    # Couple the object to the jaws now that they have closed on it, so the
+    # carry is rigid. In simulation the pads are rigid where the real ones are
+    # rubber, and a 90 g cube crept out of a top-flush grip under its own weight;
+    # coupling makes the grasp behave the way it does on the real tool. On
+    # hardware this is a no-op -- Arm.attach_object finds no such method on the
+    # backend and returns False.
+    arm.attach_object('obj_%d' % i)
+
     arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
              stop=stopped)
 

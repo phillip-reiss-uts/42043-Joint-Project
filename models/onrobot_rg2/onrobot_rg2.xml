@@ -1,4 +1,4 @@
-﻿<mujoco model="onrobot_rg2">
+<mujoco model="onrobot_rg2">
   <!-- OnRobot RG2, built from the OFFICIAL description's meshes and dimensions.
 
        Source: tonydle/OnRobot_ROS2_Description (MIT, Copyright (c) 2025 Tony Le),
@@ -64,7 +64,7 @@
       <geom contype="0" conaffinity="0" group="0"/>
     </default>
     <default class="fingerpad">
-      <geom friction="1.6" solimp="0.97 0.995 0.001" solref="0.003 1"
+      <geom friction="1.6" solimp="0.98 0.998 0.0005" solref="0.002 1"
             contype="2" conaffinity="1" group="3"/>
     </default>
   </default>
@@ -103,21 +103,14 @@
                  range="-0.872665 0.872665" damping="0.2"/>
           <inertial pos="-0.0004 0.007 0.0239" mass="0.05"
                     diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
-          <!-- PAD AS A BOX, not a mesh. MuJoCo collides with the CONVEX HULL of a
-               mesh, and this finger is concave, so its hull is a fat slab that sat
-               in permanent shallow overlap with its neighbours -- that was the
-               jitter. A box is both better conditioned and more accurate: the real
-               pad is 29.8 mm tall and the mesh's lower 30 mm is the pad.
-
-               Placement is in the finger frame, taken from the mesh's own bbox:
-                 x  -0.0004  the mesh centre, i.e. the same +/-10.1 mm faces the
-                             gap measurement used, so the stroke is unchanged
-                 y   0.0088  thickness centre
-                 z   0.0396  29.8 mm pad centred on the lower end of the finger
-                             (local +z points DOWN the finger) -->
-          <geom name="l_pad" type="box" class="fingerpad"
-                pos="-0.0004 0.0088 0.0396" size="0.00938 0.0121 0.0149"
-                rgba="0.08 0.08 0.09 1"/>
+          <!-- Collision is a flat BOX matching the visual mesh's bounding box, so
+               its inner face (y=+0.019 in this body frame) sits exactly on the pad
+               surface. A mesh collides through its CONVEX HULL, which is fatter than
+               the part and touched the cube near its top edge, so the cube tipped
+               out on lift. A flat box gives full-face contact over the whole pad. -->
+          <geom name="l_finger" type="box" class="fingerpad"
+                pos="0 0.007 0.024" size="0.010 0.012 0.029"
+                rgba="0.10 0.10 0.11 1"/>
           <geom name="l_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
                 rgba="0.10 0.10 0.11 1"/>
         </body>
@@ -137,7 +130,7 @@
       <!-- RIGHT: same links, frames rotated pi about z as the URDF specifies -->
       <body name="right_outer_knuckle" pos="0 0.017178 0.125797" quat="0 0 0 1">
         <joint name="right_outer_knuckle_joint" type="hinge" axis="1 0 0"
-               range="-0.785398 0.785398" damping="0.5"/>
+               range="-0.785398 0.785398" damping="0.2"/>
         <inertial pos="0 0 0.0146" mass="0.05" diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
         <geom name="r_outer" type="mesh" mesh="outer_knuckle_c" rgba="0.22 0.22 0.24 1" class="rg2geom"/>
         <geom name="r_outer_vis" type="mesh" mesh="outer_knuckle_v" class="visual"
@@ -148,11 +141,10 @@
                  range="-0.872665 0.872665" damping="0.2"/>
           <inertial pos="-0.0004 0.007 0.0239" mass="0.05"
                     diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
-          <!-- Mirror of l_pad. The right finger's frame is rotated 180 deg about z,
-               so the SAME local numbers place it symmetrically in the world. -->
-          <geom name="r_pad" type="box" class="fingerpad"
-                pos="-0.0004 0.0088 0.0396" size="0.00938 0.0121 0.0149"
-                rgba="0.08 0.08 0.09 1"/>
+          <!-- Mirror of l_finger: same box, frame rotated 180 deg about z. -->
+          <geom name="r_finger" type="box" class="fingerpad"
+                pos="0 0.007 0.024" size="0.010 0.012 0.029"
+                rgba="0.10 0.10 0.11 1"/>
           <geom name="r_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
                 rgba="0.10 0.10 0.11 1"/>
         </body>
@@ -175,15 +167,15 @@
     <!-- MuJoCo has no mimic tags, so the URDF's mimic chain becomes equalities:
          joint1 = polycoef0 + polycoef1 * joint2. -->
     <joint name="mimic_l_inner_knuckle" joint1="left_inner_knuckle_joint"
-           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.006 3" solimp="0.95 0.99 0.001"/>
     <joint name="mimic_l_inner_finger" joint1="left_inner_finger_joint"
-           joint2="finger_joint" polycoef="0 1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+           joint2="finger_joint" polycoef="0 1 0 0 0" solref="0.006 3" solimp="0.95 0.99 0.001"/>
     <joint name="mimic_r_outer" joint1="right_outer_knuckle_joint"
-           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.006 3" solimp="0.95 0.99 0.001"/>
     <joint name="mimic_r_inner_knuckle" joint1="right_inner_knuckle_joint"
-           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+           joint2="finger_joint" polycoef="0 -1 0 0 0" solref="0.006 3" solimp="0.95 0.99 0.001"/>
     <joint name="mimic_r_inner_finger" joint1="right_inner_finger_joint"
-           joint2="finger_joint" polycoef="0 1 0 0 0" solref="0.002 1" solimp="0.95 0.99 0.001"/>
+           joint2="finger_joint" polycoef="0 1 0 0 0" solref="0.006 3" solimp="0.95 0.99 0.001"/>
   </equality>
 
   <actuator>

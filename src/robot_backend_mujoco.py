@@ -1,4 +1,4 @@
-﻿"""MuJoCo implementation of the RobotBackend I/O seam.
+"""MuJoCo implementation of the RobotBackend I/O seam.
 
 This module is the SIMULATION side of the "who owns the clock" boundary. It
 wraps `MjData`: joint targets go to `data.ctrl`, a control cycle is `mj_step`,
@@ -25,7 +25,8 @@ exactly once.**
 import numpy as np
 
 from src.robot_backend import RobotBackend
-from src.config import (GRIP_FINGER_OPEN_ANGLE, GRIP_FINGER_SHUT_ANGLE)
+from src.config import (GRIP_FINGER_OPEN_ANGLE, GRIP_FINGER_SHUT_ANGLE,
+                        GRIP_LEVER_MM)
 
 
 # One scratch MjData per model, so the gravity evaluation does not mutate the
@@ -87,6 +88,8 @@ class MujocoBackend(RobotBackend):
         self._grip_shut = float(GRIP_FINGER_SHUT_ANGLE)
         self._grip_span = self._grip_shut - self._grip_open
         self._grip_joint = 'gripper/finger_joint'
+        # Body being carried by the jaws (see attach_object), or None.
+        self._carry = None
 
     # ---- state ----
     def joint_positions(self):
@@ -112,6 +115,57 @@ class MujocoBackend(RobotBackend):
 
     def step(self):
         self._mj.mj_step(self.model, self.data)
+        self._carry_object()
+
+    # ---- grasp coupling (simulation only) ----
+    def attach_object(self, body_name):
+        # Carry `body_name` with the tool, in the relative pose it has right now.
+        #
+        # The simulated pads are rigid where the real ones are rubber, so the cube
+        # creeps down the pad faces under its own weight and falls out of a
+        # top-flush grip. A weld EQUALITY between a 90 g free body and the arm
+        # chain is numerically unstable (the cube's inertia is tiny, so the
+        # constraint torque flings it), so the body is carried kinematically
+        # instead: its free joint is rewritten to follow the tool every step.
+        #
+        # This is a deliberate simplification, not a contact model: once the jaws
+        # have closed on the object it moves with them, which is what the real
+        # gripper does.
+        import mujoco
+        b = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, str(body_name))
+        if b < 0:
+            return False
+        j = int(self.model.body_jntadr[b])
+        R_t = np.array(self.data.xmat[int(self.tool_body_id)], float).reshape(3, 3)
+        p_t = np.array(self.data.xpos[int(self.tool_body_id)], float)
+        R_b = np.array(self.data.xmat[b], float).reshape(3, 3)
+        p_b = np.array(self.data.xpos[b], float)
+        self._carry = {
+            'qadr': int(self.model.jnt_qposadr[j]),
+            'dadr': int(self.model.jnt_dofadr[j]),
+            'rel_R': R_t.T @ R_b,      # object orientation in the tool frame
+            'rel_p': R_t.T @ (p_b - p_t),
+        }
+        return True
+
+    def detach_object(self):
+        # Stop carrying: the body keeps whatever pose it was left in.
+        self._carry = None
+        return True
+
+    def _carry_object(self):
+        if self._carry is None:
+            return
+        c = self._carry
+        R_t = np.array(self.data.xmat[int(self.tool_body_id)], float).reshape(3, 3)
+        p_t = np.array(self.data.xpos[int(self.tool_body_id)], float)
+        R_b = R_t @ c['rel_R']
+        p_b = p_t + R_t @ c['rel_p']
+        quat = np.zeros(4)
+        self._mj.mju_mat2Quat(quat, R_b.ravel())
+        self.data.qpos[c['qadr']:c['qadr'] + 3] = p_b
+        self.data.qpos[c['qadr'] + 3:c['qadr'] + 7] = quat
+        self.data.qvel[c['dadr']:c['dadr'] + 6] = 0.0
 
     # ---- gripper readback ----
     def gripper_state(self):
@@ -126,7 +180,12 @@ class MujocoBackend(RobotBackend):
         return {
             'q': q,
             'v': v,
-            'force': float(self.data.actuator_force[self._grip_act]),
+            # The actuator sits on the finger HINGE, so actuator_force is a TORQUE
+            # (N·m). The hardware path reports the force AT THE PADS (N), which is
+            # what GRASP_FORCE_MIN is calibrated against. Convert through the lever
+            # arm so the same verdict logic works on both.
+            'force': float(self.data.actuator_force[self._grip_act])
+            / (GRIP_LEVER_MM / 1000.0),
         }
 
     def _grip_pos(self, which):
