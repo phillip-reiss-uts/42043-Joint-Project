@@ -106,10 +106,10 @@ path is built and calibrated for; the fixed mode exists as a fallback for a
 constrained cell and its detection path is not finished (`tests/test_fixed_camera.py`
 is marked PENDING).
 
-## Credits
+## References
 
-This project vendors other people's descriptions and follows their methods.
-Every one is cited rather than silently copied:
+This project uses other people's descriptions and follows their methods.
+
 
 | source | used for | licence |
 |---|---|---|
@@ -117,7 +117,7 @@ Every one is cited rather than silently copied:
 | [tonydle/OnRobot_ROS2_Description](https://github.com/tonydle/OnRobot_ROS2_Description) | the RG2 geometry: four-bar linkage dimensions and meshes (`models/onrobot_rg2/`) | MIT, © 2025 Tony Le |
 | [Osaka-University-Harada-Laboratory/onrobot](https://github.com/Osaka-University-Harada-Laboratory/onrobot) | upstream origin of the RG2 meshes, per the package above | MIT |
 
-The UR3e meshes are byte-for-byte copies, SHA-256 verified. What was changed in
+The UR3e meshes are byte-for-byte copies. What was changed in
 each description, and why, is recorded in [models/README.md](models/README.md);
 the licence texts sit beside the files they cover.
 
