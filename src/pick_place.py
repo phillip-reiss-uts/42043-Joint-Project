@@ -26,7 +26,7 @@ from src.config import (
 )
 
 from src.overlay import push
-from src.pick import grasp_and_lift
+from src.pick import grasp_and_lift, search_for_object
 from src.robot_backend_mujoco import gravity_feedforward
 
 
