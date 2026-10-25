@@ -1,7 +1,7 @@
-﻿# src/config.py
-"""Single source of truth for scene and task constants."""
-
+﻿import math
 import numpy as np
+
+
 
 # workcell
 #
@@ -68,6 +68,34 @@ TABLE_XY_BOUNDS = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HALF[0], TABLE_HALF[1
 
 OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
+
+# RG2 FINGER ARC, measured on the tool: the tips travel an arc of R = 55 mm, drop
+# 39.2 mm from fully open to fully closed, and the stroke is 110 mm.
+#
+# The pad height therefore depends on HOW FAR THE JAWS HAVE CLOSED, which is why a
+# single base->pad number cannot describe the grasp pose: 220.7 mm is the OPEN-jaw
+# figure (correct for the descent, where the jaws are held open), and the pads sit
+# lower once they close on the object.
+#
+# Parametrised so both measured endpoints hold exactly:
+#   f = 0   fully open    -> drop 0
+#   f = 1   fully closed  -> drop 39.2 mm
+# with theta_max taken from the measured drop on the stated radius, and the closing
+# fraction linear in the stroke.
+RG2_MAX_OPENING_MM = 110.0
+RG2_TIP_DROP_FULL_MM = 39.2
+RG2_FINGER_RADIUS_MM = 55.0
+
+
+def rg2_pad_drop_mm(opening_mm):
+    # Pad drop below the fully-open height, for a given jaw opening.
+    f = (RG2_MAX_OPENING_MM - float(opening_mm)) / RG2_MAX_OPENING_MM
+    f = min(max(f, 0.0), 1.0)
+    th_max = math.acos(1.0 - RG2_TIP_DROP_FULL_MM / RG2_FINGER_RADIUS_MM)
+    return RG2_FINGER_RADIUS_MM * (1.0 - math.cos(f * th_max))
+
+OBJECT_WIDTH_MM = 2.0 * OBJECT_SIZE[0] * 1000.0   # the cube jaw width, 60 mm
+GRASP_PAD_SAG_MM = rg2_pad_drop_mm(OBJECT_WIDTH_MM)
 OBJECT_POS = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + OBJECT_SIZE[2]]
 
 # object pool 
@@ -235,24 +263,46 @@ LQR_R = 5.0e-2           # command cost (rad^2); sets the overall gain level
 
 # grasp / place
 #
-# TIP_OFFSET places the gripper/base when grasping: servo.desired_pose sets
-#     p_des.z = object_centre_z + TIP_OFFSET + z_offset
-# so this is where the tool is commanded relative to the object centre.
+# TIP_OFFSET is gripper/base -> object centre at grasp, so it is fixed by the
+# GRIPPER'S GEOMETRY, not by tuning:
 #
-# NOTE ON THE FORMULA. It is NOT simply "distance from gripper/base to the pad".
-# Measuring that (0.1401 m on both builds) and using base_to_tip - H/2 gives
-# 0.1101, which was tried and made grasps WORSE: the servo then drives closer
-# before the tracking gate fires, leaving under 50 mm for the open-loop commit,
-# which truncates and closes the jaws short of the cube. Measured commit offsets
-# from the target: 0.042 / 0.011 / 0.054 m at 0.1101, versus -0.002 / -0.005 /
-# 0.034 m at the original 0.1274. The original value is retained.
+#     pad bottom at grasp  = TABLE_CONTACT_CLEARANCE_MM above the table
+#     gripper base         = pad bottom + GRIPPER_TO_PAD_MM
+#     TIP_OFFSET           = gripper base - OBJECT_HEIGHT/2
 #
-# The 0.1094 term is an early empirical figure. It is left as-is rather than
-# "corrected" because the surrounding behaviour (track-then-commit) is tuned
-# against it, and changing it silently changes where the servo stops.
-GRASP_HEIGHT_FRAC = 0.2
-TIP_OFFSET = 0.1094 - (GRASP_HEIGHT_FRAC - 0.5) * OBJECT_HEIGHT
-BASE_TO_TIP = 0.1401          # measured, gripper/base -> lowest pad (reference)
+# With the measured 231.5 mm tool (220.7 mm base->pad) that is 192.7 mm.
+#
+# WHAT IT REPLACES. The old formula was 0.1094 - (GRASP_HEIGHT_FRAC - 0.5) * H
+# = 0.1274, an empirical figure describing the previous ~149 mm tool. Against the
+# 231.5 mm gripper it commanded the pads 65.3 mm THROUGH the tabletop, which is
+# the collision the z gate now catches. The old note below is kept because the
+# behaviour it describes is real, but the numbers in it belong to the old tool.
+#
+# HISTORY, superseded: measuring base->pad as 0.1401 and using base_to_tip - H/2
+# gives 0.1101, which was tried on the old build and made grasps worse, because
+# the servo drove closer before the tracking gate fired and left under 50 mm for
+# the open-loop commit. That no longer applies: the tool is a different length, so
+# the constraint it was protecting is at a different place.
+GRASP_HEIGHT_FRAC = 0.2       # kept for reference; no longer used by the offset
+# PAD CONTACT HEIGHT. The pad face is GRIPPER_PAD_HEIGHT_MM tall (measured 29.8 mm).
+# It should lie FULLY against the cube's side and not overhang it, so the pad is
+# centred on the object's height:
+#
+#     pad bottom above the table = (OBJECT_HEIGHT - pad height) / 2      = 15.1 mm
+#     pad top    above the table = that + pad height                     = 44.9 mm
+#
+# Both inside the cube's 0-60 mm, so every millimetre of pad face is in contact and
+# none of it hangs past the top or bottom edge.
+#
+# GRASP_PAD_SAG_MM is computed above from the measured finger arc
+# (rg2_pad_drop_mm): closing the jaws lowers the pads, so the commanded base height
+# has to allow for it. It belongs to the GRASP POSE only -- the descent runs with
+# the jaws held open, which is the geometry GRIPPER_TO_PAD_MM describes.
+GRIPPER_PAD_HEIGHT_MM = 29.8
+GRASP_PAD_BOTTOM_MM = (OBJECT_HEIGHT * 1000.0 - GRIPPER_PAD_HEIGHT_MM) / 2.0
+
+TIP_OFFSET = ((GRASP_PAD_BOTTOM_MM + GRIPPER_TO_PAD_MM + GRASP_PAD_SAG_MM) / 1000.0
+              - OBJECT_HEIGHT / 2.0)
 APPROACH_Z = 0.10
 FINAL_Z = 0.03
 LIFT_Z = 0.15

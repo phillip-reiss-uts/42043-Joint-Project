@@ -103,8 +103,21 @@
                  range="-0.872665 0.872665" damping="0.2"/>
           <inertial pos="-0.0004 0.007 0.0239" mass="0.05"
                     diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
-          <geom name="l_finger" type="mesh" mesh="inner_finger_c" class="fingerpad"
-                rgba="0.10 0.10 0.11 1"/>
+          <!-- PAD AS A BOX, not a mesh. MuJoCo collides with the CONVEX HULL of a
+               mesh, and this finger is concave, so its hull is a fat slab that sat
+               in permanent shallow overlap with its neighbours -- that was the
+               jitter. A box is both better conditioned and more accurate: the real
+               pad is 29.8 mm tall and the mesh's lower 30 mm is the pad.
+
+               Placement is in the finger frame, taken from the mesh's own bbox:
+                 x  -0.0004  the mesh centre, i.e. the same +/-10.1 mm faces the
+                             gap measurement used, so the stroke is unchanged
+                 y   0.0088  thickness centre
+                 z   0.0396  29.8 mm pad centred on the lower end of the finger
+                             (local +z points DOWN the finger) -->
+          <geom name="l_pad" type="box" class="fingerpad"
+                pos="-0.0004 0.0088 0.0396" size="0.0101 0.0121 0.0149"
+                rgba="0.08 0.08 0.09 1"/>
           <geom name="l_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
                 rgba="0.10 0.10 0.11 1"/>
         </body>
@@ -135,8 +148,11 @@
                  range="-0.872665 0.872665" damping="0.2"/>
           <inertial pos="-0.0004 0.007 0.0239" mass="0.05"
                     diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
-          <geom name="r_finger" type="mesh" mesh="inner_finger_c" class="fingerpad"
-                rgba="0.10 0.10 0.11 1"/>
+          <!-- Mirror of l_pad. The right finger's frame is rotated 180 deg about z,
+               so the SAME local numbers place it symmetrically in the world. -->
+          <geom name="r_pad" type="box" class="fingerpad"
+                pos="-0.0004 0.0088 0.0396" size="0.0101 0.0121 0.0149"
+                rgba="0.08 0.08 0.09 1"/>
           <geom name="r_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
                 rgba="0.10 0.10 0.11 1"/>
         </body>
