@@ -1,6 +1,19 @@
 import math
 import numpy as np
-import mujoco
+
+# MuJoCo is imported INSIDE the functions that need it, not here.
+#
+# This module is split at that line: `world_points_from_depth` is pure numpy and
+# is the ONE depth validity rule, shared by the simulated camera and by
+# `world_real`'s RealSense path. `world_real` therefore imports this module, and
+# a module-level `import mujoco` here dragged the simulator into the HARDWARE
+# front-end -- `import run_hardware` pulled it in, which is exactly what
+# run_hardware's own docstring says it does not do, on a laptop that runs the
+# arm without the simulator installed.
+#
+# This is the same shape `src.state_space` uses for its default provider: the
+# dependency is real but is resolved at call time, so importing the module needs
+# no simulator. tests/test_ur_backend.py asserts the front-end stays clean.
 
 
 def world_points_from_depth(z, K, R_wc, p_cam_w, near_min, near_max, z_min,
@@ -63,6 +76,7 @@ class RGBDCamera:
     # Wraps a MuJoCo camera as an RGB-D sensor.
 
     def __init__(self, model, camera_name, width=640, height=480):
+        import mujoco                 # see the module header
         self.model = model
         self.camera_name = camera_name
         self.width = width
@@ -120,6 +134,7 @@ class RGBDCamera:
     def deproject(self, depth, data):
         # Convert a dense depth map to a dense world-frame point cloud.
 
+        import mujoco                 # see the module header
         mujoco.mj_forward(self.model, data)
 
         H, W = depth.shape
@@ -165,6 +180,7 @@ class RGBDCamera:
         # Thin wrapper: this class knows where the MuJoCo camera is, and
         # world_points_from_depth owns the validity rule. See that function for
         # why there is only one copy of the mask.
+        import mujoco                 # see the module header
         mujoco.mj_forward(self.model, data)
         R = data.cam_xmat[self.cam_id].reshape(3, 3)
         t = data.cam_xpos[self.cam_id]
@@ -179,6 +195,7 @@ def find_camera(model):
     # than in perception so the perception geometry (clustering, calipers,
     # yaw) stays importable on a machine with no MuJoCo -- which is what the
     # hardware front-end needs.
+    import mujoco                       # see the module header
     for candidate in ('camera/depth_cam', 'depth_cam'):
         cid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, candidate)
         if cid >= 0:

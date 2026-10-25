@@ -8,11 +8,13 @@
 # mode has been deleted. This file is the opposite: a small number of checks
 # that really run against the controller and really fail.
 #
-# The config check comes FIRST and is not advisory. Every measurement taken in
-# this session -- the 180 deg root yaw, the table centre at -y, the true home --
-# lives in uncommitted edits to src/config.py. A clone onto a second machine
-# silently reverts to the old simulated workcell, and every test below would
-# then pass against the wrong cell. So the values are asserted, not printed.
+# The config check comes FIRST and is not advisory. Everything measured on this
+# cell -- the 180 deg root yaw, the table centre at -y, the true home -- lives in
+# src/config.py. That file is committed now, so a fresh clone carries it; the
+# silent failure left is a checkout of one of the OTHER branches (multi-object,
+# origin/simulation), whose config describes a different workcell. Every test
+# below would then pass against the wrong cell. So the values are asserted, not
+# printed.
 #
 # WHAT IT DOES
 # ------------
@@ -44,7 +46,11 @@ EXPECT_IP = '192.168.0.194'
 EXPECT_YAW = np.pi
 EXPECT_TABLE_CENTRE = [0.0, -0.270]
 EXPECT_TABLE_HALF = [0.22, 0.15]
-EXPECT_TABLE_HEIGHT = 0.2315
+# The work surface is the BASE PLANE -- the robot is bolted to the table, so the
+# tabletop is z = 0. This used to assert 0.2315, which was never the table: it is
+# the FLANGE-to-lowest-pad TOOL length, and it now lives with the tool geometry in
+# config.py. Asserting it here failed the config gate on a correct tree.
+EXPECT_TABLE_HEIGHT = 0.0
 EXPECT_HOME0 = 1.5708          # shoulder_pan at the true home (was -0.366)
 
 STEP_DEG = 2.0
@@ -83,10 +89,10 @@ def check_config(cfg):
     if bad:
         print()
         print('  FAIL: %s do not match the measured cell.' % ', '.join(bad))
-        print('  This machine has the simulated workcell, not the real one.')
-        print('  Copy the working tree (src/config.py is UNCOMMITTED), not a')
-        print('  git clone -- otherwise every result below describes a')
-        print('  different cell.')
+        print('  This tree does not describe the cell. Check the branch -- main is')
+        print('  the cell, multi-object and origin/simulation are not -- and that')
+        print('  src/config.py has not been edited locally. Every result below')
+        print('  would otherwise describe a different workcell.')
         return False
     print('  all measured values present')
     return True
@@ -123,9 +129,10 @@ def check_motion(cfg):
     from src.robot_backend_ur import connect
 
     b = connect(cfg.UR_IP, activate_gripper=False)
-    # The OnRobot gripper is driven by UR programs (rg_close/rg_open), not by
-    # Robotiq Modbus registers; taking it out of the loop satisfies the
-    # backend contract without writing to registers that do not exist here.
+    # The arm motion is what this tests, so the gripper is taken out of the loop
+    # entirely. That satisfies the backend contract without exercising whichever
+    # route the RG2 is on (onRobot XML-RPC primary, UR programs over the
+    # dashboard as the fallback).
     b._gripper = None
     try:
         q0 = np.array(b.joint_positions(), float)

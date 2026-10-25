@@ -43,6 +43,13 @@ def _wrap90(d):
     return (np.asarray(d) + 45.0) % 90.0 - 45.0
 
 
+# Tie window for the yaw label, degrees from the +-45 deg boundary. The top face
+# is square, so yaw and yaw+90 are the same grasp and the calipers cannot tell
+# them apart; within this window the robot keeps the side it already has instead
+# of swapping. See PBVSServo._fold_yaw.
+YAW_TIE_DEG = 5.0
+
+
 class PBVSServo:
     # Drives the gripper to a pose derived from the current view of an object.
 
@@ -230,6 +237,38 @@ class PBVSServo:
             step()
 
     # PERCEPTION
+    def _fold_yaw(self, new_yaw):
+        # Fold a mod-90 caliper reading into the yaw estimate.
+        #
+        # Every yaw in {new_yaw + 90k} is the same grasp of a square top face,
+        # so the one to command is the one closest to the HOME orientation --
+        # that is `_wrap90`, which maps the reading into [-45, 45) about R_DOWN.
+        # Storing the raw modulo-90 value instead put a cube that was aligned
+        # with home at 89.9 deg (measured), which commanded a full 90 deg wrist
+        # twist for a cube that needed none, and made the estimate flick back
+        # and forth across the 90/0 seam as the reading drifted over it.
+        #
+        # At the +-45 seam the two labels are genuinely equidistant, and that is
+        # the "two equal possibilities" the wrist used to hunt between: each look
+        # picked the other one, swinging the jaw 90 deg every perception cycle.
+        # Inside YAW_TIE_DEG of the seam the estimate therefore keeps the side it
+        # is already on. Everywhere else it blends along the shorter arc as
+        # before, with its own gain -- the position gain is too fast for a label
+        # this noisy, and taking the raw reading left err_rot permanently above
+        # the commit gate.
+        cand = float(_wrap90(new_yaw))
+        if self.yaw_est is None:
+            return cand
+        if (abs(cand) > 45.0 - YAW_TIE_DEG
+                and abs(self.yaw_est) > 45.0 - YAW_TIE_DEG
+                and cand * self.yaw_est < 0.0):
+            return float(self.yaw_est)
+        step = float(_wrap90(cand - self.yaw_est))
+        # Clamp rather than wrap: crossing the seam would be a 90 deg wrist move
+        # for a grasp that is already at the best orientation available.
+        return float(np.clip(self.yaw_est + self.yaw_smooth * step,
+                             -45.0, 45.0))
+
     def observe(self, near=None):
         # Re-observe the object. Keeps the estimate nearest the previous one.
         #
@@ -259,26 +298,14 @@ class PBVSServo:
             self.kf.advance_to(float(self.arm.backend.time()))
             fresh = self.kf.update(new_est)
             self.p_est = self.kf.position
-            self.yaw_est = (new_yaw if self.yaw_est is None else
-                            float((self.yaw_est
-                                   + self.yaw_smooth * _wrap90(new_yaw
-                                                               - self.yaw_est))
-                                  % 90.0))
+            self.yaw_est = self._fold_yaw(new_yaw)
         elif self.p_est is None:
             self.p_est = new_est
-            self.yaw_est = new_yaw
+            self.yaw_est = self._fold_yaw(new_yaw)
         else:
             a = self.smooth
             self.p_est = self.p_est + a * (new_est - self.p_est)
-            # yaw lives modulo 90 and the top face is square, so the calipers
-            # can report yaw or yaw+90 for the same physical orientation. Blend
-            # along the shorter arc with its own gain: taking the raw reading
-            # lets that label flip on every look, which commands a ~90 deg wrist
-            # swing and leaves err_rot permanently above any commit gate.
-            self.yaw_est = float((self.yaw_est
-                                  + self.yaw_smooth * _wrap90(new_yaw
-                                                              - self.yaw_est))
-                                 % 90.0)
+            self.yaw_est = self._fold_yaw(new_yaw)
         self.obs_ok += 1
         self.stage_obs += 1
         span = getattr(best, 'span', None)

@@ -29,13 +29,17 @@ TOL = 1e-10
 # It is the one quantity where the two implementations take different ROUTES to
 # the same number: MuJoCo uses a composite rigid-body recursion, the analytic
 # chain sums link contributions directly. Different summation orders differ by
-# roughly n * eps * cond, and the measured worst |dM| = 1.27e-09 sits on entries
-# of order 1e-02 -- a relative error near 1e-07, which is rounding, not geometry.
+# roughly n * eps * cond, so the agreement here is rounding-limited, not exact.
 #
-# That it is not a modelling error is shown by |dg| = 8.9e-15: gravity torque
-# depends on the same link masses and frames, so a wrong mass or a transposed
-# frame would move |dg| too, and it agrees to machine precision. A real porting
-# bug lands at 1e-03 or larger, so this still catches one.
+# Measured, and both numbers matter:
+#     mujoco 3.15   worst |dM| 6.7e-16    worst |dg| 1.1e-14
+#     mujoco 3.10   worst |dM| 1.27e-09   (todo C1: version drift in how MuJoCo
+#                                          assembles M, not a standing error)
+# TOL_M = 1e-8 covers the older build without hiding a real fault. What this
+# test actually caught was a STALE PAYLOAD -- arm_dynamics.json left behind by a
+# gripper-mesh change -- and that landed at |dM| 6.6e-3 and |dg| 8.0e-2, ten
+# orders above this tolerance. The fix is always to rebuild the data, never to
+# loosen the number:  python tools/build_arm_dynamics.py
 TOL_M = 1e-8
 
 

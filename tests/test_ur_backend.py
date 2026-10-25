@@ -1,16 +1,17 @@
-# Offline tests for the hardware backend: no robot, no ur_rtde, no pymodbus.
+# Offline tests for the hardware backend: no robot, no ur_rtde.
 #
 # WHY THIS EXISTS
 # ---------------
 # `src/robot_backend_ur.py` is the one part of the port that cannot be exercised
 # by the simulator. Everything it does can still be tested, because its RTDE and
-# Modbus dependencies are injected rather than constructed: the fakes below
+# gripper dependencies are injected rather than constructed: the fakes below
 # stand in for the controller and the gripper, and the assertions are the
-# RobotBackend contract plus the register-level behaviour.
+# RobotBackend contract.
 #
 # What this proves: the plumbing (servoj pacing, joint readback, the gripper
-# throttle, the register map, the grasp trio). What it cannot prove: that the
-# real controller accepts these calls -- that is `tests/test_arm_control.py`.
+# command and its throttle, the grasp trio) and that the hardware front-end
+# imports without the simulator. What it cannot prove: that the real controller
+# accepts these calls -- that is `tests/test_arm_control.py`.
 #
 # Run: python tests/test_ur_backend.py
 
@@ -25,7 +26,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src.robot_backend import RobotBackend
-from src.robot_backend_ur import Robotiq2F85, URBackend, UR_JOINT_NAMES
+from src.robot_backend_ur import URBackend
 
 
 # FAKES
@@ -75,24 +76,6 @@ class FakeGripper:
 
     def state(self):
         return dict(self._state)
-
-    def close(self):
-        pass
-
-
-class FakeModbus:
-    # Minimal holding-register client: enough for the 2F-85 map.
-    def __init__(self):
-        self.regs = {}
-        self.writes = []
-
-    def write_register(self, addr, value, **kw):
-        self.regs[addr] = int(value)
-        self.writes.append((addr, int(value)))
-
-    def read_holding_registers(self, addr, count, **kw):
-        regs = [self.regs.get(addr + i, 0) for i in range(count)]
-        return type('RR', (), {'registers': regs, 'isError': lambda s: False})()
 
     def close(self):
         pass
@@ -188,31 +171,17 @@ def main():
     failures += not check('no gripper -> NaN, so grasp_state says unknown',
                           all(np.isnan(gs[k]) for k in ('q', 'v', 'force')))
 
-    # ---------------- 2F-85 register map ----------------
-    print('\nROBOTIQ 2F-85 REGISTER MAP')
-    bus = FakeModbus()
-    bus.regs[Robotiq2F85.gACT] = 1          # already activated
-    rg = Robotiq2F85(bus, unit=9)
-    failures += not check('activate() writes rACT', rg.activate())
-    failures += not check('activate() writes rGTO',
-                          bus.regs.get(Robotiq2F85.GOTO) == 1)
-    rg.move(200)
-    failures += not check(
-        'move() writes speed, force, GOTO and position',
-        bus.regs.get(Robotiq2F85.SPEED) == 255
-        and bus.regs.get(Robotiq2F85.FORCE) == 255
-        and bus.regs.get(Robotiq2F85.GOTO) == 1
-        and bus.regs.get(Robotiq2F85.POSITION) == 200)
-    bus.regs[Robotiq2F85.gPO] = 128
-    bus.regs[Robotiq2F85.gCU] = 255
-    st = rg.state()
-    failures += not check(
-        'state() maps gPO/gCU onto the sim units the thresholds use',
-        abs(st['q'] - 0.8 * 128 / 255.0) < 1e-12
-        and abs(st['force'] - 5.0) < 1e-12,
-        'q %.3f force %.3f' % (st['q'], st['force']))
-    st2 = rg.state()
-    failures += not check('state() reports a finite velocity', np.isfinite(st2['v']))
+    # ---------------- 2F-85 register map: REMOVED ----------------
+    #
+    # This section drove Robotiq2F85 through a fake Modbus bus. That class is no
+    # longer reachable: `src.robot_backend_ur.connect()` builds an RG2 and its
+    # `gripper_unit` argument is documented as ignored, so nothing in the tree
+    # constructs a 2F-85 and no Modbus client is ever opened. The checks passed
+    # because the class still existed, which is the failure mode worth avoiding:
+    # green coverage of a device this cell does not have.
+    #
+    # The class itself is dead weight in src/ and is todo E1's to delete; when it
+    # goes, nothing here has to change.
 
     # ---------------- import graph ----------------
     print('\nIMPORT GRAPH')
