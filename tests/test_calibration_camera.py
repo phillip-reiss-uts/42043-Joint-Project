@@ -17,8 +17,10 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src.calibration_camera import (
-    board_pose_from_two_touches, pnp_pose, R_to_rotvec, rotvec_to_R,
-    solve_touch, transform_from, transform_to_pos_target,
+    board_pose_from_two_touches, cam_cv_to_mjocam, cam_mjocam_to_cv,
+    CAM_CV_TO_MJ, mean_transform, pnp_pose, quat_from_rot, R_to_rotvec,
+    rotvec_to_R, solve_touch, transform_from, transform_to_pos_target,
+    wrist_mount,
 )
 from src.world_real import camera_transform
 
@@ -105,32 +107,127 @@ def main():
         'its origin is the first touched corner',
         np.allclose(Tb[:3, 3], a, atol=1e-12))
 
-    # ---------------- PnP convention (needs OpenCV) ----------------
-    print('\nPNP CONVENTION')
+    # ---------------- camera frame conventions ----------------
+    print('\nCONVENTIONS')
+    T_any = transform_from([0.12, -0.31, 0.64], [0.3, 0.1, -0.2])
+    failures += not check(
+        'cv <-> mujoco camera conversion is its own inverse',
+        np.array_equal(cam_mjocam_to_cv(cam_cv_to_mjocam(T_any)), T_any))
+    failures += not check(
+        'it is a proper rotation (det +1)',
+        abs(float(np.linalg.det(CAM_CV_TO_MJ)) - 1.0) < 1e-12,
+        'det %+.3f' % np.linalg.det(CAM_CV_TO_MJ))
+    failures += not check(
+        'it flips exactly y and z, leaving the optical axis on -z',
+        np.allclose(CAM_CV_TO_MJ, np.diag([1.0, -1.0, -1.0])))
+
+    # ---------------- eye-in-hand algebra ----------------
+    # A downward-looking wrist camera: the MuJoCo camera looks along its own -z,
+    # so the identity rotation already points it at the table. Yaw and a small
+    # tilt give the pose diversity the real procedure asks the operator for.
+    print('\nWRIST MOUNT')
+    X_true = transform_from([0.05, 0.0, 0.09], [0.0, 0.0, np.pi])
+    tools = []
+    for k in range(5):
+        T = np.eye(4)
+        T[:3, :3] = rotvec_to_R(np.array([0.0, 0.0, 0.35 * k])) \
+            @ rotvec_to_R(np.array([0.12 * k, 0.0, 0.0]))
+        T[:3, 3] = [0.02 * k, -0.55 + 0.02 * k, 0.75]
+        tools.append(T)
+
+    est = [wrist_mount(Tt, Tt @ X_true) for Tt in tools]
+    failures += not check(
+        'inv(T_tool) T_cam recovers a known mount from every pose',
+        all(np.allclose(e, X_true, atol=1e-12) for e in est))
+
+    T_base = transform_from([0.0, 0.0, 0.0], [0.0, 0.0, np.pi])
+    failures += not check(
+        'rotating the base frame does not change the mount',
+        np.allclose(wrist_mount(T_base @ tools[0],
+                                T_base @ tools[0] @ X_true), X_true,
+                    atol=1e-12),
+        'UR_ROOT_YAW cancels in the product')
+
+    rng = np.random.default_rng(0)
+    noisy = [T @ transform_from(rng.normal(0, 1e-4, 3),
+                                rng.normal(0, 1e-3, 3)) for T in est]
+    X_mean, dev_t, dev_r = mean_transform(noisy)
+    failures += not check(
+        'the mean sits inside the noise it was given',
+        np.linalg.norm(X_mean[:3, 3] - X_true[:3, 3]) < 1e-3 and dev_r < 0.5,
+        'off %.2f mm, spread %.2f mm / %.2f deg'
+        % (np.linalg.norm(X_mean[:3, 3] - X_true[:3, 3]) * 1e3,
+           dev_t * 1e3, dev_r))
+    failures += not check(
+        'the quaternion is wxyz and pastes into config',
+        np.allclose(quat_from_rot(X_true[:3, :3]),
+                    [np.cos(np.pi / 2), 0.0, 0.0, np.sin(np.pi / 2)],
+                    atol=1e-12))
+
+    # ---------------- PnP convention ----------------
+    print('\nPNP CONVENTION (needs OpenCV)')
     try:
         import cv2
     except ImportError:
-        print('  [SKIP] OpenCV not installed -- ArUco mode untested here')
+        print('  [SKIP] OpenCV not installed -- the marker modes are untested')
     else:
         s = 0.05
         obj = np.array([[0, 0, 0], [s, 0, 0], [s, s, 0], [0, s, 0]], float)
         obj_base = (Rb @ obj.T).T + Tb[:3, 3]
-        # A camera that sees the board: build its pose, then project.
-        T_cam = transform_from([0.05, -0.55, 0.75], [0.08, -0.04, 0.02])
-        R_cb = T_cam[:3, :3].T
-        t_cb = -R_cb @ T_cam[:3, 3]
         K = np.array([[300.0, 0, 160], [0, 300.0, 120], [0, 0, 1]])
+
+        # The PHYSICAL camera: its pose as this repo stores it, then the same
+        # pose in cv2's frame. Projecting through the cv one is what a D435i
+        # does. Projecting through the repo's own frame is what an earlier
+        # version of this test did -- and it passed, because it only ever
+        # checked that pnp_pose inverts its own input.
+        T_cam_mj = tools[1] @ X_true
+        T_cam_cv = cam_mjocam_to_cv(T_cam_mj)
+        R_cb = T_cam_cv[:3, :3].T
+        t_cb = -R_cb @ T_cam_cv[:3, 3]
         pix, _ = cv2.projectPoints(obj_base, cv2.Rodrigues(R_cb)[0], t_cb,
                                    K, None)
-        # A planar target has a mirror solution, so seed with a perturbed
-        # estimate of the camera pose -- exactly what the tool has from config.
-        T_init = transform_from([0.07, -0.52, 0.77], [0.10, -0.02, 0.04])
-        recovered, err = pnp_pose(obj_base, pix, K, T_init=T_init)
+
+        T_seed_mj = tools[1] @ transform_from([0.07, 0.01, 0.11],
+                                              [0.05, -0.05, np.pi + 0.10])
+        rec_cv, err = pnp_pose(obj_base, pix, K,
+                               T_init=cam_mjocam_to_cv(T_seed_mj))
+        # 1e-5 m, not 1e-6: SOLVEPNP_ITERATIVE stops on its own criteria and
+        # lands ~1.5e-6 off on this synthetic case. Ten micrometres is two
+        # orders finer than any calibration that matters here; the point of the
+        # check is the frame, which is a whole rotation away from either answer.
         failures += not check(
-            'solvePnP + inversion returns the camera pose, not its inverse',
-            np.allclose(recovered, T_cam, atol=1e-6),
+            'solvePnP returns the camera pose in the OpenCV frame',
+            np.allclose(rec_cv, T_cam_cv, atol=1e-5),
             'max diff %.2e, reprojection %.2e px'
-            % (np.max(np.abs(recovered - T_cam)), err))
+            % (np.max(np.abs(rec_cv - T_cam_cv)), err))
+        failures += not check(
+            'converting it recovers the pose config stores',
+            np.allclose(cam_cv_to_mjocam(rec_cv), T_cam_mj, atol=1e-5),
+            'max diff %.2e'
+            % np.max(np.abs(cam_cv_to_mjocam(rec_cv) - T_cam_mj)))
+
+        # ---------------- eye-in-hand, end to end ----------------
+        # One board, several arm poses, one constant mount: run_wrist's whole
+        # arithmetic without a robot. If this holds, the only things left to go
+        # wrong at the cell are the operator's poses and the clamp itself.
+        print('\nWRIST RECOVERY FROM IMAGES')
+        fitted = []
+        for Tt in tools:
+            T_c = cam_mjocam_to_cv(Tt @ X_true)
+            R_c = T_c[:3, :3].T
+            t_c = -R_c @ T_c[:3, 3]
+            pix_i, _ = cv2.projectPoints(obj_base, cv2.Rodrigues(R_c)[0],
+                                         t_c, K, None)
+            rec_i, _e = pnp_pose(obj_base, pix_i, K,
+                                 T_init=cam_mjocam_to_cv(T_seed_mj))
+            fitted.append(wrist_mount(Tt, cam_cv_to_mjocam(rec_i)))
+        X_fit, dt, dr = mean_transform(fitted)
+        failures += not check(
+            'recovers the mount from projected images of one fixed board',
+            np.allclose(X_fit, X_true, atol=1e-6),
+            'off %.2e m, spread %.1e mm / %.1e deg'
+            % (np.linalg.norm(X_fit[:3, 3] - X_true[:3, 3]), dt * 1e3, dr))
 
     print()
     print('=' * 74)

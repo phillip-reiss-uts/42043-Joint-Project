@@ -99,6 +99,124 @@ def transform_to_pos_target(T, table_z=TABLE_HEIGHT):
 
 
 # --------------------------------------------------------------------------
+# CAMERA FRAME CONVENTIONS
+# --------------------------------------------------------------------------
+# TWO conventions meet here and they differ by a half turn about the optical
+# axis:
+#
+#     OpenCV / solvePnP    x right, y DOWN,  z FORWARD, into the scene
+#     MuJoCo / this repo   x right, y UP,    z BACKWARD, out of the scene
+#
+# Everything downstream of a calibration is in the MuJoCo one: camera_transform
+# builds it deliberately, world_points_from_depth consumes it, RealObjectWorld
+# composes it, and config's CAM_MOUNT_QUAT stores it. camera.py encodes the same
+# choice in its intrinsics -- it builds K with a NEGATIVE fx for exactly this
+# reason. cv2 is the opposite.
+#
+# Mixing them up yields a camera that looks backwards. That fails loudly, but
+# only at the cell, and only after the numbers have been pasted into config.
+#
+# The conversion is a rotation of 180 deg about the optical axis, applied on the
+# RIGHT, because it re-expresses the camera's OWN frame rather than the base
+# frame: T_mj = T_cv @ C. It is its own inverse.
+CAM_CV_TO_MJ = np.diag([1.0, -1.0, -1.0])
+
+
+def cam_cv_to_mjocam(T):
+    # solvePnP/OpenCV camera pose -> the convention this repo stores.
+    T = np.asarray(T, float).copy()
+    T[:3, :3] = T[:3, :3] @ CAM_CV_TO_MJ
+    return T
+
+
+def cam_mjocam_to_cv(T):
+    # The same transform, named for the other direction. It is an involution, so
+    # this is not a separate operation -- only a separate call site.
+    return cam_cv_to_mjocam(T)
+
+
+def quat_from_rot(R):
+    # Rotation matrix -> (w, x, y, z), the order arm_dynamics.rot_from_quat
+    # takes, so a printed value can be pasted straight into config.
+    R = np.asarray(R, float)
+    tr = float(np.trace(R))
+    if tr > 0.0:
+        s = np.sqrt(tr + 1.0) * 2.0
+        w = 0.25 * s
+        x = (R[2, 1] - R[1, 2]) / s
+        y = (R[0, 2] - R[2, 0]) / s
+        z = (R[1, 0] - R[0, 1]) / s
+    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+        s = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+        w = (R[2, 1] - R[1, 2]) / s
+        x = 0.25 * s
+        y = (R[0, 1] + R[1, 0]) / s
+        z = (R[0, 2] + R[2, 0]) / s
+    elif R[1, 1] > R[2, 2]:
+        s = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+        w = (R[0, 2] - R[2, 0]) / s
+        x = (R[0, 1] + R[1, 0]) / s
+        y = 0.25 * s
+        z = (R[1, 2] + R[2, 1]) / s
+    else:
+        s = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+        w = (R[1, 0] - R[0, 1]) / s
+        x = (R[0, 2] + R[2, 0]) / s
+        y = (R[1, 2] + R[2, 1]) / s
+        z = 0.25 * s
+    q = np.array([w, x, y, z], float)
+    q /= max(float(np.linalg.norm(q)), 1e-12)
+    return q if q[0] >= 0.0 else -q          # canonical sign: w >= 0
+
+
+def wrist_mount(T_base_tool, T_base_cam):
+    # Eye-in-hand: the constant transform from the controlled tool frame to the
+    # camera. One arm pose is enough to state it; several are averaged.
+    #
+    # Both arguments must be in the SAME base frame, which they are when the
+    # tool pose comes from the same FK that located the board. A rotation of the
+    # base frame -- config's UR_ROOT_YAW, for one -- cancels in the product
+    # inv(R T_tool) (R T_cam) = inv(T_tool) T_cam, so it does not matter which
+    # frame the calibration was run in.
+    return np.linalg.inv(np.asarray(T_base_tool, float)) \
+        @ np.asarray(T_base_cam, float)
+
+
+def mean_transform(Ts):
+    # Chordal mean of a set of 4x4 poses: mean translation, and the rotation
+    # closest (Frobenius) to the mean of the rotation matrices.
+    #
+    # Returns (T_mean, worst translation deviation in metres, worst rotation
+    # deviation in degrees). The deviations are the honest error bar: they say
+    # how well one constant describes every pose, which is what "the mount does
+    # not move" means. Averaging quaternions instead would need a hemisphere
+    # flip per term and is no better here.
+    if not Ts:
+        raise ValueError('mean_transform needs at least one pose')
+    Ts = [np.asarray(T, float) for T in Ts]
+    t = np.mean(np.array([T[:3, 3] for T in Ts]), axis=0)
+
+    M = np.zeros((3, 3))
+    for T in Ts:
+        M += T[:3, :3]
+    U, _s, Vt = np.linalg.svd(M)
+    D = np.eye(3)
+    D[2, 2] = np.sign(np.linalg.det(U @ Vt))   # keep det +1, never a reflection
+    R = U @ D @ Vt
+
+    T_mean = np.eye(4)
+    T_mean[:3, :3] = R
+    T_mean[:3, 3] = t
+
+    worst_t = max(float(np.linalg.norm(T[:3, 3] - t)) for T in Ts)
+    worst_r = 0.0
+    for T in Ts:
+        c = float(np.clip((np.trace(R.T @ T[:3, :3]) - 1.0) / 2.0, -1.0, 1.0))
+        worst_r = max(worst_r, float(np.degrees(np.arccos(c))))
+    return T_mean, worst_t, worst_r
+
+
+# --------------------------------------------------------------------------
 # METHOD 1: TOUCH
 # --------------------------------------------------------------------------
 class _FrameSource:
