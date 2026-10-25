@@ -1,4 +1,4 @@
-"""RealSense-backed world: the hardware implementation of the ObjectWorld seam.
+﻿"""RealSense-backed world: the hardware implementation of the ObjectWorld seam.
 
 WHAT THIS IS FOR
 ----------------
@@ -42,6 +42,7 @@ import numpy as np
 
 from src.config import (
     SELF_FILTER, SURFACE_BAND, DEPTH_MAX, TABLE_HEIGHT,
+    TABLE_CENTRE, TABLE_HALF,
     OBJECT_HEIGHT,
 )
 from src.world import ObjectWorld, TargetView
@@ -276,9 +277,23 @@ class DepthWorld(ObjectWorld):
         near = np.sqrt(ax[None, :] ** 2 + ay[:, None] ** 2 + 1.0) * z
         wz = ((R_wc[2, 0] * ax)[None, :] + (R_wc[2, 1] * ay)[:, None]
               - R_wc[2, 2]) * z + p_cam_w[2]
+        # World x and y the same way, for the tabletop footprint test below.
+        wx = ((R_wc[0, 0] * ax)[None, :] + (R_wc[0, 1] * ay)[:, None]
+              - R_wc[0, 2]) * z + p_cam_w[0]
+        wy = ((R_wc[1, 0] * ax)[None, :] + (R_wc[1, 1] * ay)[:, None]
+              - R_wc[1, 2]) * z + p_cam_w[1]
+
+        # The TABLE FOOTPRINT is part of the validity rule, not just the height.
+        # Anything outside the measured tabletop cannot be a graspable object: the
+        # robot base and column, the arm itself, the bench edge, the floor. Height
+        # alone let those through whenever they happened to sit above the surface,
+        # which is why the base kept appearing in the cluster set.
+        on_table = ((np.abs(wx - TABLE_CENTRE[0]) <= TABLE_HALF[0])
+                    & (np.abs(wy - TABLE_CENTRE[1]) <= TABLE_HALF[1]))
 
         keep = (np.isfinite(z) & (z > 0.0) & (near > SELF_FILTER)
-                & (near < DEPTH_MAX) & (wz > TABLE_HEIGHT + SURFACE_BAND))
+                & (near < DEPTH_MAX) & (wz > TABLE_HEIGHT + SURFACE_BAND)
+                & on_table)
         if not keep.any():
             return np.zeros((0, 3))
 

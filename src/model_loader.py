@@ -141,19 +141,17 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     floor_geom.size = [10, 10, 0.1]
     floor_geom.pos = [0, 0, min(_FLOOR_Z, TABLE_HEIGHT - TABLE_THICK)]
 
-    # 5. The bench, from the lab measurements.
+    # 5. The bench, exactly as measured on the cell.
     #
     #    MEASURED (2026-10-23): a 440 x 300 mm working rectangle with its long
     #    edge walked as (-0.2200, -0.4200) -> (+0.2200, -0.4200), so the centre is
     #    150 mm in from that edge: TABLE_CENTRE = [0.0, -0.270], TABLE_HALF =
     #    [0.22, 0.15]. Top face exactly on TABLE_HEIGHT.
     #
-    #    The rectangle is the WORKING AREA, not the whole bench: the base sits at
-    #    y = 0, which is 120 mm beyond the measured back edge. The arm is bolted to
-    #    the same bench, so the slab is extended under the base -- otherwise the
-    #    robot stands on air beside its own table, which is what looked wrong.
-    _bench_front = TABLE_CENTRE[1] - TABLE_HALF[1]          # -0.420
-    _bench_back = max(TABLE_CENTRE[1] + TABLE_HALF[1], 0.120)   # past the base
+    #    Nothing is extended or clamped: the slab is that rectangle and no more,
+    #    spanning x -0.220..+0.220 and y -0.420..-0.120.
+    _bench_front = TABLE_CENTRE[1] - TABLE_HALF[1]
+    _bench_back = TABLE_CENTRE[1] + TABLE_HALF[1]
     _bench_cy = 0.5 * (_bench_front + _bench_back)
     _bench_hy = 0.5 * (_bench_back - _bench_front)
     _bench_top = TABLE_HEIGHT - TABLE_THICK                 # underside of the slab

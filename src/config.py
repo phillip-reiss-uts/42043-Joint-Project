@@ -1,4 +1,4 @@
-﻿# src/config.py
+# src/config.py
 """Single source of truth for scene and task constants."""
 
 import numpy as np
@@ -89,9 +89,23 @@ PLACE_EDGE_MARGIN = 0.10   # keep this clear of the far edge so it stays in view
 # pool parking pose: far below the scene; objects are frozen here until spawned
 PARK_POS = [5.0, 5.0, -0.6]
 
-# camera mount 
+# camera mount
+#
+# Origin is gripper/base. Local +z runs DOWN the approach, toward the finger tips,
+# so CAM_POS z is measured downward from the mount face: -0.01 is 10 mm UP towards
+# the wrist, and x = +0.05 puts the camera 50 mm off the tool axis.
+#
+# The camera cannot mount to the wrist itself -- cables and connectors occupy that
+# space -- but this offset is retained. A centred placement was tried at
+# (0, 0, 0), which put the lens level with the top face of the gripper housing and
+# 50 mm inboard of the working offset, and was rejected.
+#
+# MOVED toward the finger tips in two steps: z -0.03 -> -0.01 -> +0.09, 120 mm in
+# total. x, y and the rotation are unchanged. At +0.09 the lens is 90 mm down the
+# approach, level with the gripper housing -- the housing meshes occupy that space,
+# so expect them in view.
 CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
-CAM_POS = [0.05, 0.0, -0.03]
+CAM_POS = [0.05, 0.0, 0.09]
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
 MESH_POS = CAM_POS
 
@@ -612,6 +626,22 @@ TOOL_MOUNT_QUAT = (0.7071068, -0.0001, 0.0002, 0.7071068)
 # same swing that showed up in UR_HOME_Q (joint 1 = +1.571, not -0.366) and put
 # the table at -y. The link lengths were already right; only the heading was not.
 UR_ROOT_YAW = 3.141592653589793
+
+# R_DOWN is defined further up, in the MODEL frame, because that is where it was
+# authored. Everything downstream -- servo.desired_pose, pick, solve_ik -- targets
+# the CELL frame, and the model was rotated onto that frame by UR_ROOT_YAW. Left
+# as written, R_DOWN put the tool's +x on world +x while UR_HOME_Q has it on
+# world -x, so the first orientation command spun the wrist 180 deg and swung the
+# off-axis camera across the arm.
+#
+# Re-expressed here, once, so there is a single convention: this constant now
+# agrees with the rotated model and with UR_HOME_Q. With UR_ROOT_YAW = pi,
+# [[1,0,0],[0,-1,0],[0,0,-1]] becomes [[-1,0,0],[0,1,0],[0,0,-1]] -- the approach
+# still points down, the azimuth flips by half a turn.
+_c_yaw, _s_yaw = np.cos(UR_ROOT_YAW), np.sin(UR_ROOT_YAW)
+R_DOWN = np.array([[_c_yaw, -_s_yaw, 0.0],
+                   [_s_yaw, _c_yaw, 0.0],
+                   [0.0, 0.0, 1.0]]) @ R_DOWN
 
 # ---- camera mount: WRIST (eye-in-hand) ------------------------------------
 # Transform gripper base -> D435i optical frame. The printed clamp goes on the

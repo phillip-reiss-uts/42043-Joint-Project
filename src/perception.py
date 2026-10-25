@@ -6,7 +6,8 @@ import numpy as np
 
 from src.config import (
     SELF_FILTER, SURFACE_BAND, DEPTH_MAX,
-    TABLE_HEIGHT, OBJECT_HEIGHT, OBJECT_SIZE,
+    TABLE_HEIGHT, TABLE_CENTRE, TABLE_HALF,
+    OBJECT_HEIGHT, OBJECT_SIZE,
 )
 
 
@@ -118,12 +119,25 @@ def rotation_with_yaw(yaw_deg, R_down):
 
 # SENSING
 def _filter_points(model, data, camera, cam_id):
-    # Shared point filter: world points above the surface, in range, finite.
+    # Shared point filter: world points above the surface, in range, finite, and
+    # INSIDE THE TABLE FOOTPRINT.
+    #
     # The keep-mask runs in image space, so only the surviving pixels are ever
-    # lifted to 3D (see RGBDCamera.surface_points).
+    # lifted to 3D (see RGBDCamera.surface_points). The footprint test happens on
+    # the lifted points because surface_points is the generic sensor and does not
+    # know the cell -- the world does.
+    #
+    # Height alone was not enough: the robot base, the column and the arm all sit
+    # above the surface, so any that came into view were clustered as objects.
+    # Nothing outside the measured tabletop can be a graspable object.
     depth = camera.capture_depth(data)
-    return camera.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
-                                 TABLE_HEIGHT + SURFACE_BAND)
+    pts = camera.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
+                                TABLE_HEIGHT + SURFACE_BAND)
+    if len(pts) == 0:
+        return pts
+    on_table = ((np.abs(pts[:, 0] - TABLE_CENTRE[0]) <= TABLE_HALF[0])
+                & (np.abs(pts[:, 1] - TABLE_CENTRE[1]) <= TABLE_HALF[1]))
+    return pts[on_table]
 
 
 def _span_ok(span):
