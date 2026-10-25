@@ -33,6 +33,13 @@ from src.config import (GRIP_FINGER_OPEN_ANGLE, GRIP_FINGER_SHUT_ANGLE,
 # live state and is not reallocated on every control cycle.
 _GRAV_SCRATCH = {}
 
+# A grip command at or below this fraction of the 0..255 stroke counts as "fully
+# open", and opening releases whatever the jaws were carrying.
+#
+# 0.002 is half a unit: loose enough to catch GRIP_OPEN (0.0) and any float
+# round-trip through a ramp, tight enough that no genuine partial close trips it.
+GRIP_RELEASE_FRAC = 0.002
+
 
 def gravity_feedforward(model, data, n=6):
     # Write g(q) onto data.qfrc_applied[:n].
@@ -112,6 +119,22 @@ class MujocoBackend(RobotBackend):
         f = float(grip) / 255.0                      # 0 = open, 1 = shut
         self.data.ctrl[self._grip_act] = self._grip_open + f * self._grip_span
         gravity_feedforward(self.model, self.data, self._n)
+        # OPENING THE JAWS RELEASES THE OBJECT.
+        #
+        # _carry_object re-writes the cube's pose every step while a carry is
+        # live, so any path that commands the jaws open WITHOUT going through
+        # Arm.open_gripper used to leave the cube welded to the tool as the
+        # fingers withdrew: it then hung ~230 mm below the gripper, directly in
+        # front of the wrist camera, and the next look found a cube where the
+        # table should be. Arm.open_gripper detaches explicitly, but
+        # arm.move(..., GRIP_OPEN), arm.hold(GRIP_OPEN) and the servo's own
+        # per-step command all come through here, and BOTH the failed-pick
+        # re-home and clear_table's recovery search are plain GRIP_OPEN moves.
+        #
+        # Enforcing it at the single funnel is deliberate: the coupling owns the
+        # release rule, so a new GRIP_OPEN call site cannot reintroduce this.
+        if self._carry is not None and f <= GRIP_RELEASE_FRAC:
+            self.detach_object()
 
     def step(self):
         self._mj.mj_step(self.model, self.data)

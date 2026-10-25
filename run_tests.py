@@ -206,6 +206,42 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     ok = bool(ok_approach and g['held'] and lifted_ok)
     s = rec.series()
 
+    def _mean_speed(pos):
+        # Mean |velocity| over the recorded samples, mm/s. The recorder samples
+        # every SYNC_STEPS physics steps, so the spacing is uniform in time but
+        # not in 1/dt terms -- divide per interval rather than by a total time,
+        # so a dropped frame cannot inflate the answer.
+        if pos.ndim != 2 or pos.shape[0] < 2:
+            return float('nan')
+        dt = np.diff(s['t'])
+        good = dt > 1e-9
+        if not good.any():
+            return float('nan')
+        step = np.linalg.norm(np.diff(pos, axis=0), axis=1)
+        return float(np.mean(step[good] / dt[good]) * 1e3)
+
+    # Three speed columns, because "average speed" is ambiguous here and a
+    # reader of the CSV must not have to guess which question a number answers:
+    #
+    #   band_speed_mm_s   the NOMINAL speed of this trial's motion band, from
+    #                     config (off 0, slow 15, medium 30, fast 45 mm/s). A
+    #                     parameter, not a measurement -- it is what the trial
+    #                     asked for.
+    #   obj_speed_mean_mm_s
+    #                     the TARGET's measured mean speed over the WHOLE trial.
+    #                     Diluted by design: the object glides only while
+    #                     --move-s is running, then holds still for the approach.
+    #                     So band=slow reads ~5 mm/s, not 15. It also includes
+    #                     the couple of millimetres of travel the jaws cause at
+    #                     grasp, which is why band=off is not exactly 0.
+    #   tool_speed_mean_mm_s
+    #                     the GRIPPER's mean speed -- servo effort rather than a
+    #                     trial condition. A slow trial that reaches the same
+    #                     place is fine; a route three times longer is not.
+    band_speed = float(TM.current_band()[1] * 1e3)
+    obj_speed = _mean_speed(s['obj'])
+    tool_speed = _mean_speed(s['ee'])
+
     # A trial that aborts before the servo ever syncs records nothing, and an
     # empty series is 1-D, so the norm below raised IndexError and hid the real
     # outcome. Report the empty trial instead of crashing the whole harness.
@@ -217,6 +253,9 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
         return dict(
             seed=seed, band=TM.band_names()[band], kf=bool(use_kf),
             ok=False, sabotage_mm=float(sabotage_mm),
+            spawn_x_m=float(p0[0]), spawn_y_m=float(p0[1]),
+            band_speed_mm_s=nan,
+            obj_speed_mean_mm_s=nan, tool_speed_mean_mm_s=nan,
             approach_ok=bool(ok_approach), grasp_state=g['state'],
             grasp_held=bool(g['held']), rechecked=bool(rechecked),
             lifted=bool(lifted_ok),
@@ -239,6 +278,9 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     return dict(
         seed=seed, band=TM.band_names()[band], kf=bool(use_kf),
         ok=ok, sabotage_mm=float(sabotage_mm),
+        spawn_x_m=float(p0[0]), spawn_y_m=float(p0[1]),
+        band_speed_mm_s=band_speed,
+        obj_speed_mean_mm_s=obj_speed, tool_speed_mean_mm_s=tool_speed,
         approach_ok=bool(ok_approach), grasp_state=g['state'],
         grasp_held=bool(g['held']), rechecked=bool(rechecked),
         lifted=bool(lifted_ok),
