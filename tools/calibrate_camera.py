@@ -7,8 +7,12 @@
                         -> CAM_POS / CAM_QUAT   (CAM_MOUNT_* alias them)
 
     python tools/calibrate_camera.py --touch
-    python tools/calibrate_camera.py --aruco --marker-size 0.05
-    python tools/calibrate_camera.py --wrist --marker-size 0.05
+    python tools/calibrate_camera.py --aruco
+    python tools/calibrate_camera.py --wrist
+
+The marker size defaults to 0.10 m because that is the marker in models/aruco/.
+Pass --marker-size with the MEASURED edge if you print a different size: a
+wrong value here scales the whole fit, and it fails like a bad mount.
 
 --touch   The robot is the ruler. Place the cube, centre the closed gripper
           over it, lower until it just touches the top, press Enter. Repeat at
@@ -459,8 +463,10 @@ def main(argv=None):
     g.add_argument('--wrist', action='store_true',
                    help='printed marker from several arm poses (wrist)')
     ap.add_argument('--ip', default=cfg.UR_IP)
-    ap.add_argument('--marker-size', type=float, default=0.05,
-                    help='marker edge length in metres (aruco/wrist)')
+    ap.add_argument('--marker-size', type=float, default=0.10,
+                    help='marker edge length in metres (aruco/wrist). The '
+                         'default is the shipped 100 mm marker; measure and '
+                         'pass the real edge if you print another size')
     ap.add_argument('--dict', default='DICT_4X4_50',
                     help='ArUco dictionary name (aruco/wrist)')
     ap.add_argument('--poses', type=int, default=12,
