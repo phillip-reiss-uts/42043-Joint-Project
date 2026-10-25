@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Hardware validation harness: check the model's assumptions against a real arm.
 
 WHY THIS EXISTS
@@ -165,7 +165,7 @@ def run_sim(h):
     from src.config import (
         ARM_DOF, OBJECT_SIZE, GRASP_CLOSED_Q, GRASP_FORCE_MIN,
         GRASP_DRIVER_JOINTS, R_DOWN, TABLE_HEIGHT, SELF_FILTER, DEPTH_MAX,
-        SURFACE_BAND,
+        SURFACE_BAND, TABLE_XY_BOUNDS,
     )
 
     model = load_robot_model()
@@ -512,6 +512,42 @@ def run_sim(h):
         r.set(True, 'fx %.2f fy %.2f cx %.2f cy %.2f | equal=%s centred=%s'
               % (rep['fx'], rep['fy'], rep['cx'], rep['cy'],
                  rep['fx_fy_equal'], rep['centred']))
+
+    with h.check('CAMERA', 'table footprint rejects everything off the tabletop',
+                 'Height alone is not a validity rule: the robot base, the column\n'
+                 'and the arm all sit above the surface, so any that come into\n'
+                 'view get clustered as objects. The detection paths pass\n'
+                 'TABLE_XY_BOUNDS into the shared mask; if that rectangle or its\n'
+                 'plumbing breaks, detections start appearing off the table.\n'
+                 'This is the only check that exercises the footprint rule.') as r:
+        # The scene was restored after the previous check, so stand a cube up and
+        # compare the SAME depth image with and without the bounds.
+        from src.pick_place import ObjectRegistry, place_cube
+        _reg = ObjectRegistry(model, 1)
+        place_cube(model, data, _reg, np.random.default_rng(0), settle=True)
+        mujoco.mj_forward(model, data)
+
+        cam = RGBDCamera(model, cam_name, 320, 240)
+        depth = cam.capture_depth(data)
+        unbounded = cam.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
+                                       TABLE_HEIGHT + SURFACE_BAND)
+        bounded = cam.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
+                                     TABLE_HEIGHT + SURFACE_BAND,
+                                     xy_bounds=TABLE_XY_BOUNDS)
+        cam.renderer.close()
+
+        cx, cy, hx, hy = TABLE_XY_BOUNDS
+        if len(bounded) == 0:
+            r.set(False, 'bounds kept no points; the cube should be on the table')
+        else:
+            outside = int(((np.abs(bounded[:, 0] - cx) > hx)
+                           | (np.abs(bounded[:, 1] - cy) > hy)).sum())
+            r.set(outside == 0 and len(bounded) <= len(unbounded),
+                  'kept %d of %d pts; %d outside x %.3f+/-%.3f, y %.3f+/-%.3f'
+                  % (len(bounded), len(unbounded), outside, cx, hx, cy, hy))
+
+        mujoco.mj_resetDataKeyframe(model, data, home)
+        mujoco.mj_forward(model, data)
 
     # ---------------- GEOMETRY / LIMITS ----------------
     with h.check('CAMERA', 'TABLE_HEIGHT filter separates object from surface',

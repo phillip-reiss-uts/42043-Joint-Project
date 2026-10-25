@@ -59,6 +59,13 @@ TABLE_THICK = 0.02
 TABLE_CENTRE = [0.0, -0.270]
 TABLE_HALF = [0.22, 0.15]
 
+# The valid-object region, packed the way the depth->world mask wants it:
+# (centre_x, centre_y, half_x, half_y). The tabletop is the only place a graspable
+# object can be; everything outside it is the robot base, the column, the arm, the
+# bench edge or the floor. Defined once so the simulation and the hardware cannot
+# disagree about it.
+TABLE_XY_BOUNDS = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HALF[0], TABLE_HALF[1])
+
 OBJECT_SIZE = [0.03, 0.03, 0.03]
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
 OBJECT_POS = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + OBJECT_SIZE[2]]

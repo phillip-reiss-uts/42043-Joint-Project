@@ -3,6 +3,62 @@ import numpy as np
 import mujoco
 
 
+def world_points_from_depth(z, K, R_wc, p_cam_w, near_min, near_max, z_min,
+                            xy_bounds=None):
+    # THE ONE implementation of "which depth pixels are valid, and where they are
+    # in the base frame".
+    #
+    # Both front ends call this: RGBDCamera.surface_points (a MuJoCo camera in
+    # simulation) and DepthWorld.deproject (a RealSense or fake source on
+    # hardware). They used to carry separate copies of the same maths, which is
+    # exactly how a validity rule added to one path silently failed to reach the
+    # other -- the robot base was filtered out of the hardware detections and
+    # still clustered in the simulation.
+    #
+    # z is depth in METRES. R_wc / p_cam_w are the camera pose in the base frame.
+    # xy_bounds, when given, is (centre_x, centre_y, half_x, half_y): the only
+    # region where a graspable object can be -- the measured tabletop. Anything
+    # outside it is the base, the column, the arm, the bench edge or the floor.
+    #
+    # Masking runs on (H,W) arrays and only survivors are lifted to 3D: the full
+    # cloud is ~300k points to keep ~1.6% of them.
+    H, W = z.shape
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+
+    # 1-D ray slopes, broadcast against depth only where a full (H,W) plane is
+    # genuinely needed. meshgrid here costs several 2.4 MB temporaries.
+    ax = -(np.arange(W, dtype=np.float64) - cx) / fx
+    ay = -(np.arange(H, dtype=np.float64) - cy) / fy
+
+    # |p_cam| = z * |(ax, ay, -1)|, and R is orthonormal so this is also the
+    # distance from the camera in world coordinates
+    near = np.sqrt(ax[None, :] ** 2 + ay[:, None] ** 2 + 1.0) * z
+    # world coordinates are linear in depth, so no 3D cloud is needed for the tests
+    wx = ((R_wc[0, 0] * ax)[None, :] + (R_wc[0, 1] * ay)[:, None]
+          - R_wc[0, 2]) * z + p_cam_w[0]
+    wy = ((R_wc[1, 0] * ax)[None, :] + (R_wc[1, 1] * ay)[:, None]
+          - R_wc[1, 2]) * z + p_cam_w[1]
+    wz = ((R_wc[2, 0] * ax)[None, :] + (R_wc[2, 1] * ay)[:, None]
+          - R_wc[2, 2]) * z + p_cam_w[2]
+
+    keep = (np.isfinite(z) & (z > 0.0) & (near > near_min)
+            & (near < near_max) & (wz > z_min))
+    if xy_bounds is not None:
+        bx, by, hx, hy = xy_bounds
+        keep &= (np.abs(wx - bx) <= hx) & (np.abs(wy - by) <= hy)
+    if not keep.any():
+        return np.zeros((0, 3))
+
+    # rows are v, cols are u
+    vk, uk = np.nonzero(keep)
+    zk = z[vk, uk]
+    p_cam = np.stack([-(uk - cx) * zk / fx,
+                      -(vk - cy) * zk / fy,
+                      -zk], axis=-1)
+    return p_cam @ R_wc.T + p_cam_w
+
+
 class RGBDCamera:
     # Wraps a MuJoCo camera as an RGB-D sensor.
 
@@ -104,47 +160,17 @@ class RGBDCamera:
         return points
 
     # Deprojection, masked in image space
-    def surface_points(self, depth, data, near_min, near_max, z_min):
-        # Same points as deproject() followed by the usual keep-mask, but the
-        # mask is evaluated on (H,W) arrays and only the survivors are lifted to
-        # 3D. Building the full cloud costs ~28 ms and the masks over it ~26 ms,
-        # to retain ~1.6% of 307k pixels.
+    def surface_points(self, depth, data, near_min, near_max, z_min,
+                       xy_bounds=None):
+        # Thin wrapper: this class knows where the MuJoCo camera is, and
+        # world_points_from_depth owns the validity rule. See that function for
+        # why there is only one copy of the mask.
         mujoco.mj_forward(self.model, data)
-
-        H, W = depth.shape
-        fx = self.K[0, 0]
-        fy = self.K[1, 1]
-        cx = self.K[0, 2]
-        cy = self.K[1, 2]
-
-        z = np.asarray(depth, dtype=np.float64)
-        # 1-D ray slopes, broadcast against depth only where a full (H,W) plane
-        # is genuinely needed. meshgrid here costs several 2.4 MB temporaries.
-        ax = -(np.arange(W, dtype=np.float64) - cx) / fx
-        ay = -(np.arange(H, dtype=np.float64) - cy) / fy
-
         R = data.cam_xmat[self.cam_id].reshape(3, 3)
         t = data.cam_xpos[self.cam_id]
-
-        # |p_cam| = z * |(ax, ay, -1)|, and R is orthonormal so this is also the
-        # distance from the camera in world coordinates
-        near = np.sqrt(ax[None, :] ** 2 + ay[:, None] ** 2 + 1.0) * z
-        # world z is linear in depth, so no 3D cloud is needed for the height test
-        wz = ((R[2, 0] * ax)[None, :] + (R[2, 1] * ay)[:, None]
-              - R[2, 2]) * z + t[2]
-
-        keep = (np.isfinite(z) & (z > 0.0) & (near > near_min)
-                & (near < near_max) & (wz > z_min))
-        if not keep.any():
-            return np.zeros((0, 3))
-
-        # rows are v, cols are u
-        vk, uk = np.nonzero(keep)
-        zk = z[vk, uk]
-        p_cam = np.stack([-(uk - cx) * zk / fx,
-                          -(vk - cy) * zk / fy,
-                          -zk], axis=-1)
-        return p_cam @ R.T + t
+        return world_points_from_depth(np.asarray(depth, dtype=np.float64),
+                                       self.K, R, t,
+                                       near_min, near_max, z_min, xy_bounds)
 
 def find_camera(model):
     # Return (name, id) of the wrist camera, or (None, -1).

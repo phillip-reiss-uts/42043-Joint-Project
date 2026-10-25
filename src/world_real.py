@@ -42,9 +42,11 @@ import numpy as np
 
 from src.config import (
     SELF_FILTER, SURFACE_BAND, DEPTH_MAX, TABLE_HEIGHT,
-    TABLE_CENTRE, TABLE_HALF,
+    TABLE_XY_BOUNDS,
     OBJECT_HEIGHT,
 )
+# The depth -> world-point mask lives here, shared with the simulator's camera.
+from src.camera import world_points_from_depth
 from src.world import ObjectWorld, TargetView
 
 
@@ -259,50 +261,16 @@ class DepthWorld(ObjectWorld):
     def deproject(self, z16, K):
         # uint16 millimetres -> world-frame points above the table.
         #
-        # Mirrors RGBDCamera.surface_points: the keep-mask runs in image space
-        # and only survivors are lifted to 3D, because the full cloud is ~300k
-        # points to keep ~1.6% of them.
-        H, W = z16.shape
-        fx, fy = K[0, 0], K[1, 1]
-        cx, cy = K[0, 2], K[1, 2]
-
-        z = z16.astype(np.float64) * 1e-3          # mm -> m
+        # The mask itself lives in camera.world_points_from_depth, shared with the
+        # simulator's camera, so a validity rule cannot apply to one path and not
+        # the other. This method only supplies what differs here: a millimetre
+        # source and a camera pose taken from the mount rather than from MuJoCo.
         p_cam_w, R_wc = self.camera_pose()
-
-        # Ray slopes in the camera frame. camera.py's convention is x = -(u-cx)z/fx
-        # and z_cam = -z; apply the same signs so the maths downstream is shared.
-        ax = -(np.arange(W, dtype=np.float64) - cx) / fx
-        ay = -(np.arange(H, dtype=np.float64) - cy) / fy
-
-        near = np.sqrt(ax[None, :] ** 2 + ay[:, None] ** 2 + 1.0) * z
-        wz = ((R_wc[2, 0] * ax)[None, :] + (R_wc[2, 1] * ay)[:, None]
-              - R_wc[2, 2]) * z + p_cam_w[2]
-        # World x and y the same way, for the tabletop footprint test below.
-        wx = ((R_wc[0, 0] * ax)[None, :] + (R_wc[0, 1] * ay)[:, None]
-              - R_wc[0, 2]) * z + p_cam_w[0]
-        wy = ((R_wc[1, 0] * ax)[None, :] + (R_wc[1, 1] * ay)[:, None]
-              - R_wc[1, 2]) * z + p_cam_w[1]
-
-        # The TABLE FOOTPRINT is part of the validity rule, not just the height.
-        # Anything outside the measured tabletop cannot be a graspable object: the
-        # robot base and column, the arm itself, the bench edge, the floor. Height
-        # alone let those through whenever they happened to sit above the surface,
-        # which is why the base kept appearing in the cluster set.
-        on_table = ((np.abs(wx - TABLE_CENTRE[0]) <= TABLE_HALF[0])
-                    & (np.abs(wy - TABLE_CENTRE[1]) <= TABLE_HALF[1]))
-
-        keep = (np.isfinite(z) & (z > 0.0) & (near > SELF_FILTER)
-                & (near < DEPTH_MAX) & (wz > TABLE_HEIGHT + SURFACE_BAND)
-                & on_table)
-        if not keep.any():
-            return np.zeros((0, 3))
-
-        vk, uk = np.nonzero(keep)
-        zk = z[vk, uk]
-        p_cam = np.stack([-(uk - cx) * zk / fx,
-                          -(vk - cy) * zk / fy,
-                          -zk], axis=-1)
-        return p_cam @ R_wc.T + p_cam_w
+        return world_points_from_depth(
+            z16.astype(np.float64) * 1e-3, K, R_wc, p_cam_w,
+            SELF_FILTER, DEPTH_MAX, TABLE_HEIGHT + SURFACE_BAND,
+            xy_bounds=(TABLE_CENTRE[0], TABLE_CENTRE[1],
+                       TABLE_HALF[0], TABLE_HALF[1]))
 
     # POINTS -> TargetViews
     def detect(self, points):

@@ -1,4 +1,4 @@
-# Object perception from the wrist RGB-D camera.
+﻿# Object perception from the wrist RGB-D camera.
 
 from dataclasses import dataclass
 
@@ -6,7 +6,7 @@ import numpy as np
 
 from src.config import (
     SELF_FILTER, SURFACE_BAND, DEPTH_MAX,
-    TABLE_HEIGHT, TABLE_CENTRE, TABLE_HALF,
+    TABLE_HEIGHT, TABLE_XY_BOUNDS,
     OBJECT_HEIGHT, OBJECT_SIZE,
 )
 
@@ -118,26 +118,19 @@ def rotation_with_yaw(yaw_deg, R_down):
 
 
 # SENSING
+# The valid-object region is TABLE_XY_BOUNDS from config, so the simulation and the
+# hardware share one definition; the mask itself lives in camera.py.
+
+
 def _filter_points(model, data, camera, cam_id):
     # Shared point filter: world points above the surface, in range, finite, and
-    # INSIDE THE TABLE FOOTPRINT.
-    #
-    # The keep-mask runs in image space, so only the surviving pixels are ever
-    # lifted to 3D (see RGBDCamera.surface_points). The footprint test happens on
-    # the lifted points because surface_points is the generic sensor and does not
-    # know the cell -- the world does.
-    #
-    # Height alone was not enough: the robot base, the column and the arm all sit
-    # above the surface, so any that came into view were clustered as objects.
-    # Nothing outside the measured tabletop can be a graspable object.
+    # INSIDE THE TABLE FOOTPRINT. The rule itself is in camera.py so there is one
+    # copy of it -- height alone used to let the robot base and column through
+    # whenever they came into view.
     depth = camera.capture_depth(data)
-    pts = camera.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
-                                TABLE_HEIGHT + SURFACE_BAND)
-    if len(pts) == 0:
-        return pts
-    on_table = ((np.abs(pts[:, 0] - TABLE_CENTRE[0]) <= TABLE_HALF[0])
-                & (np.abs(pts[:, 1] - TABLE_CENTRE[1]) <= TABLE_HALF[1]))
-    return pts[on_table]
+    return camera.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
+                                 TABLE_HEIGHT + SURFACE_BAND,
+                                 xy_bounds=TABLE_XY_BOUNDS)
 
 
 def _span_ok(span):
