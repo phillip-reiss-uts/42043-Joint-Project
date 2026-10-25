@@ -173,7 +173,7 @@ def main(argv=None):
         depth = RealSenseSource()
     except Exception as exc:
         print('[HW] RealSense unavailable: %s' % exc)
-        print('     install pyrealsense2 (and librealsense) or pass a replay')
+        print('     install pyrealsense2 (and librealsense), then retry')
         backend.close()
         return 2
 

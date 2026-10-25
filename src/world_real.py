@@ -52,8 +52,8 @@ from src.world import ObjectWorld, TargetView
 
 # FRAME SOURCES
 class DepthSource(ABC):
-    # Supplies depth + intrinsics. Deliberately not tied to RealSense, so a
-    # replay file or a fake can satisfy it.
+    # Supplies depth + intrinsics. Deliberately not tied to RealSense, so the
+    # fake source the tests use can satisfy it.
 
     @abstractmethod
     def capture(self):
@@ -75,10 +75,8 @@ class RealSenseSource(DepthSource):
     #
     # UNVERIFIED: this class has never been executed. pyrealsense2 does not
     # install on the development laptop (no wheel for Python 3.12 on macOS,
-    # and librealsense is required), so only the interface and the Fake/Npy
-    # sources have been run. Treat every call below as a claim to check on the
-    # robot -- tools/record_real_frame.py does exactly that, and writes a file
-    # NpyDepthSource can replay so the deprojection path is testable offline.
+    # and librealsense is required), so only the interface and the Fake source
+    # have been run. Treat every call below as a claim to check on the robot.
     #
     # The specific things to confirm first on hardware:
     #   * whether get_data() already returns millimetres (D4xx z16 usually
