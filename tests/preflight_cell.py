@@ -17,8 +17,17 @@ It checks everything that can be checked offline:
   3. tests/test_ur_backend.py passes: the backend plumbing, against fakes
   4. tests/test_arm_control.py --config-only passes: src/config.py is the
      measured cell, not the simulator's defaults
-  5. pyrealsense2 loads and enumerates   (0 devices is CORRECT here)
-  6. opencv has aruco + solvePnP         (informational; calibration only)
+  5. tests/test_ur_kinematics.py passes: the shipped payload data still matches
+     the composed model (this is what catches a stale arm_dynamics.json)
+  6. tests/test_kinematics_parity.py passes: the chain and the model agree on
+     the TCP pose in the cell frame, and that agreement needs UR_ROOT_YAW
+  7. pyrealsense2 loads and enumerates   (0 devices is CORRECT here)
+  8. opencv has aruco + solvePnP         (informational; calibration only)
+
+Tests 3-6 are the offline suites. They are here rather than left to be run by
+hand because each one covers something this gate would otherwise wave through:
+5 exists solely because a stale payload passed preflight once and only failed
+when somebody ran the test manually.
 
 What it CANNOT prove, and what you still run at the bench:
   tests/test_arm_control.py      does the UR3e accept these servoJ calls
@@ -189,9 +198,30 @@ def check_config():
              ("--config-only",))
 
 
-# --------------------------------------------------------------- 5. camera
+# ------------------------------------------------------- 5+6. kinematics
+def check_kinematics_payload():
+    # The shipped link data vs the model it was generated from. This is the only
+    # check that notices a stale models/ur3e/arm_dynamics.json, which happens
+    # whenever the gripper or camera changes: the geoms carry explicit masses
+    # and their inertia comes from the mesh SHAPE, so a geometry-only edit
+    # invalidates the file. A stale payload passes every other check here and
+    # then reports |dM| ~ 1e-3 instead of ~1e-16.
+    section("5. tests/test_ur_kinematics.py  (payload vs model, offline)")
+    run_test("payload data matches the model", "tests/test_ur_kinematics.py")
+
+
+def check_kinematics_frame():
+    # The same two kinematics, compared on the TCP POSE rather than through the
+    # mass matrix, and compared both with and without UR_ROOT_YAW. The 180 deg
+    # base error that survived for weeks would have been a plain sign flip here.
+    section("6. tests/test_kinematics_parity.py  (TCP pose + frame, offline)")
+    run_test("chain and model agree in the cell frame",
+             "tests/test_kinematics_parity.py")
+
+
+# --------------------------------------------------------------- 7. camera
 def check_realsense(mods):
-    section("5. pyrealsense2 loads and enumerates")
+    section("7. pyrealsense2 loads and enumerates")
     rs = mods.get("pyrealsense2")
     if rs is None:
         return record("pyrealsense2 importable", False)
@@ -210,9 +240,9 @@ def check_realsense(mods):
     return True
 
 
-# --------------------------------------------------------------- 6. opencv
+# --------------------------------------------------------------- 8. opencv
 def check_opencv(mods):
-    section("6. opencv (calibration only -- not on the pick path)")
+    section("8. opencv (calibration only -- not on the pick path)")
     cv2 = mods.get("cv2")
     if cv2 is None:
         note("cv2 not importable; src/calibration_camera.py will not run")
@@ -250,6 +280,8 @@ def main(argv=None):
     check_ur_rtde_api(mods)
     check_backend_plumbing()
     check_config()
+    check_kinematics_payload()
+    check_kinematics_frame()
     check_realsense(mods)
     check_opencv(mods)
 

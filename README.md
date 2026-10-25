@@ -71,10 +71,12 @@ fallback. Its two modes print `FIXED_CAM_POS/TARGET/UP` rather than the mount:
     python tests/test_task_flow.py       # pickup toggle: grasp -> hold -> put down
     python tests/test_dynamics.py        # analytic M(q)/g(q) vs MuJoCo
     python tests/test_ur_kinematics.py   # hardware chain vs MuJoCo
+    python tests/test_kinematics_parity.py  # TCP pose + frame convention
     python tests/test_ur_backend.py      # RTDE/RG2 plumbing, no robot
-    python tests/test_fixed_camera.py    # eye-to-hand world, offline
+    python tests/test_fixed_camera.py    # eye-to-hand world, offline (PENDING)
     python tests/test_calibration_camera.py  # extrinsic solvers, synthetic
     python tests/test_hardware.py --sim  # hardware assumptions
+    python run_tests.py --trials 6       # end-to-end picks, writes test_output/
 
 ## Architecture
 
