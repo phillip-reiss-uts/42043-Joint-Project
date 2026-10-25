@@ -1,11 +1,11 @@
-﻿# Object perception from the wrist RGB-D camera.
+# Object perception from the wrist RGB-D camera.
 
 from dataclasses import dataclass
 
 import numpy as np
 
 from src.config import (
-    SELF_FILTER, SURFACE_BAND, DEPTH_MAX,
+    SELF_FILTER, SURFACE_BAND, SURFACE_Z_MIN, DEPTH_MAX,
     TABLE_HEIGHT, TABLE_XY_BOUNDS,
     OBJECT_HEIGHT, OBJECT_SIZE,
 )
@@ -127,9 +127,12 @@ def _filter_points(model, data, camera, cam_id):
     # INSIDE THE TABLE FOOTPRINT. The rule itself is in camera.py so there is one
     # copy of it -- height alone used to let the robot base and column through
     # whenever they came into view.
+    #
+    # SURFACE_Z_MIN, not TABLE_HEIGHT + SURFACE_BAND: the floor is shared with
+    # the hardware path so the hand filter (config) applies to both.
     depth = camera.capture_depth(data)
     return camera.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
-                                 TABLE_HEIGHT + SURFACE_BAND,
+                                 SURFACE_Z_MIN,
                                  xy_bounds=TABLE_XY_BOUNDS)
 
 

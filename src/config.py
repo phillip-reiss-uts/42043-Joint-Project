@@ -244,6 +244,30 @@ SYNC_STEPS = 8      # SYNC_DT at the default 0.002 timestep; steps between syncs
 SELF_FILTER = 0.20
 SURFACE_BAND = 0.005
 DEPTH_MAX = 5.0
+
+# HAND FILTER: the lowest height above the tabletop that counts as the object.
+#
+# At the cell the cube is moved BY HAND, and a hand lying flat on the table sits
+# roughly 20-30 mm high -- inside the band the table filter keeps, so it clusters
+# as an object and can outcompete the cube. This raises the floor above the hand.
+#
+# It does NOT disturb the grasp height: TargetView.centre takes its z from
+# TABLE_HEIGHT + OBJECT_HEIGHT/2 (known geometry) and its x, y and yaw from the
+# TOP band of the cluster, so trimming the cube's lower body removes points
+# without moving where the robot aims. What it must not be used for is inferring
+# the object's SIZE -- span still comes from the clipped cluster. At 40 mm the
+# remaining slab is the cube's top 20 mm, whose footprint is still the full
+# 60 mm, so _span_ok's 0.70 lower bound holds. Set it above OBJECT_HEIGHT and
+# nothing survives: every detection disappears.
+#
+# 0.0 reproduces the old behaviour (table filter only, 5 mm).
+HAND_FILTER_MM = 40.0
+
+# The ONE z floor both paths use, so the simulation and the hardware cannot
+# disagree about what counts as being on the table. max() because these are two
+# independent rules: SURFACE_BAND rejects the tabletop itself, HAND_FILTER_MM
+# rejects things lying on it.
+SURFACE_Z_MIN = TABLE_HEIGHT + max(SURFACE_BAND, HAND_FILTER_MM / 1000.0)
 MIN_OBJECT_POINTS = 1500
 # LEFTOVER: unused -- superseded by the search inside clear_table.
 

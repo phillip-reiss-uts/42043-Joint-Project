@@ -41,7 +41,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from src.config import (
-    SELF_FILTER, SURFACE_BAND, DEPTH_MAX, TABLE_HEIGHT,
+    SELF_FILTER, SURFACE_BAND, SURFACE_Z_MIN, DEPTH_MAX, TABLE_HEIGHT,
     TABLE_XY_BOUNDS,
     OBJECT_HEIGHT,
 )
@@ -173,14 +173,18 @@ class FakeDepthSource(DepthSource):
     # validation (see tests/test_camera_enum.py and tests/test_camera_ruler.py).
 
     def __init__(self, width=320, height=240, cam_height=0.62, table_z=None,
-                 object_h=0.03):
+                 object_h=None):
         self._w, self._h = width, height
         # The world frame has to put the table at the SAME height the detector
-        # filters on, or every point gets discarded. On this cell TABLE_HEIGHT is
-        # 0.2315, not the 0.02 the old workcell used.
+        # filters on, or every point gets discarded.
         self.table_z = float(TABLE_HEIGHT if table_z is None else table_z)
         self.cam_height = float(cam_height)   # camera distance above the table
-        self.object_h = float(object_h)
+        # The cube this project actually uses. It used to default to 0.03 -- a
+        # leftover from the 30 mm cube -- which put the rendered top face at
+        # 30 mm, below the hand filter's floor, so every point was discarded and
+        # the whole depth->detect path reported nothing. OBJECT_HEIGHT is the
+        # single source of truth; a caller may still override it.
+        self.object_h = float(OBJECT_HEIGHT if object_h is None else object_h)
         # A realistic-ish D435i intrinsic at 320x240 (fx != fy, off-centre).
         self._K = np.array([[-191.3, 0.0, 160.6],
                             [0.0, 191.4, 120.9],
@@ -266,7 +270,7 @@ class DepthWorld(ObjectWorld):
         p_cam_w, R_wc = self.camera_pose()
         return world_points_from_depth(
             z16.astype(np.float64) * 1e-3, K, R_wc, p_cam_w,
-            SELF_FILTER, DEPTH_MAX, TABLE_HEIGHT + SURFACE_BAND,
+            SELF_FILTER, DEPTH_MAX, SURFACE_Z_MIN,
             # The same footprint the simulator uses -- one definition, so the two
             # paths cannot disagree about what counts as being on the tabletop.
             xy_bounds=TABLE_XY_BOUNDS)
