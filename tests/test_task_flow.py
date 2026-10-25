@@ -41,7 +41,7 @@ def check(name, ok, detail=''):
 def main():
     failures = 0
     log = []
-    calls = {'pick': 0, 'put': 0}
+    calls = {'pick': 0, 'put': 0, 'home': 0}
 
     world = StubWorld()
     cmd = Commands()
@@ -54,9 +54,12 @@ def main():
         calls['put'] += 1
         return True
 
+    def go_home():
+        calls['home'] += 1
+
     task = TaskStateMachine(
         commands=cmd, say=lambda m: log.append(m), at_home=lambda: True,
-        go_home=lambda: None, place_object=lambda: None,
+        go_home=go_home, place_object=lambda: None,
         track_step=lambda: None, pick_object=pick_object,
         running=lambda: True, arm=None, world=world)
     task.on_put_object = put_object
@@ -91,6 +94,8 @@ def main():
     failures += not check('the second press releases exactly once',
                           calls['put'] == 1, 'put=%d' % calls['put'])
     failures += not check('holding is cleared', not task.holding)
+    failures += not check('the arm retracts to home after the release',
+                          calls['home'] == 1, 'home=%d' % calls['home'])
     failures += not check('the mode returns to TRACK', task.mode == TRACK,
                           'mode=%s' % task.mode)
     failures += not check('PUTDOWN was reported',

@@ -314,6 +314,15 @@ class TaskStateMachine:
         else:
             self.say('PUTDOWN failed -- cube may still be held')
 
+        # Retract to the home pose. The put-down leaves the tool low over the
+        # table where it released, which is neither a useful standby pose nor
+        # where the operator expects the arm after the cube is gone. This is the
+        # same retract the failed-grip path above uses, so both exits from a
+        # grasp end in the same place.
+        self._go_home()
+        if not self._running():
+            return
+
         # The cube is on the table again, so go back to watching it.
         if self.world.active():
             self.enter_track('after put-down')
