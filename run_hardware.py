@@ -150,6 +150,11 @@ def main(argv=None):
     print('  cycle       : %.1f Hz (servoj period %.3f s)'
           % (1.0 / cfg.UR_CYCLE_DT, cfg.UR_CYCLE_DT))
     print('  the pendant stop is the only e-stop; speed starts at FEED')
+    # Say the perception floor out loud: it is the setting most likely to make
+    # the cube vanish from the log, and it is invisible otherwise.
+    print('  perception : hand filter %.0f mm (points below table+%.0f mm '
+          'ignored), log every %.1f s'
+          % (cfg.HAND_FILTER_MM, cfg.HAND_FILTER_MM, cfg.PERCEPTION_LOG_S))
     print()
 
     # ---- providers -------------------------------------------------------

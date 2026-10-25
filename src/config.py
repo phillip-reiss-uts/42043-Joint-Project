@@ -269,6 +269,20 @@ HAND_FILTER_MM = 40.0
 # rejects things lying on it.
 SURFACE_Z_MIN = TABLE_HEIGHT + max(SURFACE_BAND, HAND_FILTER_MM / 1000.0)
 MIN_OBJECT_POINTS = 1500
+
+# PERCEPTION CONSOLE LOG -- for the hardware run, which has NO viewer.
+#
+# In the simulation every perception result is pushed to the overlay panels, so
+# nothing needs printing. On the robot there is no overlay at all (push() finds
+# no viewer and does nothing), which left the operator blind: whether the hand
+# was clustered, whether the cube was found, how many points it had -- all
+# computed and discarded. This prints one line per look instead.
+#
+# Seconds between lines; 0 disables it. It is rate-limited because the servo
+# looks every SERVO_PERCEIVE_EVERY iterations (125 Hz / 15), and a line for each
+# would bury the state transitions. A change in the number of detections always
+# prints, whatever the interval, so gaining or losing the target is never missed.
+PERCEPTION_LOG_S = 0.5
 # LEFTOVER: unused -- superseded by the search inside clear_table.
 
 # state observer (src/observer.py)

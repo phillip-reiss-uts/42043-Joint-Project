@@ -37,13 +37,14 @@ detection pipeline can still be exercised.
 """
 
 from abc import ABC, abstractmethod
+import time
 
 import numpy as np
 
 from src.config import (
     SELF_FILTER, SURFACE_BAND, SURFACE_Z_MIN, DEPTH_MAX, TABLE_HEIGHT,
     TABLE_XY_BOUNDS,
-    OBJECT_HEIGHT,
+    OBJECT_HEIGHT, PERCEPTION_LOG_S,
 )
 # The depth -> world-point mask lives here, shared with the simulator's camera.
 from src.camera import world_points_from_depth
@@ -253,7 +254,38 @@ class DepthWorld(ObjectWorld):
     def perceive(self):
         z16, K = self.src.capture()
         points = self.deproject(z16, K)
-        return self.detect(points)
+        views = self.detect(points)
+        self._log_perception(len(points), views)
+        return views
+
+    # CONSOLE LOG -- the hardware world's stand-in for the overlay
+    def _log_perception(self, n_points, views):
+        # One line per look, because the robot has no viewer: in the simulator
+        # all of this goes to the overlay panels instead.
+        #
+        # This is the only visibility into perception on the real cell, so it
+        # reports the numbers a decision is made from -- how many points survived
+        # the height mask (does the HAND FILTER actually work?), how many
+        # clusters, and for the best one its centre, span and point count. A hand
+        # left on the table shows up as extra points and either a second cluster
+        # or a rejected span, which is exactly what there was no way to see.
+        if PERCEPTION_LOG_S <= 0.0:
+            return
+        n_dets = len(views)
+        now = time.monotonic()
+        # Always report a CHANGE in detection count; otherwise rate-limit.
+        changed = n_dets != getattr(self, '_log_n', None)
+        if not changed and (now - getattr(self, '_log_t', 0.0)) < PERCEPTION_LOG_S:
+            return
+        self._log_t, self._log_n = now, n_dets
+        if not views:
+            print('[PERC] pts %6d  dets 0' % n_points)
+            return
+        v = views[0]
+        print('[PERC] pts %6d  dets %d  best xy (%+.3f, %+.3f) z %.3f  '
+              'span %.3f/%.3f  n %d  yaw %+.1f  score %.1f'
+              % (n_points, n_dets, v.centre[0], v.centre[1], v.centre[2],
+                 v.span[0], v.span[1], v.n_points, v.yaw, v.score))
 
     def camera_pose(self):
         # (p, R) of the camera in the base frame. Subclasses supply it.
