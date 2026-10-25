@@ -20,15 +20,7 @@ Thumbs.db
 
 # MuJoCo runtime log
 MUJOCO_LOG.TXT
-test_output/distance_closure.png
-test_output/estimate_error.png
-test_output/servo_paths.png
-test_output/summary.csv
-test_output/summary.png
-test_output/distance_closure.png
-test_output/estimate_error.png
-test_output/servo_paths.png
-test_output/summary.csv
-test_output/summary.png
-/test_output
-/test_output
+
+# test_output/ is deliberately NOT listed. Its five files are committed, so an
+# ignore rule cannot exclude them; twelve lines that silently did nothing were
+# removed rather than tidied. To stop tracking them, git rm --cached them.

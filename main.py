@@ -43,8 +43,8 @@ def run_simulation():
 
 
 def run_hardware(args):
-    # Imported lazily so --sim never pulls in ur_rtde/pymodbus, and --hardware
-    # never pulls in mujoco.
+    # Imported lazily so --sim never pulls in ur_rtde, and --hardware never
+    # pulls in mujoco.
     from run_hardware import main as hw_main
     return hw_main(getattr(args, 'rest', []))
 

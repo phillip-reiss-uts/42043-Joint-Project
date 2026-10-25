@@ -94,8 +94,14 @@ The hardware world has two camera modes, chosen by `CAMERA_MODE` in
 `src/config.py`: `'wrist'` (eye-in-hand, the default) and `'fixed'`
 (eye-to-hand, for a camera on a stand). See the full notes for the trade-offs.
 
-## Full notes
+## Documentation
 
-The detailed document — control design, measurements, the gravity and
-integrator history, grasp accuracy, and the hardware porting checklist — lives
-one level up as [README-assignment4-full.md](../README-assignment4-full.md).
+This README is authoritative for how to run, calibrate, test and navigate the
+code. [README-assignment4-full.md](../README-assignment4-full.md) is
+authoritative for design rationale and the measurements behind it: control
+design, the gravity and integrator history, grasp accuracy, the porting
+checklist. `notes/HARDWARE-SESSION-2026-10-23.txt` is a dated log, not a
+description of the current tree — later sections in it supersede earlier ones.
+
+The generated "Vision-Guided Pick - Technical Reference.docx" was retired: it
+restated the three documents above and nothing regenerated it reliably.

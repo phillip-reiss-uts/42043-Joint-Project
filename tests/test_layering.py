@@ -16,8 +16,8 @@
 #   ROBOT modules must NOT import: target_motion, pick_place, model_loader,
 #   or camera/calibration (the sensor and scene are the world's business).
 #
-# World-facing modules (main, run_tests, demo_servo, pick_place, world_sim,
-# calibration, model_loader, overlay, target_motion) may import anything.
+# World-facing modules (main, run_tests, pick_place, world_sim, calibration,
+# model_loader, overlay, target_motion) may import anything.
 #
 # PROVIDER SEAM (second rule, no simulator behind the interfaces)
 # --------------------------------------------------------------
@@ -362,7 +362,7 @@ def main():
     if bad:
         print('%d violation(s): the robot side is not hardware-portable.' % bad)
         print('Move the offending logic behind src.world.ObjectWorld, or into')
-        print('src/pick_place.py / src/demo_servo.py if it is scene or scoring.')
+        print('src/pick_place.py if it is scene or scoring.')
         return 1
 
     print('Robot modules: %s' % ', '.join(m[:-3] for m in ROBOT_MODULES))

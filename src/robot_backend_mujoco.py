@@ -6,7 +6,7 @@ and the gripper force comes from the actuator array.
 
 The robot layer never imports this module. A simulation entry point constructs
 it and injects it into `Arm`; a hardware entry point injects a `URBackend`
-(RTDE `servoj`/`movej`, Modbus for the 2F-85) instead.
+(RTDE `servoj`/`movej`, XML-RPC for the RG2) instead.
 
 GRAVITY COMPENSATION BELONGS HERE, ONCE
 ---------------------------------------

@@ -59,7 +59,8 @@ class Arm:
         self.backend = backend
         self.base_id = self.backend.tool_body_id
         # Which actuator index the gripper occupies, when the backend has one.
-        # On hardware the gripper is a separate Modbus device, so this is None.
+        # On hardware the gripper is a separate device reached over XML-RPC, so
+        # this is None.
         self.grip_act = getattr(self.backend, 'grip_actuator', None)
 
         # Last commanded joint vector, for the observer's predict step.
@@ -83,9 +84,10 @@ class Arm:
         # still does not depend on the overlay layer.
         self.viewer = None
 
-        # Finger driver joints, for reading the jaw opening back. A real
-        # 2F-85 reports the same thing over Modbus as its position register.
-        # The backend resolves the addresses, since they are a model detail.
+        # Finger driver joints, for reading the jaw opening back. The RG2
+        # reports jaw WIDTH in millimetres and the backend scales it into the
+        # same units. The backend resolves the addresses, since they are a
+        # model detail.
         self.finger_q = []
         self.finger_v = []
         for nm in GRASP_DRIVER_JOINTS:
@@ -325,16 +327,19 @@ class Arm:
 
     def grasp_state(self):
         # Are the jaws actually holding something? Reads only the gripper's own
-        # position, velocity and force -- the same trio a 2F-85 exposes over
-        # Modbus -- so nothing here depends on knowing where the object is.
+        # position, velocity and force, so nothing here depends on knowing where
+        # the object is.
         #
-        # The backend supplies all three: the simulator reads its finger joints,
-        # a URBackend reads the Modbus registers. There is deliberately no read
-        # of `data` here, so the same verdict logic runs on both.
+        # The backend supplies all three, and they do NOT mean the same thing on
+        # both paths: the simulator reads its finger joints and actuator, while
+        # a URBackend has RG2 jaw width for q and v and reports NaN for force.
+        # NaN is what makes the verdict 'unknown' on hardware, which is the
+        # open-loop behaviour todo B5 chose. There is deliberately no read of
+        # `data` here, so this one verdict function runs on both.
         #
         # Measured on this model: closing on nothing drives the driver joints to
         # 0.77 with the actuator force at -0.13, the linkage bottoming out.
-        # Closing on the 30 mm cube stalls them at 0.25 with the force saturated
+        # Closing on the 60 mm cube stalls them at 0.25 with the force saturated
         # at +5.0. Three signals agree, so the verdict is taken from all of them
         # rather than trusting the position alone, which cannot separate
         # "gripped the cube" from "stopped against the table".

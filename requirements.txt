@@ -9,8 +9,10 @@
 # ---- core simulation -------------------------------------------------------
 # mujoco >= 3.0 for the passive viewer and MjSpec; 3.10 is what was tested.
 mujoco>=3.0.0
-# Supplies the Robotiq 2F-85 gripper MJCF. The UR3e itself is vendored under
-# models/ur3e/ (menagerie has no UR3e), so this is only needed for the gripper.
+# Fallback source of MJCF models. It is NOT needed for this project's gripper:
+# the RG2 is vendored at models/onrobot_rg2/. menagerie has no UR3e either --
+# that MJCF is vendored under models/ur3e/. Only a model name that models/ does
+# not resolve reaches menagerie at all.
 mujoco-menagerie>=0.1.0
 
 # ---- maths -----------------------------------------------------------------
@@ -21,16 +23,23 @@ scipy>=1.10.0
 matplotlib>=3.11.1
 
 # ---- hardware only (NOT installed here, not needed for simulation) ----------
-# Listed for the eventual port. See "Porting to hardware" in README.md.
+# Listed for the eventual port. See "Camera calibration" and "Run" in README.md.
 #
 # ur_rtde            # RTDE: servoj/movej for URBackend, joint readback
-# pymodbus           # Modbus: Robotiq 2F-85 registers
+# pycurl             # imported by onRobot at module level and NOT declared by
+#                    #   its setup.py, so pip will not pull it in. Install first.
+# onRobot            # the RG2 client (XML-RPC to the OnRobot URCap, port 41414):
+#                    #   pip install "git+https://github.com/RianPolMacCionaoith/onRobot.git@main#subdirectory=onRobot"
 # pyrealsense2       # D435i depth stream for RealObjectWorld
+# opencv-contrib-python  # tools/calibrate_camera.py only (aruco + solvePnP)
+#
+# pymodbus is deliberately absent: this cell's gripper is an OnRobot RG2 reached
+# over XML-RPC, and the Modbus path (a Robotiq 2F-85) has been removed.
 #
 # pyrealsense2 has NO wheel for Python 3.12 on macOS, so src/world_real.py
-# imports it lazily and falls back to FakeDepthSource. On Linux, or with an
-# older interpreter, install it normally. Alternatively install the
-# librealsense SDK (Homebrew on Intel macOS) and use its own Python bindings.
+# imports it lazily and falls back to FakeDepthSource. On Linux and Windows it
+# installs from PyPI. Alternatively install the librealsense SDK and use its own
+# Python bindings.
 
 # ---- deliberately NOT used -------------------------------------------------
 # mink: tried for IK and rejected. arm.solve_ik uses damped least squares, which

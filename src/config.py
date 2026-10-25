@@ -161,7 +161,7 @@ MESH_POS = CAM_POS
 
 # arm / gripper / camera identity
 #
-# HARDWARE TARGET: real UR3e + RealSense D435i + Robotiq 2F-85.
+# HARDWARE TARGET: real UR3e + RealSense D435i + OnRobot RG2.
 #
 # The UR3e is now simulated directly. mujoco_menagerie still ships no UR3e, so
 # the official UR3e MJCF is vendored at models/ur3e/ur3e.xml (sourced from the
@@ -569,8 +569,14 @@ GRASP_DRIVER_JOINTS = ('gripper/right_driver_joint', 'gripper/left_driver_joint'
 # (range 0..0.8) with the actuator force at -0.13 as the linkage bottoms out.
 # Closing on the 60 mm cube (OBJECT_SIZE above: half-extents of 0.03) stalls
 # them at 0.25 with the force saturated at +5.0 and the finger velocity at ~0.
+#
+# SIMULATION ONLY. These threshold the SIMULATED gripper's joints and actuator.
+# Hardware reports jaw width in millimetres and NO force at all (RG2 section
+# below), so GRASP_FORCE_MIN cannot be honoured there and the hardware pickup
+# runs open loop on 'unknown'. Giving both paths one threshold set that means
+# one thing is todo F5, and it is not a change to these numbers.
 GRASP_CLOSED_Q = 0.60         # above this the jaws plainly closed on nothing
-GRASP_FORCE_MIN = 1.0         # force needed to call it gripped, not just touched
+GRASP_FORCE_MIN = 1.0         # SIM ONLY: force to call it gripped, not touched
 GRASP_VEL_TOL = 0.02          # rad/s; below this the fingers count as stalled
 GRASP_LIFT_RECHECK = 0.04     # m; lift clear and re-read after a failed check
 
@@ -683,7 +689,7 @@ DROP_RADIUS = 0.07        # scatter drops this far around the chute centre
 VERIFY_IK = False         # run the IK self-test at startup
 VERBOSE = False           # per-stage [EXEC]/[PERCEPTION] logging
 
-# ---- hardware: UR3e + Robotiq 2F-85 + D435i -------------------------------
+# ---- hardware: UR3e + OnRobot RG2 + D435i ---------------------------------
 #
 # Everything here is a property of the CELL, not of the simulator. The link
 # data is shipped separately, in models/ur3e/arm_dynamics.json, so the robot
@@ -697,7 +703,6 @@ UR_IP = '192.168.0.194'       # controller address
 UR_CYCLE_DT = 0.008          # s, servoj period (125 Hz control loop)
 UR_LOOKAHEAD_TIME = 0.1      # s, servoj lookahead
 UR_SERVO_GAIN = 300          # servoj gain (controller-side)
-UR_GRIPPER_UNIT = 9          # Modbus unit id of the 2F-85
 UR_TRACK_CHUNK = 250         # servo iterations per operator-paced track step
 
 # Identified servo gains for the observer/linearisation.

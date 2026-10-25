@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hardware front-end: UR3e + Robotiq 2F-85 + D435i, no simulator.
+"""Hardware front-end: UR3e + OnRobot RG2 + D435i, no simulator.
 
 WHAT THIS IS
 ------------
@@ -10,7 +10,7 @@ and swaps the three providers:
     simulation                       hardware
     ----------                       --------
     MujocoKinematics                 URKinematics   (chain FK + analytic M/g)
-    MujocoBackend                    URBackend      (RTDE servoj + Modbus)
+    MujocoBackend                    URBackend      (RTDE servoj + RG2)
     SimObjectWorld                   RealObjectWorld (RealSense depth)
 
 Nothing above that layer changes, which is the point of the seams. This module
@@ -138,14 +138,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog='run_hardware.py',
                                  description='Run the pick on a real UR3e.')
     ap.add_argument('--ip', default=cfg.UR_IP, help='controller IP')
-    ap.add_argument('--gripper-unit', type=int, default=cfg.UR_GRIPPER_UNIT)
     ap.add_argument('--no-gripper', action='store_true',
                     help='arm only; grasp checks report "unknown"')
     args = ap.parse_args(argv)
 
     print()
     print('=' * 74)
-    print('HARDWARE  UR3e + Robotiq 2F-85 + D435i')
+    print('HARDWARE  UR3e + OnRobot RG2 + D435i')
     print('=' * 74)
     print('  controller  : %s' % args.ip)
     print('  cycle       : %.1f Hz (servoj period %.3f s)'
@@ -158,7 +157,7 @@ def main(argv=None):
         backend = _connect(args)
     except Exception as exc:
         print('[HW] cannot connect: %s' % exc)
-        print('     install ur_rtde + pymodbus and check the IP, then retry')
+        print('     install ur_rtde and check the IP, then retry')
         return 2
 
     dyn = ArmDynamics.from_file(_links_path())
@@ -292,8 +291,7 @@ def _links_path():
 
 def _connect(args):
     from src.robot_backend_ur import connect
-    return connect(args.ip, gripper_unit=args.gripper_unit,
-                   activate_gripper=not args.no_gripper,
+    return connect(args.ip, activate_gripper=not args.no_gripper,
                    dt=cfg.UR_CYCLE_DT,
                    lookahead_time=cfg.UR_LOOKAHEAD_TIME,
                    gain=cfg.UR_SERVO_GAIN)

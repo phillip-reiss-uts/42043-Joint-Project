@@ -19,13 +19,13 @@ That is three hardware assumptions in four lines:
   3. a control cycle is `mj_step`, i.e. the simulation advances time.
 
 On a real UR3e none of those hold. Arm targets go over RTDE as `servoj`/`movej`,
-the 2F-85 goes over Modbus, and the clock is the controller's 125 Hz control
-loop -- you do not advance it, you participate in it.
+the RG2's jaw is commanded over XML-RPC and reports width, and the clock is the
+controller's 125 Hz control loop -- you do not advance it, you participate in it.
 
 This module is the interface only. The implementations live with their layer:
 
     src/robot_backend_mujoco.py   MujocoBackend -- simulation
-    (hardware)                    URBackend -- RTDE + Modbus
+    (hardware)                    URBackend -- RTDE + RG2
 
 `Arm` is handed whichever one the entry point constructed, so the robot layer
 never imports either.
@@ -85,8 +85,9 @@ class RobotBackend(ABC):
     @abstractmethod
     def gripper_state(self):
         # {'q': float, 'v': float, 'force': float} -- the jaw position,
-        # velocity and actuator force. A real 2F-85 reports the same trio over
-        # Modbus, which is why Arm.grasp_state reads only these.
+        # velocity and actuator force. The simulator can supply all three; the
+        # RG2 supplies width (so q and v) and returns NaN for force, which is
+        # why Arm.grasp_state reports 'unknown' on hardware.
         raise NotImplementedError
 
     # ---- model handles ----

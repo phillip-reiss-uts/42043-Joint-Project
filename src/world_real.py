@@ -168,7 +168,7 @@ class RealSenseSource(DepthSource):
 class FakeDepthSource(DepthSource):
     # A stand-in depth source, so the pipeline is testable without librealsense.
     #
-    # Renders a 30 mm cube on a table so detection has something real to find.
+    # Renders a 60 mm cube on a table so detection has something real to find.
     # This is scaffolding for the test suite, not a substitute for hardware
     # validation (see tests/test_camera_enum.py and tests/test_camera_ruler.py).
 
