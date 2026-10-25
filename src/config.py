@@ -1,4 +1,4 @@
-# src/config.py
+﻿# src/config.py
 """Single source of truth for scene and task constants."""
 
 import numpy as np
@@ -175,6 +175,25 @@ FEED_MIN_STEPS = 400
 # an arbitrary half-open pose instead of following the command. The hardware path
 # uses RG2_GRIP_FORCE_N for the real gripper, so this only bounds the simulation.
 GRIP_FORCE_RANGE = (-40.0, 40.0)
+
+# ---- contact guard for the descent ----------------------------------------
+# The lowest point of the gripper is the PAD BOTTOM, which sits GRIPPER_TO_PAD_MM
+# below gripper/base: the measured flange-to-pad length (231.5 mm) minus the
+# TOOL_MOUNT standoff (10.8 mm).
+#
+# The descent is never allowed to command the pads nearer the tabletop than
+# TABLE_CONTACT_CLEARANCE_MM. The gate is on the TOOL, not on the commanded grasp
+# height, so a wrong TIP_OFFSET stops the arm above the table and says so instead
+# of driving through it.
+#
+# This is a height gate, not stall detection: it cannot tell a collision from a
+# reach limit, and it does not watch for the controller's own stall warning.
+GRIPPER_TO_PAD_MM = 220.7
+TABLE_CONTACT_CLEARANCE_MM = 2.0
+# Descents that end within this distance of the gate are run slower, so the last
+# stretch is gentle even though the profile is already easing out.
+CONTACT_SLOW_ZONE_MM = 30.0
+CONTACT_SLOW_FACTOR = 0.3
 
 # Viewer frame pacing: sync once per ~16 ms of simulated time (~60 Hz).
 SYNC_DT = 0.016
@@ -356,32 +375,29 @@ SERVO_RETREAT_MAX = 15          # cap on backup steps
 # the joint distance each move needs; at the RAPID rate the backup ran ~80 mm/s
 # against the servo's 15 mm/s descent.
 SERVO_RETREAT_V = 0.03
-# Hover standoff for the closed-loop leg. Measured: at 100 mm above the grasp the
-# jaws bias the fitted centre by ~0.55x any lateral gripper offset, in the same
-# direction, so the estimate feeds back into the gripper and walks off centre.
-# At 200 mm the bias is independent of offset (fully visible), so acquire and
-# hold there and commit from that estimate.
+# HOVER HEIGHT IS NOW DEFINED BY THE CAMERA, not by the tool.
 #
-# RAISED to 350 mm to put a palm-mounted camera inside the D435i's 0.3-3 m ideal
-# range, then put BACK to 200 mm after measuring both in the sim, 6 trials each:
+# We know where the camera sits on the gripper, so the requirement is stated in
+# the units that matter: the camera should be CAM_HOVER_HEIGHT_MM above the table
+# surface when the servo holds at hover. The standoff that achieves it follows.
 #
-#     standoff   approach complete   picked   wrist estimate error
-#     0.20 m          6/6              2/6      5-10 mm
-#     0.35 m          2/6              1/6      1.5-2 mm
+#     gripper base height above table at hover
+#         = OBJECT_HEIGHT/2 + TIP_OFFSET + SERVO_STANDOFF
+#     camera height above table
+#         = that, minus CAM_POS[2]     (CAM_POS z is measured DOWN the approach,
+#                                       so the camera sits CAM_POS[2] below the base)
 #
-# Raising it does help the estimate, as expected -- the target is further from the
-# jaws and less occluded -- but it also lengthens the OPEN-LOOP commit that
-# follows, and that is where the grasp error comes from: commit gaps of 14-29 mm
-# leave the jaws closing on air. Net, 350 mm costs four approaches out of six.
+# Solving for the standoff at a 320 mm camera height gives 252.6 mm.
 #
-# So the earlier assumption that raising it was free was wrong. It trades grasp
-# accuracy for estimate accuracy, and the accuracy that matters at the end is the
-# commit's.
-#
-# If depth really is marginal at 200 mm (todo D4, still unmeasured on the cell),
-# fix the COMMIT rather than the standoff -- shorten it, or close the loop lower
-# -- because moving the hover out makes the pick worse.
-SERVO_STANDOFF = 0.35
+# CAVEAT: this inherits TIP_OFFSET, which was tuned against an older tool model
+# and is still un-retuned for the 231.5 mm gripper. If TIP_OFFSET moves, this
+# standoff moves with it -- which is the point of deriving rather than hardcoding.
+CAM_HOVER_HEIGHT_MM = 320.0
+
+SERVO_STANDOFF = (CAM_HOVER_HEIGHT_MM / 1000.0
+                  - OBJECT_HEIGHT / 2.0
+                  - TIP_OFFSET
+                  + CAM_POS[2])
 
 # ---- moving target (robustness demonstration) ----
 # The object glides on the table while the arm servos, so the servo has to

@@ -18,6 +18,8 @@ from src.config import (
     SERVO_TRACK_MOVING, SERVO_STILL_TIME, SERVO_TRACK_ITERS, SERVO_STILL_TOL,
     SERVO_SEARCH_LIMIT, SERVO_YAW_SMOOTH, SERVO_WATCH_DESCENT,
     SERVO_MOVE_TOL, SERVO_COMMIT_TRIES,
+    TABLE_HEIGHT, GRIPPER_TO_PAD_MM, TABLE_CONTACT_CLEARANCE_MM,
+    CONTACT_SLOW_ZONE_MM, CONTACT_SLOW_FACTOR,
 )
 from src.tracking import TargetFilter
 # Pure geometry helper; carries no object or simulator state.
@@ -172,8 +174,27 @@ class PBVSServo:
         self.ref_p = None            # last unbiased estimate (fullest view)
         self.ref_yaw = None
 
+        # Contact gate. Set when a commanded grasp pose would put the pads below
+        # the tabletop; the pose is then clamped and the caller is told.
+        self.gated = False
+        self.gate_requested_z = None
+
         # set while the loop runs, so observe() can push to the overlay
         self.viewer = None
+
+    def z_floor(self):
+        # Lowest gripper/base height the descent may command: pad bottom at the
+        # tabletop plus the clearance.
+        return (TABLE_HEIGHT
+                + (GRIPPER_TO_PAD_MM + TABLE_CONTACT_CLEARANCE_MM) / 1000.0)
+
+    def gate_report(self):
+        # One-line description of a clamped grasp, for the terminal and overlay.
+        return ('[SERVO] Z GATE: commanded grasp z %.3f is below the contact limit '
+                '%.3f (pad %.1f mm + %.1f mm clearance) -- stopped short by %.1f mm'
+                % (self.gate_requested_z, self.z_floor(), GRIPPER_TO_PAD_MM,
+                   TABLE_CONTACT_CLEARANCE_MM,
+                   (self.z_floor() - self.gate_requested_z) * 1e3))
 
     def _control(self, state):
         # Tell the overlay which regime the loop is in, for colour coding.
@@ -299,7 +320,17 @@ class PBVSServo:
         p = self.p_est
         if self.kf is not None and self.kf.ready and self.lead_s != 0.0:
             p = self.kf.lead(self.lead_s)
-        p_des = np.array([p[0], p[1], p[2] + TIP_OFFSET + z_offset])
+        z_want = float(p[2] + TIP_OFFSET + z_offset)
+        # CONTACT GATE. The lowest part of the gripper is the pad bottom, well
+        # below gripper/base, so a grasp commanded too low sends the pads through
+        # the table. Clamp the commanded height and remember that we did: the
+        # callers report it and retreat rather than driving on.
+        z_floor = self.z_floor()
+        if z_want < z_floor:
+            self.gated = True
+            self.gate_requested_z = z_want
+            z_want = z_floor
+        p_des = np.array([p[0], p[1], z_want])
         R_des = rotation_with_yaw(self.yaw_est, R_DOWN)
         return p_des, R_des
 
@@ -731,6 +762,11 @@ class PBVSServo:
         p0, _ = self.world.gripper_pose()
         p0 = np.asarray(p0, float)
         p_des = np.asarray(p_des, float)
+        # Slow the final stretch when this run ENDS near the contact gate. The
+        # quintic profile already eases out, but a descent that finishes within a
+        # few millimetres of the table should arrive gently as well.
+        if p_des[2] - self.z_floor() <= CONTACT_SLOW_ZONE_MM / 1000.0:
+            v_cart = max(float(v_cart) * CONTACT_SLOW_FACTOR, 1e-3)
         dist = float(np.linalg.norm(p_des - p0))
         steps = max(1, int(dist / max(float(v_cart), 1e-6) / backend.dt))
         q = np.array(backend.joint_positions(), float)
@@ -841,6 +877,15 @@ class PBVSServo:
         self._cartesian_descent(p_des, R_des, self.retreat_v, viewer=viewer,
                                 estop=estop, aborted=stop_now,
                                 watch=watch_step_)
+        if self.gated:
+            # The pose we wanted was below the contact limit, so the descent
+            # stopped short of it. Say so, back off, and report failure rather
+            # than closing the jaws in mid-air over a table we never reached.
+            msg = self.gate_report()
+            print(msg)
+            push(viewer, 'occlusion', 'Z GATE: grasp not reached', msg)
+            self.retreat(viewer=viewer, estop=estop, aborted=aborted)
+            return False, 0
         if self.target_moved:
             return False, 0
         if aborted is not None and aborted():
@@ -854,6 +899,8 @@ class PBVSServo:
         # Coarse move to the hover pose, then closed-loop hover and descent.
         if self.p_est is None and not self.observe():
             return False, 0, float('inf'), 0
+        self.gated = False
+        self.gate_requested_z = None
         if track is None:
             track = bool(self.track_moving)
         if stationary_s is None:
@@ -887,6 +934,11 @@ class PBVSServo:
                 if ok_c:
                     self.recovered = True
                     return True, n_done, 0.0, n_done
+                if self.gated:
+                    # commit_open_loop already printed the gate message and
+                    # retreated. Do not retry: the target did not move, the pose
+                    # is simply not reachable without hitting the table.
+                    return False, n_done, e1, n_done
                 if not self.target_moved:
                     return False, n_done, e1, n_done
                 # The camera caught the target moving part way down. Lift back
@@ -916,6 +968,15 @@ class PBVSServo:
                                  estop=estop, aborted=aborted, trace=trace,
                                  v_max=self.v_descent,
                                  check_occlusion=check_occlusion)
+        if self.gated:
+            # The grasp pose we were asked for is below the contact limit. The
+            # servo has driven to the clamped height instead, so the pick was NOT
+            # reached: say so, back off, and fail.
+            msg = self.gate_report()
+            print(msg)
+            push(viewer, 'occlusion', 'Z GATE: grasp not reached', msg)
+            self.retreat(viewer=viewer, estop=estop, aborted=aborted)
+            return False, n1 + n2, e2, n1
         if ok2:
             return True, n1 + n2, e2, n1
         if not (recover and self.occluded):
