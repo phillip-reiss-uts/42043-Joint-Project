@@ -198,11 +198,11 @@ FEED_MIN_STEPS = 400
 
 # Gripper squeeze force limit (N), applied to the fingers actuator at build.
 #
-# The RG2 is rated to 40 N, and the official linkage needs that headroom: at the
-# old +/-5 N the actuator could not hold the mimic chain open, so the jaws sat at
-# an arbitrary half-open pose instead of following the command. The hardware path
-# uses RG2_GRIP_FORCE_N for the real gripper, so this only bounds the simulation.
-GRIP_FORCE_RANGE = (-40.0, 40.0)
+# SET FROM RG2_GRIP_FORCE_N further down, so the simulation and the hardware cannot
+# disagree: the real gripper is told a force of RG2_GRIP_FORCE_N and the simulated
+# one is capped at the same number. It used to be a separate +/-40 N literal, i.e.
+# twice what the hardware is given, which made the sim press twice as hard as the
+# real gripper and look like it was crushing the cube.
 
 # ---- contact guard for the descent ----------------------------------------
 # The lowest point of the gripper is the PAD BOTTOM, which sits GRIPPER_TO_PAD_MM
@@ -601,8 +601,12 @@ RG2_CLOSE_PROGRAM = '/programs/rg_close.urp'
 # a target width in mm, so the command is interpolated between these.
 RG2_OPEN_WIDTH_MM = 110.0    # RG2 full stroke, from the datasheet
 RG2_CLOSE_WIDTH_MM = 10.0    # fully closed without slamming; the example uses 10
-RG2_GRIP_FORCE_N = 20.0      # write-only input; never readable
-RG2_MIN_STEP_MM = 2.0        # skip commands smaller than this
+RG2_GRIP_FORCE_N = 5.0       # write-only input; never readable
+# ONE force for both paths. The simulation's actuator is capped at the same value
+# the hardware is commanded with, so neither can press harder than the other.
+# 5 N was measured on the bench: winding the real gripper down to 3 N still held
+# the cube firmly, so 5 leaves margin without crushing it.
+GRIP_FORCE_RANGE = (-RG2_GRIP_FORCE_N, RG2_GRIP_FORCE_N)
 # Width -> the simulation's driver-joint convention. The sim reads HIGH q as
 # CLOSED (closing on air drives its joints to 0.77), while the RG2 reports jaw
 # opening in mm, so the map has to invert: wider jaws -> smaller q. Keeping the

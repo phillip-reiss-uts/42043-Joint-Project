@@ -1,4 +1,4 @@
-<mujoco model="onrobot_rg2">
+﻿<mujoco model="onrobot_rg2">
   <!-- OnRobot RG2, built from the OFFICIAL description's meshes and dimensions.
 
        Source: tonydle/OnRobot_ROS2_Description (MIT, Copyright (c) 2025 Tony Le),
@@ -116,7 +116,7 @@
                  z   0.0396  29.8 mm pad centred on the lower end of the finger
                              (local +z points DOWN the finger) -->
           <geom name="l_pad" type="box" class="fingerpad"
-                pos="-0.0004 0.0088 0.0396" size="0.0101 0.0121 0.0149"
+                pos="-0.0004 0.0088 0.0396" size="0.00938 0.0121 0.0149"
                 rgba="0.08 0.08 0.09 1"/>
           <geom name="l_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
                 rgba="0.10 0.10 0.11 1"/>
@@ -151,7 +151,7 @@
           <!-- Mirror of l_pad. The right finger's frame is rotated 180 deg about z,
                so the SAME local numbers place it symmetrically in the world. -->
           <geom name="r_pad" type="box" class="fingerpad"
-                pos="-0.0004 0.0088 0.0396" size="0.0101 0.0121 0.0149"
+                pos="-0.0004 0.0088 0.0396" size="0.00938 0.0121 0.0149"
                 rgba="0.08 0.08 0.09 1"/>
           <geom name="r_finger_vis" type="mesh" mesh="inner_finger_v" class="visual"
                 rgba="0.10 0.10 0.11 1"/>
