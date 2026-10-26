@@ -238,12 +238,14 @@ def main(argv=None):
     print()
     print('  p = pick up / put down (toggle)')
     print('  h = go home          s = status          q = quit')
+    print('  space = pause / resume (holds position; p is ignored while paused)')
     print()
     print('[STATE] WAIT  (place the cube, then press p)')
 
     held_q = np.array(backend.joint_positions(), float)
     grip = GRIP_OPEN
     mode_seen = None
+    paused = False
 
     while True:
         # Keep the servoj stream alive: a real controller expects a command
@@ -259,17 +261,40 @@ def main(argv=None):
             held_q = np.array(backend.joint_positions(), float)
             grip = GRIP_OPEN
         elif key in ('p', 'P'):
-            world.refresh()
-            cmd.pickup = True
+            if paused:
+                # Otherwise the command would fire the moment we resume, with
+                # your hand possibly still in the cell.
+                print('[HW] paused -- press space first, then p')
+            else:
+                world.refresh()
+                cmd.pickup = True
         elif key in ('s', 'S'):
             p, _ = kin.pose(backend.joint_positions())
-            print('[STATE] %s  holding=%s  tool=(%.3f, %.3f, %.3f)'
-                  % (task.mode, task.holding, p[0], p[1], p[2]))
-        elif key in ('\r', '\n', ' '):
+            print('[STATE] %s  holding=%s  paused=%s  tool=(%.3f, %.3f, %.3f)'
+                  % (task.mode, task.holding, paused, p[0], p[1], p[2]))
+        elif key in ('\r', '\n'):
             pass
+        elif key == ' ':
+            # PAUSE / RESUME. The arm keeps its last commanded target (the
+            # servoj stream above is what holds it there), the mode stops being
+            # advanced, and no pick can start. It does NOT abort a pick that is
+            # already running: task.step() blocks for the whole pick and the key
+            # is only read between them, so the pendant is still the way out of
+            # a pick in progress.
+            paused = not paused
+            held_q = np.array(backend.joint_positions(), float)
+            grip = GRIP_CLOSED if task.holding else GRIP_OPEN
+            print('[HW] %s -- %s'
+                  % ('PAUSED' if paused else 'RUNNING',
+                     'holding position; p is ignored until you resume'
+                     if paused else 'policy advancing'))
 
         # Advance the policy. This is where a pick runs; it blocks until the
         # grasp (or the put-down) finishes, streaming servoj targets itself.
+        if paused:
+            # Still streaming held_q at the top of the loop; just do not let the
+            # policy run. "continue" is what keeps the servoj stream fed.
+            continue
         try:
             task.step()
         except KeyboardInterrupt:

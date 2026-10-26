@@ -16,8 +16,28 @@ MuJoCo and on the real robot from the same robot code.
     python main.py --lightweight  # simulation, no camera panels (older machines)
     python main.py --hardware --ip 192.168.0.194
 
-Simulation keys: `6` spawn, `7` pick up / put down (toggle), `8` pause,
-`9` reset, `.` object speed. On macOS use `mjpython main.py`.
+Simulation keys: `6` Spawns a cube in a random position and orientation,
+`7` pick up / put down (toggle), `8` pause, `9` reset,
+`.` Cycles object speed, from 0 to 45 mm /s. On macOS use `mjpython main.py`.
+
+Hardware keys: `p` pick up / put down (toggle), `space` pause / resume, `h` go to
+home, `s` status, `q` quit. Both front-ends print their keys at startup.
+
+The two sets differ because the scene keys have nothing to act on: you place the
+cube by hand instead of spawning it, and there is no scene reset. After an
+abandoned pick, `h` with the jaws open is the recovery — it re-homes and releases
+the carry.
+
+`space` pauses the hardware run: it holds the arm at its last commanded position,
+stops the mode advancing and ignores `p`, so you can reach into the cell without
+the robot starting a pick under your hand. It does **not** abort a pick already in
+progress — `task.step()` blocks for the whole pick and the key is only read
+between them, so the pendant remains the way out of one.
+
+On hardware, perception prints one `[PERC]` line per look — points that survived
+the height filter, cluster count, and the chosen centre, span and point count.
+That is the only view of what the camera sees; `PERCEPTION_LOG_S` in
+`src/config.py` sets the interval, and `0` disables it.
 
 `--lightweight` drops the RGB-image and point-cloud panels. Each is its own GL
 render on top of the depth pass perception already does, so on a machine without
