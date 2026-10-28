@@ -1,4 +1,4 @@
-﻿"""Rebuild models/ur3e/arm_dynamics.json from the composed MuJoCo model.
+"""Rebuild models/ur3e/arm_dynamics.json from the composed MuJoCo model.
 
 WHY THIS EXISTS
     URKinematics (the hardware chain) cannot call MuJoCo, so the arm's link
@@ -64,6 +64,14 @@ MERGE = [
     'camera/d435i',
 ]
 
+# OPTIONAL: merged only when present. `camera_bracket` is the dummy mass that
+# stands in for the printed mount (CAM_BRACKET_MASS_KG in config). It exists only
+# while that constant is non-zero, so it cannot go in MERGE above -- a missing
+# body there is a hard error, and rightly so for the links that must exist. This
+# one must be picked up when it is there, or the payload silently loses exactly
+# the mass the dummy was added to represent.
+MERGE_OPTIONAL = ['camera_bracket']
+
 
 def _part(model, data, name):
     # mass, world com, world inertia tensor about that com
@@ -84,7 +92,10 @@ def main():
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)          # jaws at qpos 0 = fully open
 
-    parts = [_part(model, data, n) for n in [LAST_LINK] + MERGE]
+    present = [n for n in MERGE_OPTIONAL
+               if mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, n) >= 0]
+    parts = [_part(model, data, n)
+             for n in [LAST_LINK] + MERGE + present]
     total = np.array([p[0] for p in parts]).sum()
     com_w = sum(p[0] * p[1] for p in parts) / total
 
@@ -113,7 +124,7 @@ def main():
     with open(PATH, 'w') as fh:
         json.dump(data_json, fh, indent=2)
 
-    print('merged   : %s + %s' % (LAST_LINK, ' + '.join(MERGE)))
+    print('merged   : %s + %s' % (LAST_LINK, ' + '.join(MERGE + present)))
     print('mass     : %.4f kg' % total)
     print('com      : %s (last-link frame)' % np.round(com_l, 5))
     print('inertia  : diag %s' % np.round(np.diag(I_l), 6))

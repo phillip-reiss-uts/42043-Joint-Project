@@ -143,21 +143,46 @@ PARK_POS = [5.0, 5.0, -0.6]
 #
 # Origin is gripper/base. Local +z runs DOWN the approach, toward the finger tips,
 # so CAM_POS z is measured downward from the mount face: -0.01 is 10 mm UP towards
-# the wrist, and x = +0.05 puts the camera 50 mm off the tool axis.
+# the wrist, and x = +0.0405 puts the camera 40.5 mm off the tool axis.
 #
 # The camera cannot mount to the wrist itself -- cables and connectors occupy that
 # space -- but this offset is retained. A centred placement was tried at
 # (0, 0, 0), which put the lens level with the top face of the gripper housing and
-# 50 mm inboard of the working offset, and was rejected.
+# 40.5 mm inboard of the working offset, and was rejected.
+#
+# x WAS 0.05 (50 mm) until 2026-10-28, when a printed mount replaced the old one
+# and put the lens 40.5 mm off the tool axis. Only x changed: z is still +0.09,
+# so the camera sits the same 90 mm down the approach and the hover height is
+# untouched -- SERVO_STANDOFF derives from CAM_POS[2] alone.
 #
 # MOVED toward the finger tips in two steps: z -0.03 -> -0.01 -> +0.09, 120 mm in
 # total. x, y and the rotation are unchanged. At +0.09 the lens is 90 mm down the
 # approach, level with the gripper housing -- the housing meshes occupy that space,
 # so expect them in view.
 CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
-CAM_POS = [0.05, 0.0, 0.09]
+CAM_POS = [0.0405, 0.0, 0.09]
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
 MESH_POS = CAM_POS
+
+# ---- dummy mass for the printed camera bracket ----------------------------
+#
+# The bracket is NOT modelled as geometry: models/camera bracket/ is SolidWorks
+# and MuJoCo cannot read it, so only the D435i mesh is in the scene. Its mass is
+# therefore missing from the payload, and it is the worst place to lose mass --
+# 40.5 mm off the tool axis, on the end of the arm, where every gram has the
+# longest lever.
+#
+# model_loader adds this as a single explicit-mass sphere at the midpoint between
+# the palm and the lens, which is roughly where the part sits. It is a DUMMY:
+# a point mass with no shape, no collision and no inertia of its own beyond the
+# offset, so the payload's mass and centroid improve while the inertia tensor is
+# only approximately right. That is a deliberate trade against having nothing.
+#
+# WEIGH THE PART and put the real number here, then rebuild:
+#     python tools/build_arm_dynamics.py
+# 0.030 kg is a guess for a PLA clamp plus bracket, NOT a measurement. Set it to
+# 0.0 to model the camera alone.
+CAM_BRACKET_MASS_KG = 0.030
 
 # arm / gripper / camera identity
 #

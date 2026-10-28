@@ -9,7 +9,7 @@ _MODELS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
 
 from src.config import (
-    CAM_QUAT, CAM_POS, MESH_QUAT, MESH_POS,
+    CAM_QUAT, CAM_POS, CAM_BRACKET_MASS_KG, MESH_QUAT, MESH_POS,
     TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
     OBJECT_SIZE, OBJECT_MASS_KG, OBJECT_FRICTION, GRIP_PAD_FRICTION,
     GRIP_FORCE_RANGE,
@@ -95,6 +95,35 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     gripper_frame.quat = MESH_QUAT
 
     arm.attach(camera, prefix="camera/", frame=gripper_frame)
+
+    # 2b. DUMMY MASS for the printed bracket.
+    #
+    # The bracket is not modelled: only the D435i mesh is attached above, so the
+    # payload would be short by the weight of the part that holds it. Its weight
+    # cannot be read from the model, so it comes from config
+    # (CAM_BRACKET_MASS_KG).
+    #
+    # IT HAS TO BE ITS OWN BODY. gripper/base sets an EXPLICIT body mass (the RG2
+    # link values are given, not derived from geometry), and an explicit mass
+    # makes MuJoCo ignore the mass of any geom on that body -- adding a geom here
+    # changes nothing, measured: base mass stayed 0.78000 kg for 0.000, 0.030 and
+    # 0.100 kg of added geom mass.
+    #
+    # Placed at the midpoint between the palm and the lens, in the gripper base
+    # frame, which is where the printed parts actually sit. Mass with a ~zero
+    # inertia is a POINT MASS: it corrects the payload's mass and centroid but not
+    # its inertia tensor. That is deliberate -- a point mass in the right place
+    # beats no mass at all, and it does not pretend to know the part's shape. The
+    # tiny diagonal is only there to keep the inertia positive-definite.
+    if CAM_BRACKET_MASS_KG > 0.0:
+        bracket = gripper_base.add_body(
+            name='camera_bracket',
+            pos=[0.5 * CAM_POS[0], 0.5 * CAM_POS[1], 0.5 * CAM_POS[2]],
+        )
+        bracket.mass = CAM_BRACKET_MASS_KG
+        bracket.inertia = [1e-9, 1e-9, 1e-9]
+        print('[INFO] dummy bracket mass %.3f kg at the midpoint of the camera '
+              'offset' % CAM_BRACKET_MASS_KG)
 
     # 3. Camera element on the gripper base (must come after attach)
     gripper_base.add_camera(
