@@ -339,6 +339,33 @@ class RG2:
         self._last_t = None
 
     # ---- route selection --------------------------------------------------
+    def probe(self):
+        # Decide the route NOW and prove it answers. Called by connect() straight
+        # after the RTDE interfaces come up.
+        #
+        # A CONSTRUCT IS NOT A CONNECTION. RG(host, id) only records the address
+        # and builds an XML-RPC proxy; it never touches the device. Measured
+        # against a dead host: the constructor succeeds and the route looks fine,
+        # which is why a probe that only constructs is worthless. The width READ
+        # is what proves the URCap is answering.
+        #
+        # Returns:
+        #   'xmlrpc'         constructed and the width came back
+        #   'xmlrpc-noread'  constructed, but the width read failed -- the URCap
+        #                    is not answering, so writes will be refused too
+        #   'dashboard'      XML-RPC unreachable, blind fallback selected
+        #   None             nothing available (fallback disabled)
+        #
+        # Note what this cannot test: whether a WRITE is accepted. That would
+        # move the jaws, and the session requirement is about writes. The read is
+        # the strongest check available without commanding the gripper.
+        if self._route is None:
+            self._xmlrpc()
+        if self._route != 'xmlrpc':
+            return self._route
+        self.probe_width = self._read_width()
+        return 'xmlrpc' if self.probe_width is not None else 'xmlrpc-noread'
+
     def _xmlrpc(self):
         if self._rg is not None:
             return self._rg or None
@@ -501,6 +528,15 @@ def connect(ip, dt=0.008, lookahead_time=0.1, gain=300,
     #
     # activate_gripper means "no gripper at all" when False, which is what
     # run_hardware.py --no-gripper and tests/test_arm_control.py rely on.
+    #
+    # THE ORDER HERE IS LOAD-BEARING. The OnRobot URCap accepts gripper commands
+    # only while an external-control RTDE session is open on the controller --
+    # upstream UR3_RG2_rosbridge commit 92a5c4e (2026-10-28) had to add an RTDE
+    # control+receive session to its own gripper-only example for exactly this
+    # reason. So RTDEControlInterface and RTDEReceiveInterface are opened BEFORE
+    # RG2 is constructed, and must stay open for the whole session. Constructing
+    # the gripper first, or closing the interfaces early, produces an RG2 that
+    # reads width but silently refuses rg_grip.
     from rtde_control import RTDEControlInterface
     from rtde_receive import RTDEReceiveInterface
 
@@ -512,5 +548,18 @@ def connect(ip, dt=0.008, lookahead_time=0.1, gain=300,
                       close_width_mm=close_width_mm, force_n=force_n,
                       min_step_mm=min_step_mm, stroke_time=stroke_time,
                       dashboard_fallback=dashboard_fallback)
+        # EXERCISE THE ROUTE NOW, while the RTDE session is known to be open.
+        #
+        # The URCap accepts gripper commands only while an external-control
+        # session exists (upstream UR3_RG2_rosbridge 92a5c4e, 2026-10-28). Left
+        # lazy, the first rg_grip happens mid-pick, and if it is refused the
+        # backend treats that as "this route is dead" and demotes to the blind
+        # dashboard fallback -- which masks the real cause. Probing here makes a
+        # dead session a startup message instead.
+        route = gripper.probe()
+        if route != 'xmlrpc':
+            print('[HW] gripper did not answer over XML-RPC (%s)' % (route,))
+            print('     commands may be refused: check the OnRobot URCap is '
+                  'running and that RTDE external control is active')
     return URBackend(control, receive, gripper, dt=dt,
                      lookahead_time=lookahead_time, gain=gain)
