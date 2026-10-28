@@ -61,9 +61,19 @@ class VisibleWorld:
     # therefore means "the camera saw something the last time we asked", which
     # is the honest hardware equivalent.
 
-    def __init__(self, world):
+    def __init__(self, world, cache_frames=False):
         self.world = world
         self.last = []
+        # The snapshot feature needs the frame that produced the last views. It
+        # stays OFF unless run_hardware was given --snapshot, so a normal run
+        # keeps nothing and behaves exactly as it did before the feature existed.
+        if hasattr(world, 'cache_frames'):
+            world.cache_frames = bool(cache_frames)
+
+    def last_perception(self):
+        # Forwarded, because this wrapper is the object the front-end holds.
+        getter = getattr(self.world, 'last_perception', None)
+        return None if getter is None else getter()
 
     def refresh(self):
         self.last = self.world.perceive()
@@ -140,6 +150,11 @@ def main(argv=None):
     ap.add_argument('--ip', default=cfg.UR_IP, help='controller IP')
     ap.add_argument('--no-gripper', action='store_true',
                     help='arm only; grasp checks report "unknown"')
+    ap.add_argument('--snapshot', metavar='DIR', default=None,
+                    help='enable the v key: write an annotated depth PNG of the '
+                         'last camera look into DIR. OFF by default -- no frame '
+                         'is cached and src/liveview is never imported unless '
+                         'this is given')
     args = ap.parse_args(argv)
 
     print()
@@ -155,6 +170,9 @@ def main(argv=None):
     print('  perception : hand filter %.0f mm (points below table+%.0f mm '
           'ignored), log every %.1f s'
           % (cfg.HAND_FILTER_MM, cfg.HAND_FILTER_MM, cfg.PERCEPTION_LOG_S))
+    print('  snapshots  : %s'
+          % ('v writes a PNG into %s' % args.snapshot if args.snapshot
+             else 'OFF (add --snapshot DIR to arm the v key)'))
     print()
 
     # ---- providers -------------------------------------------------------
@@ -182,17 +200,27 @@ def main(argv=None):
         return 2
 
     flange_pose = lambda: kin.pose(backend.joint_positions())
+    # cache_frames is the snapshot switch: True only when --snapshot was given.
     if cfg.CAMERA_MODE == 'fixed':
         T_base_cam = _fixed_camera_transform()
         world = VisibleWorld(FixedCameraWorld(depth, flange_pose=flange_pose,
-                                              T_base_cam=T_base_cam))
+                                              T_base_cam=T_base_cam),
+                             cache_frames=bool(args.snapshot))
         print('[HW] camera: fixed (eye-to-hand) at %s, aimed at %s'
               % (np.round(cfg.FIXED_CAM_POS, 3),
                  np.round(cfg.FIXED_CAM_TARGET, 3)))
     else:
         world = VisibleWorld(RealObjectWorld(depth, flange_pose=flange_pose,
-                                             T_flange_cam=_camera_mount()))
+                                             T_flange_cam=_camera_mount()),
+                             cache_frames=bool(args.snapshot))
         print('[HW] camera: wrist-mounted (eye-in-hand)')
+
+    # Snapshot writer: only built when the feature was asked for, so a normal run
+    # never imports src.liveview and never touches cv2.
+    shots = None
+    if args.snapshot:
+        from src.liveview import Snapshotter
+        shots = Snapshotter(args.snapshot)
 
     # ---- task ------------------------------------------------------------
     cmd = Commands()
@@ -239,6 +267,8 @@ def main(argv=None):
     print('  p = pick up / put down (toggle)')
     print('  h = go home          s = status          q = quit')
     print('  space = pause / resume (holds position; p is ignored while paused)')
+    if shots is not None:
+        print('  v = save an annotated depth PNG of the last camera look')
     print()
     print('[STATE] WAIT  (place the cube, then press p)')
 
@@ -272,6 +302,26 @@ def main(argv=None):
             p, _ = kin.pose(backend.joint_positions())
             print('[STATE] %s  holding=%s  paused=%s  tool=(%.3f, %.3f, %.3f)'
                   % (task.mode, task.holding, paused, p[0], p[1], p[2]))
+        elif key in ('v', 'V'):
+            # Snapshot of the LAST camera look. Deliberately not a fresh capture:
+            # this must not consume a frame perception wanted, and it must never
+            # wait on the camera inside the operator loop.
+            if shots is None:
+                print('[HW] snapshots are off -- restart with --snapshot DIR')
+            else:
+                frame = world.last_perception()
+                if frame is None:
+                    print('[HW] no camera look yet -- press p first')
+                else:
+                    from src.liveview import annotate
+                    img = annotate(frame['z16'], frame['K'], frame['p_cam_w'],
+                                   frame['R_wc'], frame['views'],
+                                   note='%s  dets %d  holding=%s'
+                                        % (task.mode, len(frame['views']),
+                                           task.holding),
+                                   tool_pose=kin.pose(
+                                       backend.joint_positions())[0])
+                    print('[HW] wrote %s' % shots.save(img))
         elif key in ('\r', '\n'):
             pass
         elif key == ' ':

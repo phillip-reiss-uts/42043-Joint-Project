@@ -245,6 +245,18 @@ class DepthWorld(ObjectWorld):
         self.src = depth_source
         self._flange_pose = flange_pose
         self.n_objects_max = int(n_objects_max)
+        # SNAPSHOT CACHE. Off by default, and it must stay that way: with it off,
+        # perceive() keeps nothing and the hardware path behaves exactly as it did
+        # before the feature existed. run_hardware turns it on only when
+        # --snapshot is given. See src/liveview.py for why this is a saved PNG
+        # and not a live window.
+        self.cache_frames = False
+        self._last_frame = None
+
+    def last_perception(self):
+        # The most recent look, for the snapshot feature: {z16, K, p_cam_w,
+        # R_wc, views}. None unless cache_frames was switched on.
+        return self._last_frame
 
     # BOUNDARY: the robot's own pose
     def gripper_pose(self):
@@ -253,8 +265,15 @@ class DepthWorld(ObjectWorld):
     # BOUNDARY: what the camera can see
     def perceive(self):
         z16, K = self.src.capture()
-        points = self.deproject(z16, K)
+        # One FK lookup per look at most: computed here only when the frame is
+        # needed, otherwise deproject() makes the single call it always made.
+        pose = self.camera_pose() if self.cache_frames else None
+        points = self.deproject(z16, K, pose=pose)
         views = self.detect(points)
+        if pose is not None:
+            # Only the snapshot feature reads this, and only when it is on.
+            self._last_frame = {'z16': z16, 'K': K, 'p_cam_w': pose[0],
+                                'R_wc': pose[1], 'views': views}
         self._log_perception(len(points), views)
         return views
 
@@ -292,14 +311,19 @@ class DepthWorld(ObjectWorld):
         raise NotImplementedError
 
     # DEPTH -> WORLD POINTS
-    def deproject(self, z16, K):
+    def deproject(self, z16, K, pose=None):
         # uint16 millimetres -> world-frame points above the table.
         #
         # The mask itself lives in camera.world_points_from_depth, shared with the
         # simulator's camera, so a validity rule cannot apply to one path and not
         # the other. This method only supplies what differs here: a millimetre
         # source and a camera pose taken from the mount rather than from MuJoCo.
-        p_cam_w, R_wc = self.camera_pose()
+        #
+        # `pose` is (p_cam_w, R_wc) when the caller already asked for it -- the
+        # snapshot cache does -- so a look does not pay for two forward-kinematics
+        # lookups. None means "ask now", which is the behaviour every existing
+        # caller gets.
+        p_cam_w, R_wc = self.camera_pose() if pose is None else pose
         return world_points_from_depth(
             z16.astype(np.float64) * 1e-3, K, R_wc, p_cam_w,
             SELF_FILTER, DEPTH_MAX, SURFACE_Z_MIN,

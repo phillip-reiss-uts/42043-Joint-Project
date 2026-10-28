@@ -45,6 +45,22 @@ a decent GPU they dominate the frame and a pick takes minutes of wall time
 instead of seconds. The 3D scene, the tool trail, the detections and the text
 panels all stay — the robot uses none of the panels.
 
+### Snapshots on hardware (opt-in)
+
+    python main.py --hardware --ip 192.168.0.194 --snapshot shots/
+
+arms a `v` key that writes `shots/snap_001.png` — an annotated picture of the
+**last camera look**: false-colour depth, the detected hull, the object centre
+with its world coordinates, and the current tool position. It is the only way to
+see *why* a look failed (a hand in the cloud, jaws clipping the cube, a depth
+dropout), because the hardware run has no viewer.
+
+Off unless `--snapshot` is given, and off means off: no frame is cached, no
+behaviour changes, and `src/liveview.py` is not imported. It never re-captures —
+it draws the frame perception already took, so it cannot consume a frame or delay
+a command. There is deliberately no live window: this runs over SSH, and a draw
+inside the servo loop would starve the 8 ms servoj stream.
+
 ## Camera calibration
 
 `CAM_POS`/`CAM_QUAT` in `src/config.py` are the simulator's bracket, not a
@@ -102,6 +118,7 @@ fallback. Its two modes print `FIXED_CAM_POS/TARGET/UP` rather than the mount:
     python tests/test_ur_backend.py      # RTDE/RG2 plumbing, no robot
     python tests/test_fixed_camera.py    # eye-to-hand world, offline (PENDING)
     python tests/test_calibration_camera.py  # extrinsic solvers, synthetic
+    python tests/test_liveview.py        # snapshot projection/drawing, and OFF
     python tests/test_hardware.py --sim  # hardware assumptions
     python run_tests.py --trials 6       # end-to-end picks, writes test_output/
 
