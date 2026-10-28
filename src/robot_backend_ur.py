@@ -557,9 +557,18 @@ def connect(ip, dt=0.008, lookahead_time=0.1, gain=300,
         # dashboard fallback -- which masks the real cause. Probing here makes a
         # dead session a startup message instead.
         route = gripper.probe()
-        if route != 'xmlrpc':
-            print('[HW] gripper did not answer over XML-RPC (%s)' % (route,))
-            print('     commands may be refused: check the OnRobot URCap is '
-                  'running and that RTDE external control is active')
+        if route == 'xmlrpc':
+            print('[HW] gripper: XML-RPC answered, width %.1f mm'
+                  % gripper.probe_width)
+        elif route == 'xmlrpc-noread':
+            print('[HW] gripper: constructed but the width read FAILED')
+            print('     the URCap is not answering, so rg_grip will be refused: '
+                  'check it is running in Tool/IO')
+        elif route == 'dashboard':
+            print('[HW] gripper: XML-RPC unavailable, using the DASHBOARD fallback')
+            print('     discrete open/close only, no readback -- see the triage notes')
+        else:
+            print('[HW] gripper: NO ROUTE (XML-RPC down and fallback disabled)')
+            print('     grasps will report unknown and never squeeze')
     return URBackend(control, receive, gripper, dt=dt,
                      lookahead_time=lookahead_time, gain=gain)
