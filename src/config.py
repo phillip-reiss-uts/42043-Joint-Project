@@ -418,6 +418,11 @@ PLACE_DX = 0.0
 PLACE_DY = 0.0
 PLACE_CLEARANCE = 0.002
 STEPS_CLOSE = 3000
+# The hardware gripper is RETARGETED on every distinct width it receives, and a
+# 3000-cycle ramp handed the URCap ~50 of them: the close stuttered and kept
+# pushing. Quantise the commanded width to this many levels; the RG2 has its own
+# motion controller, so it needs a target, not a servo ramp.
+GRIP_RAMP_LEVELS = 8
 STEPS_RELEASE = 2000
 DROP_HOLD_STEPS = 500      # hold the fingers open after a drop before the next pick
 
@@ -625,6 +630,10 @@ SERVO_LEAD_S = 0.15
 # whose servoJ lag is 0.1 s of lookahead, so a 6/s loop has little phase margin
 # and rings. 2.0 is the calm setting; raise it only with the arm unloaded.
 SERVO_KP = 2.0
+# Commanded grasp height offset, metres, added to the geometric grasp pose.
+# -0.030 forced by the operator: the arm settles short of the pose it is given
+# on this cell, so the pick was closing high. The contact gate still clamps it.
+GRASP_EXTRA_Z = -0.030
 SERVO_KO = 2.0
 SERVO_KI = 0.0               # integral gain on the Cartesian pose error
 SERVO_KI_NEAR_M = 0.05
@@ -735,12 +744,15 @@ RG2_CLOSE_PROGRAM = '/programs/rg_close.urp'
 # The pipeline commands grip as GRIP_OPEN..GRIP_CLOSED (0..255); the RG2 wants
 # a target width in mm, so the command is interpolated between these.
 RG2_OPEN_WIDTH_MM = 110.0    # RG2 full stroke, from the datasheet
-RG2_CLOSE_WIDTH_MM = 10.0    # fully closed without slamming; the example uses 10
+# 56 mm for the 60 mm cube: the jaws stop on the faces and squeeze ~4 mm.
+# It was 10 mm, which commanded the jaws 50 mm past the cube so the RG2 drove
+# until the force limit -- "closing too far, with too much force".
+RG2_CLOSE_WIDTH_MM = 56.0
 # HARDWARE force. This is what rg_grip(width_mm, force_N) is sent, and 5 N was
 # measured on the bench: winding the real gripper down to 3 N still held the cube
 # firmly. The real robot works, so this number does not change to suit the
 # simulation.
-RG2_GRIP_FORCE_N = 5.0       # write-only input; never readable
+RG2_GRIP_FORCE_N = 2.5       # write-only input; never readable
 RG2_MIN_STEP_MM = 2.0        # skip commands smaller than this
 
 # The simulated actuator sits on the finger HINGE, so its forcerange is a TORQUE

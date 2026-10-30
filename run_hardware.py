@@ -141,6 +141,26 @@ def _put_down(arm):
     arm.move(q_high, GRIP_CLOSED, rate=RAPID)
     q_low = arm.solve_ik([p[0], p[1], release_z], q_high, R_target=R)
     arm.move(q_low, GRIP_CLOSED, rate=FEED)
+
+    def settle(q, seconds=0.30):
+        # move() returns when the last target is SENT; the arm is still moving.
+        # Opening there releases the cube in mid-air, which is the "drop".
+        for _ in range(max(1, int(seconds / arm.backend.dt))):
+            arm.backend.command(q, GRIP_CLOSED)
+            arm.backend.step()
+
+    settle(q_low)
+    # The arm settles ~11 mm ABOVE the pose it is given, so correct the measured
+    # residual before letting go: command the release height that far lower.
+    p_now, _ = arm.kin.pose(arm.backend.joint_positions())
+    dz = float(p_now[2]) - release_z
+    if 0.002 < dz < 0.030:
+        print('[HW] put-down settled %.0f mm high -- correcting' % (dz * 1e3))
+        q_low = arm.solve_ik([p[0], p[1], release_z - dz],
+                             arm.backend.joint_positions(), R_target=R)
+        arm.move(q_low, GRIP_CLOSED, rate=FEED)
+        settle(q_low)
+
     arm.open_gripper(STEPS_RELEASE)
     return True
 

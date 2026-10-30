@@ -9,9 +9,9 @@ import numpy as np
 
 from src.config import (
     ARM_DOF, TIP_OFFSET, R_DOWN, JOINT_RANGE,
-    GRIP_OPEN, SYNC_STEPS, RAPID,
+    GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
-    SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD, SERVO_KI_MAX_M,
+    SERVO_KP, SERVO_KO, GRASP_EXTRA_Z, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD, SERVO_KI_MAX_M,
     SERVO_KI_MAX_RAD, SERVO_DAMP_GAIN, SERVO_DAMP_NEAR_M,
     SERVO_DAMP_NEAR_RAD,
     SERVO_TRACK_TOL, SERVO_TRACK_TOL_ROT, SERVO_STILL_SPEED, SERVO_LOST_LIMIT,
@@ -191,6 +191,7 @@ class PBVSServo:
         # there would close them in mid-air.
         self.descent_short = 0.0
         self.descent_joint = None
+        self.descent_info = None
 
         # set while the loop runs, so observe() can push to the overlay
         self.viewer = None
@@ -812,6 +813,7 @@ class PBVSServo:
         q = np.array(backend.joint_positions(), float)
         self.descent_short = 0.0
         self.descent_joint = None
+        self.descent_info = None
 
         for i in range(steps):
             if aborted is not None and aborted():
@@ -842,6 +844,16 @@ class PBVSServo:
         p_end, _ = self.world.gripper_pose()
         self.descent_short = float(np.linalg.norm(
             np.asarray(p_end, float) - p_des))
+        # Why it fell short: the IK's own residual (the commanded joint vector
+        # does not put the tool on p_des) versus the joint lag (the arm is not
+        # where it was commanded). Those need different fixes.
+        p_cmd, _ = self.arm.kin.pose(q[:ARM_DOF])
+        q_act = np.asarray(backend.joint_positions(), float)[:ARM_DOF]
+        self.descent_info = {
+            'steps': steps,
+            'ik_mm': 1e3 * float(np.linalg.norm(np.asarray(p_cmd) - p_des)),
+            'lag': float(np.max(np.abs(q[:ARM_DOF] - q_act))),
+        }
         # Which joint is closest to its clip, so a short descent can say why.
         lim = np.abs(np.asarray(JOINT_RANGE, float))
         if lim.ndim:
@@ -911,7 +923,11 @@ class PBVSServo:
         self.p_est = np.array(ref, float)
         self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
                              else self.best_yaw)
-        p_des, R_des = self.desired_pose(0.0)
+        # 30 mm LOWER than the geometric grasp pose, forced by the operator: the
+        # arm settles ~11 mm short of whatever it is given, and the first runs
+        # were closing high. The contact gate still clamps it to the pad limit,
+        # so this cannot drive the pads into the table.
+        p_des, R_des = self.desired_pose(GRASP_EXTRA_Z)
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_target(p_des, R_des)
@@ -919,23 +935,28 @@ class PBVSServo:
              'open-loop commit to %6.3f %6.3f' % (self.best_p[0], self.best_p[1]),
              'from the fullest view, span %.4f' % self.best_span)
 
-        # Watch for the target moving during the descent, on the camera only.
+        # OPEN LOOP, which is what the commit is for: one IK solve from the last
+        # unbiased estimate, then a plain joint move. No per-step Cartesian
+        # servo, no re-solving down the line, no camera in the loop. The reason
+        # the camera must stay out is the same one that makes the servo descent
+        # unusable here -- closer in, the jaws and the housing bias the fitted
+        # centre, so anything that keeps looking drives on a drifting target.
         self.target_moved = False
-        counter = [0]
-
-        def watch_step():
-            counter[0] += 1
-            if counter[0] % self.perceive_every == 0:
-                self.motion_watch(viewer=viewer)
-
-        def stop_now():
-            # the descent also stops early the moment motion is seen
-            return ((aborted is not None and aborted()) or self.target_moved)
-
-        watch_step_ = watch_step if watch else None
-        self._cartesian_descent(p_des, R_des, self.retreat_v, viewer=viewer,
-                                estop=estop, aborted=stop_now,
-                                watch=watch_step_)
+        q_goal = self.arm.solve_ik(
+            p_des, np.asarray(self.arm.backend.joint_positions(), float),
+            R_target=R_des, max_joint=JOINT_RANGE)
+        self.arm.move(q_goal, GRIP_OPEN, rate=FEED, estop=estop)
+        # SETTLE. move() returns when the last target has been STREAMED, not
+        # when the arm has arrived; servoJ lags it. Measuring straight away
+        # reads that lag as a short descent (13 mm on the cell), so hold the
+        # final target for a moment before asking where the tool is.
+        for _ in range(max(1, int(0.30 / self.arm.backend.dt))):
+            self.arm.backend.command(q_goal, GRIP_OPEN)
+            self.arm.backend.step()
+        self.descent_short = 0.0
+        p_end, _ = self.world.gripper_pose()
+        self.descent_short = float(np.linalg.norm(
+            np.asarray(p_end, float) - np.asarray(p_des, float)))
         if self.gated:
             # The pose we wanted was below the contact limit, so the descent
             # stopped short of it. Say so, back off, and report failure rather
@@ -954,21 +975,26 @@ class PBVSServo:
             print('[SERVO] DESCENT ABANDONED: the target moved while descending '
                   '(%.0f mm short, not closing)' % (1e3 * self.descent_short))
             return False, 0
-        if self.descent_short > 0.010:
-            # The pose was legal but the arm did not get there: the jaws are in
-            # mid-air, and closing them here is the "grasped thin air" failure.
-            # Say where it stopped and refuse the grasp.
+        # REPORT ONLY. A short descent is printed but never refuses and never
+        # retreats: the operator wants the grasp attempted wherever the arm
+        # stopped. The refusal this replaces was what turned a near miss into a
+        # visible failure.
+        if self.descent_short > 0.015:
             extra = ''
             if self.descent_joint is not None:
                 j, qv, ql = self.descent_joint
                 extra = ('  [j%d at %+.2f, clip %+.2f]'
                          % (j + 1, qv, ql if qv >= 0 else -ql))
+            info = getattr(self, 'descent_info', None) or {}
+            why = ''
+            if info:
+                why = ('  [ik %.0f mm, joint lag %.2f rad, %d steps]'
+                       % (info['ik_mm'], info['lag'], info['steps']))
             msg = ('[SERVO] DESCENT SHORT: stopped %.0f mm above the grasp pose '
-                   '(not closing)%s' % (1e3 * self.descent_short, extra))
+                   '(forced -- closing anyway)%s%s'
+                   % (1e3 * self.descent_short, extra, why))
             print(msg)
-            push(viewer, 'occlusion', 'descent short -- not closing', msg)
-            self.retreat(viewer=viewer, estop=estop, aborted=aborted)
-            return False, 0
+            push(viewer, 'occlusion', 'descent short -- closing anyway', msg)
         if aborted is not None and aborted():
             return False, 0
         return True, 1

@@ -32,7 +32,7 @@ import numpy as np
 
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, R_DOWN,
-    RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS,
+    RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS, GRIP_RAMP_LEVELS,
     SYNC_STEPS,
     GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
 )
@@ -315,7 +315,11 @@ class Arm:
             if stop is not None and stop():
                 return
             a = (i + 1) / steps
-            grip = g_from + a * (g_to - g_from)
+            # Quantised command (see GRIP_RAMP_LEVELS): a real gripper is
+            # retargeted per distinct width, so a smooth 3000-step ramp makes it
+            # stutter. Eight levels close in eight clean moves.
+            k = min(GRIP_RAMP_LEVELS, int(a * GRIP_RAMP_LEVELS + 0.999))
+            grip = g_from + (k / GRIP_RAMP_LEVELS) * (g_to - g_from)
             if self.observer is not None:
                 self.observer.predict(q_hold)
             self._command_step(q_hold, grip)
