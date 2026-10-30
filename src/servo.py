@@ -8,10 +8,10 @@
 import numpy as np
 
 from src.config import (
-    ARM_DOF, TIP_OFFSET, R_DOWN,
+    ARM_DOF, TIP_OFFSET, R_DOWN, JOINT_RANGE,
     GRIP_OPEN, SYNC_STEPS, RAPID,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
-    SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD, SERVO_KI_MAX_M,
+    SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD, SERVO_KI_MAX_M,
     SERVO_KI_MAX_RAD, SERVO_DAMP_GAIN, SERVO_DAMP_NEAR_M,
     SERVO_DAMP_NEAR_RAD,
     SERVO_TRACK_TOL, SERVO_TRACK_TOL_ROT, SERVO_STILL_SPEED, SERVO_LOST_LIMIT,
@@ -54,7 +54,7 @@ class PBVSServo:
     # Drives the gripper to a pose derived from the current view of an object.
 
     def __init__(self, model, data, arm, world,
-                 kp=6.0, ko=6.0, damp=1e-2, dq_max=0.02,
+                 kp=SERVO_KP, ko=SERVO_KO, damp=1e-2, dq_max=0.02,
                  perceive_every=15, tol_p=3.0e-3, tol_o=3.0e-2,
                  smooth=1.0, v_max=float('inf'), v_descent=None,
                  yaw_smooth=SERVO_YAW_SMOOTH,
@@ -185,6 +185,12 @@ class PBVSServo:
         # the tabletop; the pose is then clamped and the caller is told.
         self.gated = False
         self.gate_requested_z = None
+        # Distance (m) between where a Cartesian descent was told to go and
+        # where the tool actually ended. Non-zero means the arm did not follow
+        # the line -- IK saturation or a stopped stream -- and closing the jaws
+        # there would close them in mid-air.
+        self.descent_short = 0.0
+        self.descent_joint = None
 
         # set while the loop runs, so observe() can push to the overlay
         self.viewer = None
@@ -358,7 +364,14 @@ class PBVSServo:
             self.gate_requested_z = z_want
             z_want = z_floor
         p_des = np.array([p[0], p[1], z_want])
-        R_des = rotation_with_yaw(self.yaw_est, R_DOWN)
+        # Yaw is HELD at the estimate from the fullest view, not re-driven from
+        # every look. The caliper yaw on a square top face moves by degrees with
+        # the viewpoint -- measured on the cell at 84-89 deg across one track
+        # while the cube did not move -- and driving the wrist to that moving
+        # label swings the gripper instead of holding it pointed down. The
+        # object's yaw belongs to the object, so the best look wins.
+        yaw_cmd = self.best_yaw if self.best_yaw is not None else self.yaw_est
+        R_des = rotation_with_yaw(yaw_cmd, R_DOWN)
         return p_des, R_des
 
     def current_pose(self):
@@ -797,6 +810,8 @@ class PBVSServo:
         dist = float(np.linalg.norm(p_des - p0))
         steps = max(1, int(dist / max(float(v_cart), 1e-6) / backend.dt))
         q = np.array(backend.joint_positions(), float)
+        self.descent_short = 0.0
+        self.descent_joint = None
 
         for i in range(steps):
             if aborted is not None and aborted():
@@ -804,7 +819,13 @@ class PBVSServo:
             a = (i + 1) / steps
             a = a * a * a * (a * (a * 6.0 - 15.0) + 10.0)
             p = (1.0 - a) * p0 + a * p_des
-            q = self.arm.solve_ik(p, q, R_target=R_des)
+            # Per-joint limits, not one scalar: the solver default of +-3 rad
+            # is a simulator convention, and a wrist that needs past it gets
+            # clipped. The tool then follows a pose that is NOT on the line and
+            # the descent finishes high -- which closed the jaws in mid-air.
+            # The elbow is the one joint the MJCF models at +-pi; the rest are
+            # +-2*pi, as on the UR3e.
+            q = self.arm.solve_ik(p, q, R_target=R_des, max_joint=JOINT_RANGE)
             backend.command(q, GRIP_OPEN)
             self._step_world()
             if watch is not None and i % self.perceive_every == 0:
@@ -817,6 +838,17 @@ class PBVSServo:
                     viewer.sync()
             if viewer is not None and i % SYNC_STEPS == 0:
                 viewer.sync()
+
+        p_end, _ = self.world.gripper_pose()
+        self.descent_short = float(np.linalg.norm(
+            np.asarray(p_end, float) - p_des))
+        # Which joint is closest to its clip, so a short descent can say why.
+        lim = np.abs(np.asarray(JOINT_RANGE, float))
+        if lim.ndim:
+            margin = lim - np.abs(q[:len(lim)])
+            self.descent_joint = (int(np.argmin(margin)),
+                                  float(q[int(np.argmin(margin))]),
+                                  float(lim[int(np.argmin(margin))]))
 
     def retreat(self, viewer=None, estop=None, aborted=None, v_cart=None):
         # Back straight up in steps until the object is whole in view again.
@@ -914,6 +946,28 @@ class PBVSServo:
             self.retreat(viewer=viewer, estop=estop, aborted=aborted)
             return False, 0
         if self.target_moved:
+            # The monitor saw the TARGET move during the descent. That is a
+            # different failure from an unreachable pose and used to be hidden
+            # behind the short-descent message below.
+            push(viewer, 'occlusion', 'descent abandoned: target moved',
+                 '%.0f mm from the grasp pose' % (1e3 * self.descent_short))
+            print('[SERVO] DESCENT ABANDONED: the target moved while descending '
+                  '(%.0f mm short, not closing)' % (1e3 * self.descent_short))
+            return False, 0
+        if self.descent_short > 0.010:
+            # The pose was legal but the arm did not get there: the jaws are in
+            # mid-air, and closing them here is the "grasped thin air" failure.
+            # Say where it stopped and refuse the grasp.
+            extra = ''
+            if self.descent_joint is not None:
+                j, qv, ql = self.descent_joint
+                extra = ('  [j%d at %+.2f, clip %+.2f]'
+                         % (j + 1, qv, ql if qv >= 0 else -ql))
+            msg = ('[SERVO] DESCENT SHORT: stopped %.0f mm above the grasp pose '
+                   '(not closing)%s' % (1e3 * self.descent_short, extra))
+            print(msg)
+            push(viewer, 'occlusion', 'descent short -- not closing', msg)
+            self.retreat(viewer=viewer, estop=estop, aborted=aborted)
             return False, 0
         if aborted is not None and aborted():
             return False, 0

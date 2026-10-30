@@ -34,10 +34,22 @@ acceptance checklist; `tests/test_ur_backend.py` proves the plumbing
 and `tests/test_gripper_backend.py` proves the RG2 client.
 """
 
+import contextlib
+import io
 import socket
 import time
 
 import numpy as np
+
+@contextlib.contextmanager
+def _quiet():
+    # The lab's onRobot package prints the raw XML-RPC response body on EVERY
+    # call (gripper.py, print(response.decode())), which floods the console with
+    # <methodResponse> blocks once the loop sends a grip width per cycle.
+    # Swallow stdout only around those calls; this module's own lines still
+    # print normally.
+    with contextlib.redirect_stdout(io.StringIO()):
+        yield
 
 from src import config as _cfg
 from src.robot_backend import RobotBackend
@@ -371,7 +383,8 @@ class RG2:
             return self._rg or None
         try:
             from onRobot.gripper import RG as _RG    # noqa: N813
-            self._rg = _RG(self.host, self._grip_id)
+            with _quiet():
+                self._rg = _RG(self.host, self._grip_id)
             self._route = 'xmlrpc'
         except Exception as exc:
             self._rg = False
@@ -413,7 +426,8 @@ class RG2:
                 and abs(width - self._sent_width) < self.min_step_mm):
             return
         try:
-            self._rg.rg_grip(width, self.force_n)
+            with _quiet():
+                self._rg.rg_grip(width, self.force_n)
             self._sent_width = width
         except Exception as exc:
             # One failure is enough to stop trusting the route.
@@ -467,7 +481,9 @@ class RG2:
         if rg is None:
             return None
         try:
-            return float(rg.get_rg_width())
+            with _quiet():
+                width = float(rg.get_rg_width())
+            return width
         except Exception as exc:
             # A failed READ does not invalidate CONTROL: rg_grip may still work,
             # so the route is left alone and only the readback is given up.

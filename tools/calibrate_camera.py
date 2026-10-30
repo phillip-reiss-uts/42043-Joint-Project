@@ -3,12 +3,15 @@
 
     --touch / --aruco   a FIXED (eye-to-hand) camera
                         -> FIXED_CAM_POS / TARGET / UP
-    --wrist             a WRIST (eye-in-hand) camera
+    --wrist             a WRIST (eye-in-hand) camera, printed marker
                         -> CAM_POS / CAM_QUAT   (CAM_MOUNT_* alias them)
+    --wrist-touch       a WRIST camera, no marker: the cube IS the target
+                        -> CAM_POS / CAM_QUAT
 
     python tools/calibrate_camera.py --touch
     python tools/calibrate_camera.py --aruco
     python tools/calibrate_camera.py --wrist
+    python tools/calibrate_camera.py --wrist-touch
 
 The marker size defaults to 0.10 m because that is the marker in models/aruco/.
 Pass --marker-size with the MEASURED edge if you print a different size: a
@@ -37,6 +40,16 @@ wrong value here scales the whole fit, and it fails like a bad mount.
           Move mostly by TWISTING THE WRIST between poses. Translation-only
           motion barely constrains the mount's rotation, which is the part a
           printed clamp gets wrong.
+
+--wrist-touch
+          The ruler method without the marker. At each station the pads are
+          lowered onto the cube's top, which fixes that cube's centre in the
+          base frame; lift so the cube is in view and capture, which fixes the
+          same point in the camera frame. The mount is the rigid transform
+          between the two point sets (Kabsch), so no marker, no PnP and no
+          touch-to-board conversion are involved. The camera height IS
+          observable here, unlike the fixed --touch. Twist the wrist between
+          stations for the same reason as --wrist.
 
 Only the RTDE *receive* interface is used: the arm can be hand-guided in local
 mode, and nothing here commands motion. The pendant stays in charge.
@@ -92,16 +105,31 @@ def _kinematics():
     from src.kinematics_ur import URKinematics
     path = os.path.join(ROOT, 'models', 'ur3e', 'arm_dynamics.json')
     dyn = ArmDynamics.from_file(path)
+    # root_yaw is required for anything that runs the PERCEPTION: the table
+    # filters (TABLE_XY_BOUNDS, SURFACE_Z_MIN) live in the cell frame, and
+    # without it the deprojected cloud lands in the mirrored quadrant and every
+    # look is rejected -- which is why --wrist-touch never saw the cube. The
+    # marker fits cancel the base rotation, so this changes nothing for --wrist.
     return URKinematics(dyn,
                         (np.full(6, cfg.UR_SERVO_KP), np.full(6, cfg.UR_SERVO_KV)),
                         tool_pos=cfg.TOOL_MOUNT_POS,
-                        tool_quat=cfg.TOOL_MOUNT_QUAT)
+                        tool_quat=cfg.TOOL_MOUNT_QUAT,
+                        root_yaw=cfg.UR_ROOT_YAW)
 
 
 def _base_xy(receive, kin):
+    # The CONTACT POINT, not the gripper base.
+    #
+    # The operator touches the marker with the pads, so the FK pose (gripper
+    # base) has to be moved down the tool axis by base->pad before it is a point
+    # on the board. Using the base directly put the board GRIPPER_TO_PAD_MM above
+    # the table, which shifts every camera estimate and makes the error grow as
+    # the wrist turns -- the "spread 132 mm / 117 deg" failure, not a flexing
+    # mount. The tool axis is +z, pointing down the approach.
     q = receive.getActualQ()
-    p, _ = kin.pose(np.asarray(q, float))
-    return p
+    p, R = kin.pose(np.asarray(q, float))
+    return np.asarray(p, float) + np.asarray(R, float)[:, 2] * (
+        cfg.GRIPPER_TO_PAD_MM / 1000.0)
 
 
 def _tool_pose(receive, kin):
@@ -120,13 +148,20 @@ def _board_from_touches(receive, kin, args):
     # the base frame. Shared by both marker modes so the operator is asked for
     # the same thing either way, and so the diagonal-vs-edge mistake is caught
     # in one place.
-    print('  Touch corner 0 with the TCP (pads\' midpoint over the corner), '
-          'then Enter.')
+    print('  Touch corner 0 with the CLOSED pads\' midpoint over it, then Enter.')
     input('  > ')
     a = _base_xy(receive, kin)
     print('  Touch corner 1 -- the adjacent one -- then Enter.')
     input('  > ')
     b = _base_xy(receive, kin)
+
+    print('  contact z %.1f mm (expect ~0 with the pads on the table)'
+          % (a[2] * 1e3))
+    if abs(a[2]) > 0.02 or abs(b[2]) > 0.02:
+        print('[CAL] the touch was not made on the table: the pads sit '
+              '%.1f / %.1f mm above it. The edge length cannot detect this, '
+              'so the board would be placed high and every pose would shift.'
+              % (a[2] * 1e3, b[2] * 1e3))
 
     edge = float(np.linalg.norm(b - a))
     print('  touched edge %.1f mm (marker is %.1f mm)'
@@ -320,16 +355,21 @@ def run_wrist(args):
         return colour, K
 
     from src.calibration_camera import aruco_corners
-    Xs = []
+    samples = []      # (T_tool, T_base_cam) per pose; the board hypothesis is
+                      # applied after the loop, so the four yaws can be tried.
     try:
         # ---- locate the board once -------------------------------------
-        input('  Press Enter to capture the marker > ')
-        colour, K = grab()
-        found = aruco_corners(colour, args.dict)
-        if not found:
+        while True:
+            line = input('  Press Enter to capture the marker   [q] quit > ')
+            if line.strip().lower() == 'q':
+                return 2
+            colour, K = grab()
+            found = aruco_corners(colour, args.dict)
+            if found:
+                break
+            _check_frame(colour, K, found, args, 'calib_marker')
             print('[CAL] no marker detected -- check lighting, focus and the '
-                  'dictionary name')
-            return 2
+                  'dictionary name. Nothing was captured; try again.')
         path = _annotate(colour, found)
         print('  detected %d marker(s); annotated image: %s'
               % (len(found), path))
@@ -345,18 +385,41 @@ def run_wrist(args):
         print('  Now move the arm and photograph the marker from %d poses.'
               % args.poses)
         print('  TWIST THE WRIST between poses, and keep the marker in view.')
-        print('  Enter alone repeats a pose; [d] stops early.')
+        print('  [v] saves a snapshot and reports the marker WITHOUT recording')
+        print('      a pose -- use it to judge the view before committing.')
+        print('  [d] stops early. A pose that finds no marker is not counted.')
         print()
-        for k in range(args.poses):
-            line = input('  pose %d/%d -- move, then Enter  [d] done > '
-                         % (k + 1, args.poses)).strip().lower()
+        recorded = 0
+        while recorded < args.poses:
+            line = input('  pose %d/%d -- [Enter] record  [v] snapshot  '
+                         '[x] undo last  [d] done > '
+                         % (recorded + 1, args.poses)).strip().lower()
             if line == 'd':
                 break
-            try:
+            if line == 'x':
+                if samples:
+                    samples.pop()
+                    recorded -= 1
+                    print('    last pose discarded (%d recorded).' % recorded)
+                else:
+                    print('    nothing recorded yet.')
+                continue
+            if line == 'v':
                 colour, K = grab()
-                found = aruco_corners(colour, args.dict)
-                if not found:
-                    raise RuntimeError('no marker in this frame')
+                _check_frame(colour, K, aruco_corners(colour, args.dict),
+                             args, 'calib_pose_%02d' % (recorded + 1))
+                continue
+
+            colour, K = grab()
+            found = aruco_corners(colour, args.dict)
+            if not found:
+                _check_frame(colour, K, found, args,
+                             'calib_nomarker_%02d' % (recorded + 1))
+                print('    [CAL] no marker -- pose NOT recorded. Move, then '
+                      'record again, or [v] to inspect first.')
+                continue
+
+            try:
                 T_tool = _tool_pose(receive, kin)
                 # Seed PnP from where FK says the camera should be, converted
                 # into the solver's own frame. A planar target has a mirror
@@ -366,23 +429,177 @@ def run_wrist(args):
                                             dict_name=args.dict,
                                             T_init=T_init_cv)
             except RuntimeError as exc:
-                print('    [CAL] %s -- skipped' % exc)
+                print('    [CAL] %s -- pose NOT recorded' % exc)
                 continue
             X = wrist_mount(T_tool, cam_cv_to_mjocam(T_cam_cv))
-            Xs.append(X)
+            r_tool = float(np.linalg.norm(X[:3, 3]))
+            if err > 2.0 or not (0.02 <= r_tool <= 0.40):
+                print('    [CAL] rejected: %.2f px, %.0f mm from the tool -- '
+                      'poor fit, or not a wrist-sized mount'
+                      % (err, r_tool * 1e3))
+                continue
+            samples.append((T_tool, T_cam_cv))
+            recorded += 1
             print('    %.2f px   centre %.1f mm from the tool, '
-                  '%.1f mm from the config value'
+                  '%.1f mm from the config value   (%d/%d)'
                   % (err, float(np.linalg.norm(X[:3, 3])) * 1e3,
-                     float(np.linalg.norm(X[:3, 3] - X_nom[:3, 3])) * 1e3))
+                     float(np.linalg.norm(X[:3, 3] - X_nom[:3, 3])) * 1e3,
+                     recorded, args.poses))
+            if recorded >= 3:
+                # Live error bar, so a pose that disagrees is caught while the
+                # arm is still there -- [x] undoes it and it is retaken.
+                try:
+                    dev_t, dev_r, deg = _board_fits(Tb, samples)[0][:3]
+                    print('    running spread: %.2f mm / %.2f deg '
+                          '(board yaw %d deg, %d poses)'
+                          % (dev_t * 1e3, dev_r, deg, recorded))
+                except Exception:
+                    pass
     finally:
         pipe.stop()
 
-    if len(Xs) < 3:
-        print('[CAL] need at least 3 usable poses, got %d' % len(Xs))
+    if len(samples) < 3:
+        print('[CAL] need at least 3 usable poses, got %d' % len(samples))
         return 2
 
-    X, dev_t, dev_r = mean_transform(Xs)
-    _report_mount(X, dev_t, dev_r, len(Xs), X_nom, args.json)
+    # ---- which edge of the marker did the touches follow ---------------
+    # The touches fix the board's ORIGIN and one edge direction, but the
+    # operator can pick the wrong adjacent corner. 0 -> 3 instead of 0 -> 1
+    # leaves the board right-handed and on the table, merely rotated 90 deg,
+    # and one rotated board wrecks every pose. So try the four yaws and keep
+    # the one that makes the poses agree -- the data decides, not the guess.
+    print()
+    print('  board yaw check (touched edge vs marker +x):')
+    rows = _board_fits(Tb, samples)
+    best_deg = rows[0][2]
+    for dev_t_i, dev_r_i, deg_i, _, _ in sorted(rows, key=lambda r: r[2]):
+        print('    %3d deg : spread %8.2f mm / %7.2f deg%s'
+              % (deg_i, dev_t_i * 1e3, dev_r_i,
+                 '   <-- best' if deg_i == best_deg else ''))
+    dev_t, dev_r, deg, X, Xs_best = rows[0]
+    if deg:
+        print('  using the %d deg board: the touched edge was not the marker'
+              % deg)
+        print('  +x edge. Next time touch corner 0 and then corner 1.')
+    if dev_t > 5e-3 or dev_r > 2.0:
+        print('  no board yaw explains the disagreement, so the touch points')
+        print('  themselves are wrong -- wrong corner pair or origin, the')
+        print('  marker moved between touches, or a pose with the marker')
+        print('  oblique. Re-run the touches before the poses.')
+
+    _report_mount(X, dev_t, dev_r, len(samples), X_nom, args.json)
+    if dev_t > 5e-3 or dev_r > 2.0:
+        _pose_diagnostics(X, Xs_best, dev_t)
+    return 0 if (dev_t < 5e-3 and dev_r < 2.0) else 1
+
+
+def run_wrist_touch(args):
+    # Eye-in-hand from KNOWN POINTS -- the ruler method without the marker.
+    #
+    # Each station gives the SAME physical point twice: the cube's top centre,
+    # once in the base frame (the pads touch it) and once in the camera frame
+    # (the depth look sees it). The mount is the rigid transform between the two
+    # point sets, so there is no board, no PnP, no corner order and no touch
+    # conversion -- the failure modes that ate the marker runs are all absent.
+    #
+    # The camera HEIGHT is observable here: the base-frame point is a real 3D
+    # point at TABLE + OBJECT_HEIGHT, not a plane with an assumed height.
+    try:
+        from src.world_real import RealSenseSource, RealObjectWorld
+    except ImportError as exc:
+        print('[CAL] %s' % exc)
+        return 2
+
+    receive = _connect(args.ip)
+    kin = _kinematics()
+    X_nom = _mount_from_config()
+
+    depth = RealSenseSource()
+    flange_pose = lambda: kin.pose(np.asarray(receive.getActualQ(), float))
+    world = RealObjectWorld(depth, flange_pose=flange_pose,
+                            T_flange_cam=X_nom)
+    z_top = cfg.TABLE_HEIGHT + cfg.OBJECT_HEIGHT
+
+    print()
+    print('WRIST CALIBRATION  (robot as ruler, no marker)')
+    print('  %d stations, spread over the table. At each one:' % args.stations)
+    print('    1. lay the cube down and lower the CLOSED pads until they')
+    print('       just touch its top (the same touch the board mode uses)')
+    print('    2. lift until the cube is in view, TWIST THE WRIST, capture')
+    print()
+
+    Ps, Qs = [], []    # camera-frame point, same point in the tool frame
+    try:
+        i = 0
+        while i < args.stations:
+            input('  station %d/%d -- pads on the cube top, then Enter > '
+                  % (i + 1, args.stations))
+            q_touch = np.asarray(receive.getActualQ(), float)
+            p, R = kin.pose(q_touch)
+            contact = np.asarray(p, float) + np.asarray(R, float)[:, 2] * (
+                cfg.GRIPPER_TO_PAD_MM / 1000.0)
+            if abs(contact[2] - z_top) > 0.015:
+                print('    contact z %.1f mm, cube top is %.1f mm -- lower the '
+                      'pads until they just touch it'
+                      % (contact[2] * 1e3, z_top * 1e3))
+            P_true = np.array([contact[0], contact[1], z_top])
+
+            input('  lift, put the cube in view, then Enter > ')
+            views = [v for v in world.perceive() if v.ok]
+            if not views:
+                print('    no cube in view -- station skipped, try again')
+                continue
+            v = min(views, key=lambda w: float(np.linalg.norm(
+                np.asarray(w.centre)[:2] - P_true[:2])))
+            if v.hull is None:
+                print('    no top face in this view -- station skipped')
+                continue
+
+            # The detector's xy is the top-face centre in the base frame; its
+            # z comes from the hull, so this point is exactly the camera-frame
+            # point carried through the NOMINAL mount. Using TABLE + H here
+            # instead would inject the nominal mount's height error.
+            p_det = np.array([v.centre[0], v.centre[1],
+                              float(np.mean(v.hull[:, 2]))])
+            T_tool = _pose_at(kin, np.asarray(receive.getActualQ(), float))
+            T_cam = T_tool @ X_nom
+            p_cam = (np.linalg.inv(T_cam) @ np.r_[p_det, 1.0])[:3]
+            q_tool = (np.linalg.inv(T_tool) @ np.r_[P_true, 1.0])[:3]
+            Ps.append(p_cam)
+            Qs.append(q_tool)
+            i += 1
+            print('    touched (%+.3f, %+.3f), detected (%+.3f, %+.3f)'
+                  % (P_true[0], P_true[1], p_det[0], p_det[1]))
+    finally:
+        depth.close()
+
+    if len(Ps) < 4:
+        print('[CAL] need at least 4 stations, got %d' % len(Ps))
+        return 2
+
+    P = np.array(Ps)
+    Q = np.array(Qs)
+    X = _kabsch(P, Q)
+    res = np.linalg.norm(P @ X[:3, :3].T + X[:3, 3] - Q, axis=1)
+
+    print()
+    print('  per-station residual (the fit against the touched points):')
+    for i, r in enumerate(res):
+        print('    station %2d : %6.2f mm' % (i + 1, r * 1e3))
+
+    # Rotation error bar: refit without each station and see how far the
+    # rotation moves. Translation residuals alone cannot see a rotation that
+    # the station layout fails to constrain.
+    dev_r = 0.0
+    if len(P) > 4:
+        for i in range(len(P)):
+            X_i = _kabsch(np.delete(P, i, 0), np.delete(Q, i, 0))
+            c = float(np.clip((np.trace(X_i[:3, :3].T @ X[:3, :3]) - 1.0) / 2.0,
+                              -1.0, 1.0))
+            dev_r = max(dev_r, float(np.degrees(np.arccos(c))))
+    dev_t = float(np.max(res))
+
+    _report_mount(X, dev_t, dev_r, len(P), X_nom, args.json)
     return 0 if (dev_t < 5e-3 and dev_r < 2.0) else 1
 
 
@@ -431,7 +648,7 @@ def _report_mount(X, dev_t, dev_r, n, X_nom, out_json=None):
         print('  wrote %s' % out_json)
 
 
-def _annotate(colour, found):
+def _annotate(colour, found, name='aruco_corners.png'):
     # Save the capture with each detected corner numbered, so the operator can
     # see which physical corner is 0 and which is 1.
     import cv2
@@ -445,9 +662,114 @@ def _annotate(colour, found):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
         cv2.putText(img, 'id %d' % mid, (p[0][0] + 10, p[0][1] + 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-    path = os.path.join(ROOT, 'aruco_corners.png')
+    path = os.path.join(ROOT, name)
     cv2.imwrite(path, img)
     return path
+
+
+def _check_frame(colour, K, found, args, tag):
+    # Snapshot preview: write the annotated frame and say whether it is usable.
+    # Records NOTHING -- this is the [v] key, so a pose can be judged before it
+    # is committed. On this cell the only way to see the camera is a saved
+    # image; pressing Enter blind is how a pose ends up oblique or half out of
+    # frame, which is exactly what makes the poses disagree.
+    path = _annotate(colour, found, name='%s.png' % tag)
+    h, w = colour.shape[:2]
+    if not found:
+        print('    no marker in view -- image saved: %s' % path)
+        return path
+
+    fx = float(K[0, 0])
+    for mid, pix in found:
+        edges = [np.linalg.norm(pix[(i + 1) % 4] - pix[i]) for i in range(4)]
+        edge_px = float(np.mean(edges))
+        rng = fx * float(args.marker_size) / max(edge_px, 1e-9)
+        margin = float(min(pix[:, 0].min(), pix[:, 1].min(),
+                           w - 1 - pix[:, 0].max(), h - 1 - pix[:, 1].max()))
+        warn = '   <-- close to the frame edge' if margin < 0.05 * min(w, h) else ''
+        print('    id %d: %.0f px edge, ~%.0f mm away, %.0f px from the edge%s'
+              % (mid, edge_px, rng * 1e3, margin, warn))
+    print('    %d marker(s) detected -- image saved: %s' % (len(found), path))
+    return path
+
+
+def _kabsch(P, Q):
+    # Rigid X with Q ~ X P, from matched 3D points. SVD, no scipy, and it
+    # cannot return a reflection (D keeps det +1) -- a mirrored clamp is not a
+    # thing, so a reflected fit would be a bug wearing a number.
+    P = np.asarray(P, float)
+    Q = np.asarray(Q, float)
+    pc = P.mean(axis=0)
+    qc = Q.mean(axis=0)
+    U, _s, Vt = np.linalg.svd((P - pc).T @ (Q - qc))
+    D = np.eye(3)
+    D[2, 2] = np.sign(np.linalg.det(Vt.T @ U.T))
+    R = Vt.T @ D @ U.T
+    X = np.eye(4)
+    X[:3, :3] = R
+    X[:3, 3] = qc - R @ pc
+    return X
+
+
+def _pose_at(kin, q):
+    p, R = kin.pose(np.asarray(q, float))
+    T = np.eye(4)
+    T[:3, :3] = np.asarray(R, float)
+    T[:3, 3] = np.asarray(p, float)
+    return T
+
+
+def _board_fits(Tb, samples):
+    # One X set per board-yaw hypothesis, best spread first:
+    # (dev_t, dev_r, deg, X, Xs). Used by the live running spread as well as
+    # the final table, so both always name the same board.
+    inv_Tb = np.linalg.inv(Tb)
+    rows = []
+    for deg in (0, 90, 180, 270):
+        Tb_try = Tb @ _rot_z(deg)
+        Xs = [wrist_mount(T_tool, cam_cv_to_mjocam(Tb_try @ inv_Tb @ T_cam))
+              for T_tool, T_cam in samples]
+        X, dev_t, dev_r = mean_transform(Xs)
+        rows.append((dev_t, dev_r, deg, X, Xs))
+    rows.sort(key=lambda r: r[0])
+    return rows
+
+
+def _pose_diagnostics(X, Xs, dev_t):
+    # Which pose is dragging the mean. One bad capture is the common case: the
+    # marker was oblique or near the frame edge, PnP still fitted it, and the
+    # mean moved. Naming the pose -- and the spread without it -- turns the
+    # warning into a decision.
+    rows = []
+    for i, X_i in enumerate(Xs):
+        dt = float(np.linalg.norm(X_i[:3, 3] - X[:3, 3]))
+        c = float(np.clip((np.trace(X[:3, :3].T @ X_i[:3, :3]) - 1.0) / 2.0,
+                          -1.0, 1.0))
+        rows.append((dt, float(np.degrees(np.arccos(c))), i))
+
+    print()
+    print('  per-pose deviation from the mean:')
+    for dt, dr, i in rows:
+        flag = '   <-- outlier' if dt > max(2.0 * dev_t, 5e-3) else ''
+        print('    pose %2d : %7.1f mm / %5.2f deg%s'
+              % (i + 1, dt * 1e3, dr, flag))
+
+    if len(Xs) > 4:
+        best = None
+        for i in range(len(Xs)):
+            _, dt_i, dr_i = mean_transform(Xs[:i] + Xs[i + 1:])
+            if best is None or dt_i < best[1]:
+                best = (i, dt_i, dr_i)
+        print('    dropping pose %d would leave %.2f mm / %.2f deg'
+              % (best[0] + 1, best[1] * 1e3, best[2]))
+
+
+def _rot_z(deg):
+    # 4x4 rotation about +z, for trying the four board yaws.
+    c, s = np.cos(np.radians(deg)), np.sin(np.radians(deg))
+    T = np.eye(4)
+    T[:3, :3] = [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
+    return T
 
 
 def main(argv=None):
@@ -462,6 +784,8 @@ def main(argv=None):
                    help='printed marker, solvePnP (needs OpenCV; fixed)')
     g.add_argument('--wrist', action='store_true',
                    help='printed marker from several arm poses (wrist)')
+    g.add_argument('--wrist-touch', action='store_true',
+                   help='wrist camera from touched cube positions, no marker')
     ap.add_argument('--ip', default=cfg.UR_IP)
     ap.add_argument('--marker-size', type=float, default=0.10,
                     help='marker edge length in metres (aruco/wrist). The '
@@ -471,13 +795,15 @@ def main(argv=None):
                     help='ArUco dictionary name (aruco/wrist)')
     ap.add_argument('--poses', type=int, default=12,
                     help='arm poses to average over (wrist; at least 3)')
+    ap.add_argument('--stations', type=int, default=6,
+                    help='cube positions to touch (wrist-touch; at least 4)')
     ap.add_argument('--json', default=None,
                     help='also write the result to this file')
     args = ap.parse_args(argv)
 
     print('=' * 72)
     print('CAMERA EXTRINSICS  (%s camera)'
-          % ('wrist' if args.wrist else 'fixed'))
+          % ('wrist' if (args.wrist or args.wrist_touch) else 'fixed'))
     print('=' * 72)
     print('  robot  : %s (receive only; hand-guide the arm)' % args.ip)
     print('  table  : TABLE_HEIGHT = %.4f m -- the fit trusts this'
@@ -485,6 +811,8 @@ def main(argv=None):
     try:
         if args.wrist:
             return run_wrist(args)
+        if args.wrist_touch:
+            return run_wrist_touch(args)
         return run_aruco(args) if args.aruco else run_touch(args)
     except ImportError as exc:
         print('[CAL] missing dependency: %s' % exc)

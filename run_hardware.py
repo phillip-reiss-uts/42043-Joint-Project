@@ -26,15 +26,16 @@ table and a person putting a cube on it; there is nothing to spawn.
 SAFETY
 ------
 This drives a real arm. There is no e-stop button in this program: the UR
-teach pendant's own stop is the authority. Ctrl-C stops the console but does NOT
-necessarily stop a `servoj` stream that is already running -- press the pendant
-stop first. Speed is deliberately slow (FEED); raise it only after the geometry
-checks pass.
+teach pendant's own stop is the authority. Ctrl-C now QUITS the loop (it used to
+be swallowed and resume the pick); it still cannot stop a `servoj` stream the
+instant it is sent, so press the pendant stop if the arm is moving. Speed is
+deliberately slow (FEED); raise it only after the geometry checks pass.
 """
 
 import argparse
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -47,7 +48,7 @@ from src.config import (
 )
 from src.kinematics_ur import URKinematics
 from src.pick import pick_and_hold
-from src.task import Commands, TaskStateMachine
+from src.task import Commands, TaskStateMachine, TRACK, WAIT
 from src.world_real import (FixedCameraWorld, RealObjectWorld, RealSenseSource,
                             camera_transform)
 
@@ -262,20 +263,32 @@ def main(argv=None):
         arm=arm, world=world)
     task.on_put_object = lambda: _put_down(arm)
 
+    # START IN TRACK, NOT WAIT. Nothing perceives while the task is in WAIT, so
+    # world.active() would stay false and the arm would hold the home pose until
+    # p -- the opposite of "watch the cube until a pick is commanded". One look
+    # here seeds the cache and drops the task straight into TRACK, where it
+    # servos over the cube and p starts the pick.
+    if world.perceive():
+        task.enter_track('object on the table at startup')
+
     # ---- operator console ------------------------------------------------
     print()
     print('  p = pick up / put down (toggle)')
-    print('  h = go home          s = status          q = quit')
+    print('  h = go home    s = status    q or Ctrl-C = quit')
     print('  space = pause / resume (holds position; p is ignored while paused)')
+    print('  t = tracking on / off (off holds position)')
     if shots is not None:
         print('  v = save an annotated depth PNG of the last camera look')
     print()
-    print('[STATE] WAIT  (place the cube, then press p)')
+    if task.mode != TRACK:
+        print('[STATE] WAIT  (place the cube, then press p)')
 
     held_q = np.array(backend.joint_positions(), float)
     grip = GRIP_OPEN
     mode_seen = None
     paused = False
+    track_on = True
+    last_look = 0.0
 
     while True:
         # Keep the servoj stream alive: a real controller expects a command
@@ -338,18 +351,42 @@ def main(argv=None):
                   % ('PAUSED' if paused else 'RUNNING',
                      'holding position; p is ignored until you resume'
                      if paused else 'policy advancing'))
+        elif key in ('t', 'T'):
+            # TRACK / HOLD. Off means the policy stops advancing, so the arm
+            # stays where it is instead of following the cube; on picks the
+            # follow up again from there. It does NOT re-home (enter_wait would)
+            # and it does not consume a look, so switching it back on resumes
+            # around the same estimate.
+            track_on = not track_on
+            held_q = np.array(backend.joint_positions(), float)
+            print('[HW] tracking %s' % ('on' if track_on else 'off -- holding'))
 
         # Advance the policy. This is where a pick runs; it blocks until the
         # grasp (or the put-down) finishes, streaming servoj targets itself.
-        if paused:
+        if paused or not track_on:
             # Still streaming held_q at the top of the loop; just do not let the
             # policy run. "continue" is what keeps the servoj stream fed.
             continue
+        # WAIT NEVER PERCEIVES. The hardware world has no object pool, so
+        # active() only changes when something looks. Without this the arm sits
+        # in WAIT until p even with the cube right under the camera; with it,
+        # placing the cube in view is enough to start tracking. One look a
+        # second: each costs ~65 ms, which is fine while holding still.
+        if task.mode == WAIT:
+            now = time.monotonic()
+            if now - last_look >= 1.0:
+                last_look = now
+                if world.perceive():
+                    task.enter_track('object in view')
+
         try:
             task.step()
         except KeyboardInterrupt:
-            print('\n[HW] interrupted -- the arm holds its last target')
-            continue
+            # QUIT, do not swallow it. This used to `continue`, which made
+            # Ctrl-C during a pick look like nothing happened: the pick was
+            # abandoned mid-motion and the loop simply started the next one.
+            print('\n[HW] interrupted -- stopping')
+            break
 
         # Re-latch the hold pose on every mode change, so the stream does not
         # turn into an integrator under the arm's own compliance.

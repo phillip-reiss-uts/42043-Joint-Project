@@ -150,6 +150,12 @@ class Arm:
         # controller for the same two quantities, so this loop is unchanged.
         target = np.asarray(target, float)
         q_arm = np.array(q_init[:ARM_DOF], float)
+        # max_joint is a scalar for a symmetric clip, or a per-joint sequence
+        # (config.JOINT_RANGE). np.clip broadcasts the second form, but the
+        # unary minus needs an array, not a tuple.
+        lim = np.abs(np.asarray(max_joint, float))
+        if lim.ndim and lim.shape != (ARM_DOF,):
+            raise ValueError('max_joint must be a scalar or one limit per joint')
 
         # `pose_and_jacobian` when available: one FK pass per iteration instead
         # of two. Falls back to the narrow interface otherwise.
@@ -173,7 +179,7 @@ class Arm:
 
             e = np.concatenate([gain_p * err_p, gain_o * err_o])
             dq = J.T @ np.linalg.solve(J @ J.T + damp * np.eye(6), e)
-            q_arm = np.clip(q_arm + dq, -max_joint, max_joint)
+            q_arm = np.clip(q_arm + dq, -lim, lim)
 
         # Carry the non-arm joints (gripper fingers) through untouched, as
         # before: callers pass the full qpos and expect it back.

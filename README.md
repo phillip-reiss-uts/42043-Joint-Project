@@ -108,6 +108,19 @@ fallback. Its two modes print `FIXED_CAM_POS/TARGET/UP` rather than the mount:
     python tools/calibrate_camera.py --touch     # robot touches the cube
     python tools/calibrate_camera.py --aruco     # one marker image
 
+A **wrist** camera can also be calibrated without the marker, using the cube as
+the target (`--wrist-touch`, at least 4 stations, 8 recommended):
+
+    python tools/calibrate_camera.py --wrist-touch --stations 8
+
+At each station: lay the cube down, lower the closed pads until they just touch
+its top, Enter, then lift and twist the wrist so the cube is in view, Enter.
+The touch fixes that cube's centre in the base frame and the depth look fixes
+the same point in the camera frame, so the mount is the rigid transform between
+the two point sets — no board, no PnP, and the camera height is observable.
+It prints the per-station residual; the fit is `CAM_POS`/`CAM_QUAT`, same paste
+as `--wrist`.
+
 ## Tests
 
     python tests/test_layering.py        # robot/world + provider separation

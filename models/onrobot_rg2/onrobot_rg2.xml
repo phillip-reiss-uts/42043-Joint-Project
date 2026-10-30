@@ -75,24 +75,25 @@
   </default>
 
   <worldbody>
-    <body name="base" pos="0 0 0.0108" quat="0.70711 0 0 -0.70711">
+    <body name="base" pos="0 0 0.023" quat="0.70711 0 0 -0.70711">
       <inertial pos="0 0 0.074" mass="0.78" diaginertia="1.0e-3 1.0e-3 1.0e-3"/>
       <geom name="base_link" type="mesh" mesh="base_link_c" rgba="0.16 0.16 0.18 1" class="rg2geom"/>
       <geom name="base_link_vis" type="mesh" mesh="base_link_v" class="visual"
             rgba="0.16 0.16 0.18 1"/>
 
-      <!-- MOUNT ADAPTER. The base body sits 10.8 mm down the approach axis
-           (TOOL_MOUNT_POS), because that standoff is real: there is an adapter
-           between the flange and the gripper. The Robotiq model carried it as a
-           separate 'base_mount' body; the OnRobot URDF has none, so its base_link
-           is authored flush and this space came out empty -- a visible gap.
+      <!-- MOUNT ADAPTER. The base body sits 23 mm down the approach axis
+           (TOOL_MOUNT_POS, measured 2026-10-30), because that standoff is real:
+           there is an adapter between the flange and the gripper. The Robotiq
+           model carried it as a separate 'base_mount' body; the OnRobot URDF has
+           none, so its base_link is authored flush and this space came out empty
+           -- a visible gap.
 
-           A plain cylinder fills it: spans z = -0.0108 .. 0 in this frame, so the
+           A plain cylinder fills it: spans z = -0.023 .. 0 in this frame, so the
            top face meets the flange and the bottom meets the gripper housing.
            Radius 32 mm matches the mounting collar. Pads, tool length and the
            wrist camera are all untouched by this geom. -->
-      <geom name="mount_adapter" type="cylinder" pos="0 0 -0.0054"
-            size="0.032 0.0054" class="visual" rgba="0.30 0.30 0.32 1"/>
+      <geom name="mount_adapter" type="cylinder" pos="0 0 -0.0115"
+            size="0.032 0.0115" class="visual" rgba="0.30 0.30 0.32 1"/>
 
       <!-- LEFT: outer knuckle, and the inner knuckle hanging off the base -->
       <body name="left_outer_knuckle" pos="0 -0.017178 0.125797">

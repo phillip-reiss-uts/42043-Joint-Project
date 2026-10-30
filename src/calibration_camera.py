@@ -360,8 +360,17 @@ def solve_aruco(image_bgr, K, T_board, marker_size, dict_name='DICT_4X4_50',
         raise RuntimeError('no marker detected -- check lighting and focus')
 
     s = float(marker_size)
+    # THE SQUARE IS ON THE -y SIDE. cv2 returns the marker's corners CLOCKWISE
+    # as seen from the camera. The board frame has +z up and +x along the
+    # touched corner 0 -> corner 1 edge, so clockwise is the -y side of that
+    # edge: z cross x points OUT of the marker, not into it. Putting the
+    # square on +y (as this did) mirrors the correspondence. solvePnP then
+    # reprojects the image just as well but places the camera UNDER the board --
+    # which is why every wrist run returned a camera hundreds of mm (once
+    # 100 km) from the tool with a 100+ deg spread, and why pnp_pose's
+    # above-the-board filter now refuses those poses outright.
     obj = np.array([[0.0, 0.0, 0.0], [s, 0.0, 0.0],
-                    [s, s, 0.0], [0.0, s, 0.0]], float)
+                    [s, -s, 0.0], [0.0, -s, 0.0]], float)
     obj_base = (np.asarray(T_board, float)[:3, :3] @ obj.T).T \
         + np.asarray(T_board, float)[:3, 3]
 
@@ -395,6 +404,13 @@ def pnp_pose(obj_base, pix, K, dist=None, T_init=None):
     pix = np.asarray(pix, float).reshape(-1, 2)
     K = np.asarray(K, float)
 
+    # Candidate poses from BOTH solvers. The seeded iterative one is good when
+    # the config is close, but it can wander when the board guess is off; IPPE
+    # returns both planar solutions, one of which is the mirror. Every candidate
+    # is then checked PHYSICALLY, not just by reprojection error -- that is what
+    # stops a mirror or a wandered solution reaching the report as a 100 km
+    # camera.
+    cands = []
     if T_init is not None:
         T_init = np.asarray(T_init, float)
         R_cb = T_init[:3, :3].T
@@ -402,21 +418,47 @@ def pnp_pose(obj_base, pix, K, dist=None, T_init=None):
         ok, rvec, tvec = cv2.solvePnP(
             obj, pix, K, dist, cv2.Rodrigues(R_cb)[0], t_cb.copy(),
             useExtrinsicGuess=True, flags=cv2.SOLVEPNP_ITERATIVE)
-    else:
+        if ok:
+            cands.append((rvec, tvec))
+    ok = False
+    if hasattr(cv2, 'solvePnPGeneric'):
+        try:
+            ok, rvecs, tvecs, _ = cv2.solvePnPGeneric(
+                obj, pix, K, dist, flags=cv2.SOLVEPNP_IPPE)
+        except cv2.error:
+            ok = False
+    if ok:
+        cands.extend(zip(rvecs, tvecs))
+    elif not cands:
         ok, rvec, tvec = cv2.solvePnP(obj, pix, K, dist,
                                       flags=cv2.SOLVEPNP_IPPE)
-    if not ok:
+        if ok:
+            cands.append((rvec, tvec))
+    if not cands:
         raise RuntimeError('solvePnP failed')
 
-    proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
-    err = float(np.sqrt(np.mean(np.sum((proj.reshape(-1, 2) - pix) ** 2,
-                                       axis=1))))
+    z_board = float(np.mean(obj[:, 2]))
+    best = None
+    for rvec, tvec in cands:
+        proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
+        err = float(np.sqrt(np.mean(np.sum(
+            (proj.reshape(-1, 2) - pix) ** 2, axis=1))))
+        R, _ = cv2.Rodrigues(rvec)
+        t = np.asarray(tvec, float).reshape(3)
+        # The mirror solution reprojects identically, so it is rejected here:
+        # a camera photographing a marker on the table must be ABOVE the board
+        # and must have every marker point in front of it.
+        in_front = bool(np.all((obj @ R.T + t)[:, 2] > 0.0))
+        p_cam = -R.T @ t
+        if not (in_front and p_cam[2] > z_board + 0.02):
+            continue
+        if best is None or err < best[0]:
+            T = np.eye(4)
+            T[:3, :3] = R.T
+            T[:3, 3] = p_cam
+            best = (err, T)
 
-    R, _ = cv2.Rodrigues(rvec)
-    t = np.asarray(tvec, float).reshape(3)
-    # solvePnP returns X_cam = R X_base + t, so the camera pose in the base
-    # frame is the inverse.
-    T = np.eye(4)
-    T[:3, :3] = R.T
-    T[:3, 3] = -R.T @ t
-    return T, err
+    if best is None:
+        raise RuntimeError('solvePnP found no physically valid pose '
+                           '(camera below the board or behind it)')
+    return best[1], best[0]

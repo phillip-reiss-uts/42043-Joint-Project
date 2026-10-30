@@ -50,6 +50,9 @@ import numpy as np
 # different point. Both are right; they were never measuring the same thing. The
 # simulated RG2 is now built to 231.5 mm.
 #
+# SUPERSEDED 2026-10-30: TOOL_MOUNT was measured at 23 mm, not 10.8, so the
+# flange-to-pad length is 243.7 mm. The 231.5 above used the old standoff.
+#
 # NOT YET ACTED ON: TIP_OFFSET is tuned against grasp heights that were derived
 # while the tool was modelled at 149 mm. It has NOT been retuned for a 231.5 mm
 # tool, so expect the commit to sit high until it is -- and that is a measurement
@@ -159,8 +162,20 @@ PARK_POS = [5.0, 5.0, -0.6]
 # total. x, y and the rotation are unchanged. At +0.09 the lens is 90 mm down the
 # approach, level with the gripper housing -- the housing meshes occupy that space,
 # so expect them in view.
-CAM_QUAT = [0.0, 0.707, 0.707, 0.0]
-CAM_POS = [0.0405, 0.0, 0.09]
+#
+# MEASURED 2026-10-30 on the cell: tool0 at z = 300 mm above the base plane and
+# the lens at 186 mm, i.e. 114 mm flange-to-lens. With TOOL_MOUNT_POS at 23 mm
+# that puts the lens 91 mm below the gripper base. The off-axis offset was
+# checked by hand at 39 mm (config keeps 40.5).
+#
+# OPERATOR SET 2026-10-30: measured mount, then corrected in the cell because
+# the pick landed 72 mm short of the cube in +x. That 72 mm is carried on the
+# tool x here, so the commanded target sits 72 mm past the metric mount and the
+# arm's shortfall lands on the cube. Offset from the tool axis is now 119 mm.
+# If a pick ever overshoots by 72 mm, take the 72 back out -- that means the arm
+# reached the pose it was given and this compensation is no longer needed.
+CAM_POS  = (0.046, -0.0080, 0.07689)
+CAM_QUAT = (0.008026, -0.695654, -0.718261, -0.010057)
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
 MESH_POS = CAM_POS
 
@@ -171,7 +186,7 @@ MESH_POS = CAM_POS
 # therefore missing from the payload, and it is the worst place to lose mass --
 # 40.5 mm off the tool axis, on the end of the arm, where every gram has the
 # longest lever.
-#
+#AM_POS = [-0.04324, 0.03181, 0.08106]
 # model_loader adds this as a single explicit-mass sphere at the midpoint between
 # the palm and the lens, which is roughly where the part sits. It is a DUMMY:
 # a point mass with no shape, no collision and no inertia of its own beyond the
@@ -209,6 +224,12 @@ ROBOT_GRIPPER = 'onrobot_rg2'            # models/onrobot_rg2/onrobot_rg2.xml
 ROBOT_CAMERA = 'realsense_d435i'         # assumed wrist-mounted D435i
 
 ARM_DOF = 6
+# Per-joint IK clip, rad, in joint order. The UR3e allows +-2*pi on every joint;
+# the vendored MJCF models the ELBOW as +-pi, so a solution inside the real
+# robot's range can still be one the simulated arm cannot hold. The Cartesian
+# descent uses this instead of the solver's single +-3 rad default, which was
+# clipping wrists that need more and leaving the jaws to close in mid-air.
+JOINT_RANGE = (2.0 * math.pi,) * ARM_DOF
 GRIP_OPEN = 0.0
 GRIP_CLOSED = 255.0
 # RG2 linkage. The official URDF's driven quantity is finger_width, an OPENING
@@ -231,7 +252,7 @@ R_DOWN = np.array([[1.0, 0.0, 0.0],
                    [0.0, 0.0, -1.0]])
 
 # motion rates (CNC style)
-RAPID = 0.20
+RAPID = 0.10
 FEED = 0.05
 RAPID_MIN_STEPS = 200
 FEED_MIN_STEPS = 400
@@ -244,8 +265,10 @@ FEED_MIN_STEPS = 400
 
 # ---- contact guard for the descent ----------------------------------------
 # The lowest point of the gripper is the PAD BOTTOM, which sits GRIPPER_TO_PAD_MM
-# below gripper/base: the measured flange-to-pad length (231.5 mm) minus the
-# TOOL_MOUNT standoff (10.8 mm).
+# below gripper/base. It is base-relative, so the 2026-10-30 TOOL_MOUNT change
+# does not touch it: flange-to-pad is then 243.7 mm against the 2026-10-23
+# reading of 242.3 -- 1.4 mm, inside the tape error. P_open is still to be
+# measured at the bench; do not re-derive this from the datasheet.
 #
 # The descent is never allowed to command the pads nearer the tabletop than
 # TABLE_CONTACT_CLEARANCE_MM. The gate is on the TOOL, not on the commanded grasp
@@ -286,7 +309,12 @@ DEPTH_MAX = 5.0
 # nothing survives: every detection disappears.
 #
 # 0.0 reproduces the old behaviour (table filter only, 5 mm).
-HAND_FILTER_MM = 40.0
+#
+# 15 mm by the operator's call on the cell, from 40 mm: the floor is then 15 mm
+# above the tabletop. That keeps the cube's full face and gives the calipers
+# more points to fit, at the cost of the hand-clustering this guard was added
+# for -- a flat hand sits ~20-30 mm high, so it can win the cluster again.
+HAND_FILTER_MM = 15.0
 
 # The ONE z floor both paths use, so the simulation and the hardware cannot
 # disagree about what counts as being on the table. max() because these are two
@@ -476,7 +504,12 @@ SEARCH_SPEED = RAPID     # looks are not contact moves; the gripper is high
 # gap on a moving target -- at 0.05 m/s it merely matched the medium band and
 # tracked nothing. It runs in free space, well above the object, so it is safe
 # to be brisk; only the descent needs to be gentle.
-SERVO_V_TRANSIT = 0.150
+#
+# 0.150 -> 0.080 after the first live pick: 150 mm/s across the table reads as
+# a lurch, and with the servo's perception stalls the whole approach arrives in
+# bursts. 80 mm/s is still 1.8x the fastest band (0.045), so the moving-target
+# demo keeps its margin.
+SERVO_V_TRANSIT = 0.080
 SERVO_V_DESCENT = 0.015
 # Iteration budget per servo stage. At the caps above the hover leg alone needs
 # ~3100 steps, so the default 1500 would time out and abort the pick.
@@ -518,14 +551,14 @@ SERVO_RETREAT_V = 0.03
 #                                       so the camera sits CAM_POS[2] below the base)
 #
 # Solving for the standoff at a 320 mm camera height: with the present
-# TIP_OFFSET (229.9 mm) and CAM_POS[2] (90 mm) that is 150.1 mm, giving a gripper
-# base at 410.0 mm above the table. Verified in the model: the depth camera comes
+# TIP_OFFSET (224.9 mm) and CAM_POS[2] (91 mm) that is 156.1 mm, giving a gripper
+# base at 411.0 mm above the table. Verified in the model: the depth camera comes
 # out at exactly 320.0 mm. The number moves whenever TIP_OFFSET or the camera
 # mount does -- that is the point of deriving it rather than hardcoding it.
 #
 # If TIP_OFFSET moves, this standoff moves with it, so the camera stays at 320 mm
 # without anyone re-fitting the hover. Nothing to re-measure by hand.
-CAM_HOVER_HEIGHT_MM = 320.0
+CAM_HOVER_HEIGHT_MM = 380.0
 
 SERVO_STANDOFF = (CAM_HOVER_HEIGHT_MM / 1000.0
                   - OBJECT_HEIGHT / 2.0
@@ -585,6 +618,14 @@ SERVO_LEAD_S = 0.15
 # They are kept, defaulted off, because on hardware the gravity feedforward is
 # approximate rather than exact, and a standing bias is exactly what the I term
 # is for. Re-enable and re-tune then; do not assume these numbers transfer.
+# PBVS proportional gains, 1/s. These, not the v_max caps, set how fast the
+# arm actually moves: the law asks for kp * error, and the cap only clamps it.
+#
+# 6.0 overshot and hunted on the cell -- the 125 Hz stream drives a controller
+# whose servoJ lag is 0.1 s of lookahead, so a 6/s loop has little phase margin
+# and rings. 2.0 is the calm setting; raise it only with the arm unloaded.
+SERVO_KP = 2.0
+SERVO_KO = 2.0
 SERVO_KI = 0.0               # integral gain on the Cartesian pose error
 SERVO_KI_NEAR_M = 0.05
 SERVO_KI_NEAR_RAD = 0.30
@@ -622,7 +663,12 @@ SERVO_WATCH_DESCENT = True
 # depth bias on a straight descent, so the robot's own approach does not trip
 # it. At the slowest band that is one second of travel, so the motion is
 # unmistakable before it fires.
-SERVO_MOVE_TOL = 0.015
+# 40 mm, from 15 mm. The commit's motion watch aborts the descent when the
+# perceived target moves more than this; with the mount still showing a
+# view-dependent bias, the estimate drifts past 15 mm on the way down and every
+# descent stopped ~86 mm above the cube ("DESCENT ABANDONED"). A real push is
+# far larger than 40 mm, so the guard still catches it.
+SERVO_MOVE_TOL = 0.040
 SERVO_COMMIT_TRIES = 5        # abandon-and-retrack cycles before giving up
 
 # ---- grasp verification ----
@@ -820,8 +866,15 @@ UR_HOME_Q = (1.5708, -1.6299, 0.9853, -0.9276, -1.5708, 0.0)
 SIM_HOME_Q = (1.2564, -1.6585, 1.0695, -0.9818, -1.5708, 1.2564)
 
 # Mount: wrist_3_link -> gripper base (the frame the robot controls).
-# MEASURE on the gripper; these are the composed model's values.
-TOOL_MOUNT_POS = (1.0e-06, -3.0e-06, -1.08e-02)
+# MEASURED 2026-10-30: flange face -> gripper top face, T = 23.0 mm.
+#
+# SIGN: +z of the wrist_3 frame is the tool axis and points DOWN the approach at
+# R_DOWN, so this constant is POSITIVE. The old -1.08e-02 was the composed
+# model's 10.8 mm standoff with the wrong sign: it put the chain's gripper base
+# 21.6 mm above the model's. Simulation never reads this constant, so nothing
+# caught it -- test_kinematics_parity derives its tool frame from the MJCF and
+# cannot see a config sign error.
+TOOL_MOUNT_POS = (1.0e-06, -3.0e-06, 2.30e-02)
 TOOL_MOUNT_QUAT = (0.7071068, -0.0001, 0.0002, 0.7071068)
 
 # Root yaw: the model's base frame -> the CELL's base frame.
