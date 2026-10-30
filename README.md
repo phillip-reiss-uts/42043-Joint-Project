@@ -65,61 +65,35 @@ inside the servo loop would starve the 8 ms servoj stream.
 
 `CAM_POS`/`CAM_QUAT` in `src/config.py` are the simulator's bracket, not a
 measurement. Every detected centre inherits that error directly, so calibrate
-before a hardware run. Print `models/aruco/marker0_DICT_4X4_50_100mm.pdf`, lay
-it flat on the table, then:
+before a hardware run.
 
-    python tools/calibrate_camera.py --wrist
+The route that works on this cell is a direct offset loop against the tool:
 
-The marker size defaults to 0.10 m, which is that file. If you print a different
-size, pass `--marker-size` with the edge you actually measured.
+1. Jog the tool until it is centred on the cube. That TCP xy is the truth in
+   the base frame.
+2. Take one perception look and record the detected cube xy.
+3. Jog the tool to the detected xy. The physical gap between the tool and the
+   cube centre is the error in `CAM_POS`.
+4. Add that offset to `CAM_POS`, restart, and repeat from 2 until the arm
+   centres on the cube to within ±2 mm.
 
-Print at **100% / actual size, not "fit to page"**: the page is 140 mm and the
-black square 100 mm, so scaling up by a quarter gives a 125 mm marker while the
-tool still assumes 0.10 — a silent 25% error in every number that follows.
-Measure the printed square before trusting it.
+`CAM_POS_z` is measured, not set by the loop: on this cell the camera sits
+114 mm below tool0 (tool0 300 mm, camera 186 mm), so
+`CAM_POS_z = 114 mm — T`, where `T` is the flange-to-gripper-top distance.
 
-It captures the marker once and asks you to touch two adjacent corners with the
-TCP, which fixes the board's pose in the base frame. Then move the arm to
-`--poses` poses (default 12), twisting the wrist between them so the mount's
-rotation is actually constrained. Each pose gives one estimate of the same
-constant; the tool prints the mean with its error bar. Sample output only:
+The loop constrains translation only. `CAM_QUAT` is set by the mount geometry,
+not by this loop, and is good enough for this task.
 
-    RESULT  (wrist, 12 poses)  spread 1.8 mm / 0.6 deg
-    CAM_POS  = (0.04821, -0.00312, 0.08764)
-    CAM_QUAT = (0.501204, -0.498871, 0.498871, 0.501204)     # w, x, y, z
-
-Paste both into `src/config.py`. `CAM_MOUNT_POS`/`_QUAT` alias them, so the
-simulator and the hardware move together; leave `HW_CAM_DELTA_*` at identity,
-since this is the measurement that delta exists for.
-
-The spread is the result, not the average. Under 5 mm / 2 deg means one constant
-describes every pose, and the tool exits 0. Well above that means the clamp
-flexes, the marker moved, or a pose was taken with the marker half out of frame
-— re-run rather than trusting the mean. Then check it against a ruler:
-
-    python tests/test_camera_ruler.py --truth 0.0,-0.27
-
-A constant bias across three table spots is the mount; an error that grows
-across the table is the extrinsic or a scale mistake.
+The marker tooling is still in the tree for the fixed-camera fallback below, but
+the wrist ArUco route was tried on 2026-10-30 and did not converge — the
+ruler check read 65.9 mm error at truth (0, -0.25). It is not the calibration
+route for this cell's wrist.
 
 A camera on a stand instead of the wrist (`CAMERA_MODE = 'fixed'`) is the
 fallback. Its two modes print `FIXED_CAM_POS/TARGET/UP` rather than the mount:
 
     python tools/calibrate_camera.py --touch     # robot touches the cube
     python tools/calibrate_camera.py --aruco     # one marker image
-
-A **wrist** camera can also be calibrated without the marker, using the cube as
-the target (`--wrist-touch`, at least 4 stations, 8 recommended):
-
-    python tools/calibrate_camera.py --wrist-touch --stations 8
-
-At each station: lay the cube down, lower the closed pads until they just touch
-its top, Enter, then lift and twist the wrist so the cube is in view, Enter.
-The touch fixes that cube's centre in the base frame and the depth look fixes
-the same point in the camera frame, so the mount is the rigid transform between
-the two point sets — no board, no PnP, and the camera height is observable.
-It prints the per-station residual; the fit is `CAM_POS`/`CAM_QUAT`, same paste
-as `--wrist`.
 
 ## Tests
 
