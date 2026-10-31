@@ -20,3 +20,4 @@ Thumbs.db
 
 # Results of test runs
 test_output/
+MUJOCO_LOG.TXT

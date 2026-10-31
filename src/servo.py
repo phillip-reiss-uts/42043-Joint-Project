@@ -45,6 +45,13 @@ def _wrap90(d):
     return (np.asarray(d) + 45.0) % 90.0 - 45.0
 
 
+def _tool_yaw(R):
+    # The yaw the tool currently holds, degrees, from its orientation matrix.
+    # A commanded orientation is Rz(yaw) @ R_DOWN, so R @ R_DOWN.T is Rz(yaw).
+    Rz = np.asarray(R, float) @ R_DOWN.T
+    return float(np.degrees(np.arctan2(Rz[1, 0], Rz[0, 0])))
+
+
 # Yaw disagreement above which a reading replaces the estimate instead of
 # being blended into it, degrees.
 YAW_JUMP_DEG = 20.0
@@ -366,7 +373,16 @@ class PBVSServo:
         # while the cube did not move -- and driving the wrist to that moving
         # label swings the gripper instead of holding it pointed down. The
         # object's yaw belongs to the object, so the best look wins.
-        yaw_cmd = self.best_yaw if self.best_yaw is not None else self.yaw_est
+        # The cube's face is the SET {yaw + 90k}, and every member is an equally
+        # valid grasp. Take the member nearest the orientation the tool already
+        # holds, so the wrist is never sent to a distant branch and the
+        # commanded turn stays within +-45 deg of where the arm is.
+        # yaw_ref is the object's angle in the WORLD frame; this is where it
+        # becomes an arm-relative command.
+        yaw_ref = self.best_yaw if self.best_yaw is not None else self.yaw_est
+        _p_cur, R_cur = self.current_pose()
+        yaw_now = _tool_yaw(R_cur)
+        yaw_cmd = yaw_now + float(_wrap90(yaw_ref - yaw_now))
         R_des = rotation_with_yaw(yaw_cmd, R_DOWN)
         return p_des, R_des
 
