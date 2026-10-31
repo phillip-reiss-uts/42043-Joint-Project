@@ -29,13 +29,17 @@ the simulation implementations are constructed from them; nothing here
 dereferences them for control.
 """
 
+import time
+
 import numpy as np
 
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, R_DOWN,
     RAPID, FEED, RAPID_MIN_STEPS, FEED_MIN_STEPS, GRIP_RAMP_LEVELS,
-    SYNC_STEPS,
+    GRIP_HOLD_S, SYNC_STEPS,
+    RG2_CLOSE_WIDTH_MM,
     GRASP_DRIVER_JOINTS, GRASP_CLOSED_Q, GRASP_FORCE_MIN, GRASP_VEL_TOL,
+    OBJECT_HEIGHT,
 )
 class Arm:
     def __init__(self, model=None, data=None, kinematics=None, backend=None):
@@ -271,20 +275,119 @@ class Arm:
                 if on_step is not None:
                     on_step()
 
+    def _real_gripper(self):
+        # The RG2 is not a servo: rg_grip(width, force) runs ONE stroke and
+        # stops on the object. Stepping it through intermediate widths restarts
+        # the stroke each time -- that is the slow, jerky close, and against a
+        # blocked jaw it is the clicking. A backend that couples carried objects
+        # is the simulator; anything else is driven with a single command.
+        return getattr(self.backend, 'attach_object', None) is None
+
+    def _one_shot_grip(self, grip, on_step=None, stop=None):
+        # ONE rg_grip, then HOLD it briefly while the arm's servo stream keeps
+        # running. rg_grip is treated as blocking: the URCap holds the HTTP
+        # request open until the stroke is finished, so by the time this returns
+        # the jaws have stopped and their width can be read once.
+        #
+        # The width-settle loop that used to live here has been removed as
+        # redundant (operator, 2026-11-01). It is kept below, commented out, so
+        # the decision can be revisited if todo-inlab-gripper.txt G.1 shows the
+        # call does NOT block.
+        q_hold = self.backend.joint_positions()
+        frames = max(1, int(GRIP_HOLD_S / self.backend.dt))
+        for i in range(frames):
+            if stop is not None and stop():
+                break
+            if self.observer is not None:
+                self.observer.predict(q_hold)
+            self._command_step(q_hold, grip)
+            if on_step is not None and i % SYNC_STEPS == 0:
+                on_step()
+        st = self.backend.gripper_state()
+        width = st.get('width_mm')
+        if width is None or not np.isfinite(width):
+            width = None
+        return width is not None, width, GRIP_HOLD_S
+
+    # REMOVED 2026-11-01: the width settle loop. rg_grip is taken to block, so
+    # after the single call the width is already final and polling for it to
+    # stop changing only adds a round trip. Restore if G.1 proves otherwise.
+    #
+    # def _one_shot_grip(self, grip, on_step=None, stop=None):
+    #     q_hold = self.backend.joint_positions()
+    #     t0 = time.monotonic()
+    #     settled_since = None
+    #     width_prev = None
+    #     width = None
+    #     while True:
+    #         if stop is not None and stop():
+    #             return False, width, time.monotonic() - t0
+    #         if self.observer is not None:
+    #             self.observer.predict(q_hold)
+    #         self._command_step(q_hold, grip)
+    #         if on_step is not None:
+    #             on_step()
+    #         now = time.monotonic()
+    #         if now - t0 >= GRIP_STROKE_MAX_S:
+    #             return False, width, now - t0
+    #         st = self.backend.gripper_state()
+    #         width = st.get('width_mm')
+    #         if width is None or not np.isfinite(width):
+    #             width = None
+    #         if width is None:
+    #             continue
+    #         if width_prev is None or abs(width - width_prev) > GRIP_SETTLE_TOL_MM:
+    #             width_prev = width
+    #             settled_since = now
+    #         elif settled_since is not None and (now - settled_since) >= GRIP_SETTLE_S:
+    #             return True, width, now - t0
+
+    def _grip_verdict(self, width):
+        # Did the jaws stop on the cube? The close width is BELOW the cube's, so
+        # the jaws either stop on the cube or run to the commanded width with
+        # nothing between them. The settled width says which, and the split is
+        # halfway between the two.
+        if width is None:
+            return 'unknown', None
+        mid = 0.5 * (RG2_CLOSE_WIDTH_MM + OBJECT_HEIGHT * 1e3)
+        ok = width > mid
+        return ('grip' if ok else 'fail'), ok
+
     def close_gripper(self, steps, viewer=None, estop=None, stop=None,
                       on_step=None):
-        # Ramp the fingers shut while holding the present arm pose.
+        # Shut on the object and hold it. Stepped for a simulated servo, one
+        # command plus a settle wait for a real gripper.
+        #
+        # Return value: None for the simulator; (ok, width_mm, seconds) on
+        # hardware, where ok is the width verdict. Callers that do not look
+        # (the put-down) are unaffected.
+        if viewer is not None and on_step is None:
+            on_step = viewer.sync
+        if self._real_gripper():
+            settled, width, secs = self._one_shot_grip(GRIP_CLOSED, on_step,
+                                                       stop)
+            verdict, ok = self._grip_verdict(width)
+            print('[GRIP] %s: width %s mm after %.2f s'
+                  % (verdict, '?' if width is None else '%.1f' % width, secs))
+            return ok, width, verdict
         self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer, estop,
                         stop, on_step)
+        return None
 
     def open_gripper(self, steps, viewer=None, estop=None, stop=None,
                      on_step=None):
-        # Ramps open, so whatever the jaws were carrying is released first.
+        # Release, so whatever the jaws were carrying is detached first.
         # Detaching here rather than at each call site means every release path
         # -- pick, place, demo, abort -- uncouples automatically.
         self.detach_object()
+        if viewer is not None and on_step is None:
+            on_step = viewer.sync
+        if self._real_gripper():
+            self._one_shot_grip(GRIP_OPEN, on_step, stop)
+            return None
         self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop,
                         stop, on_step)
+        return None
 
     def attach_object(self, body_name):
         # Couple an object to the jaws for the carry. Simulation only: the
@@ -338,40 +441,55 @@ class Arm:
 
     def grasp_state(self):
         # Are the jaws actually holding something? Reads only the gripper's own
-        # position, velocity and force, so nothing here depends on knowing where
-        # the object is.
+        # registers, so nothing here depends on knowing where the object is.
         #
-        # The backend supplies all three, and they do NOT mean the same thing on
-        # both paths: the simulator reads its finger joints and actuator, while
-        # a URBackend has RG2 jaw width for q and v and reports NaN for force.
-        # NaN is what makes the verdict 'unknown' on hardware, which is the
-        # open-loop behaviour chosen deliberately. There is deliberately no read of
-        # `data` here, so this one verdict function runs on both.
+        # TWO DIFFERENT VERDICTS, because the two paths report different things:
         #
-        # Measured on this model: closing on nothing drives the driver joints to
-        # 0.77 with the actuator force at -0.13, the linkage bottoming out.
-        # Closing on the 60 mm cube stalls them at 0.25 with the force saturated
-        # at +5.0. Three signals agree, so the verdict is taken from all of them
-        # rather than trusting the position alone, which cannot separate
-        # "gripped the cube" from "stopped against the table".
+        #   simulator  q, v and force. Force is a real measurement, so all three
+        #              signals are used: position alone cannot separate "gripped
+        #              the cube" from "stopped against the table".
+        #   hardware   q and v from the RG2's jaw width, force ALWAYS NaN (the
+        #              RG2 takes force as a write-only input), plus the URCap's
+        #              rg_get_grip_detected. So the verdict there is width +
+        #              contact, never force.
+        #
+        # 'closed' is the hardware success state. It is deliberately NOT 'held':
+        # 'held' claims a force reading that does not exist. pick.py proceeds on
+        # 'closed' and abandons on 'empty'.
         g = self.backend.gripper_state()
         q = float(g['q'])
         v = float(g['v'])
         f = float(g['force'])
+        det = g.get('detected')
         if not np.isfinite(q):
             return {'state': 'unknown', 'held': False, 'q': q,
-                    'force': f, 'vel': v}
+                    'force': f, 'vel': v, 'detected': det}
 
-        if q > GRASP_CLOSED_Q:
-            state = 'empty'                 # ran to the stop, nothing between
-        elif abs(v) > GRASP_VEL_TOL:
-            state = 'moving'                # still travelling, read too early
-        elif f < GRASP_FORCE_MIN:
-            state = 'touching'              # blocked, but not gripping
+        if np.isfinite(f):
+            # The simulator: three agreeing signals.
+            if q > GRASP_CLOSED_Q:
+                state = 'empty'             # ran to the stop, nothing between
+            elif abs(v) > GRASP_VEL_TOL:
+                state = 'moving'            # still travelling, read too early
+            elif f < GRASP_FORCE_MIN:
+                state = 'touching'          # blocked, but not gripping
+            else:
+                state = 'held'
         else:
-            state = 'held'
-        return {'state': state, 'held': state == 'held', 'q': q,
-                'force': f, 'vel': v}
+            # Hardware: no force, so judge by width, and let the URCap's contact
+            # bit veto. 'detected' is None when the URCap will not answer, which
+            # leaves the width as the only evidence -- say so rather than claim
+            # a hold.
+            if q > GRASP_CLOSED_Q:
+                state = 'empty'             # jaws shut past the closed width
+            elif abs(v) > GRASP_VEL_TOL:
+                state = 'moving'
+            elif det is False:
+                state = 'touching'          # stopped, but nothing between
+            else:
+                state = 'closed'
+        return {'state': state, 'held': state in ('held', 'closed'), 'q': q,
+                'force': f, 'vel': v, 'detected': det}
 
     def hold(self, grip, q=None):
         # Command a fixed pose and grip without advancing a ramp.

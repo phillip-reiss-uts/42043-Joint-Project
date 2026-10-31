@@ -121,8 +121,9 @@ def main():
                           all(hasattr(grip, m) for m in
                               ('move', 'state', 'close')))
     st = grip.state()
-    failures += not check('state() returns q, v, force',
-                          set(st) == {'q', 'v', 'force'}, str(sorted(st)))
+    failures += not check('state() returns q, v, force, detected, width_mm',
+                          set(st) == {'q', 'v', 'force', 'detected', 'width_mm'},
+                          str(sorted(st)))
     failures += not check('force is NaN, never invented',
                           st['force'] != st['force'])
 

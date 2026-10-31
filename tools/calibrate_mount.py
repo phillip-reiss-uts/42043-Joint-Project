@@ -50,8 +50,8 @@ CAM_HEIGHT_TOOL_Z = 0.250
 GRIP_TEST_LIFT = 0.020
 
 # Step 3 / 5: what counts as "centred" and how many tries before giving up.
-OFFSET_TOL = 0.002
-MAX_TRIES = 8
+OFFSET_TOL = 0.005
+MAX_TRIES = 6
 
 
 # ---------------------------------------------------------------- session

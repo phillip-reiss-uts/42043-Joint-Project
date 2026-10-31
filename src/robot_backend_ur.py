@@ -170,7 +170,8 @@ class URBackend(RobotBackend):
     # ---- gripper readback ----
     def gripper_state(self):
         if self._gripper is None:
-            return {'q': float('nan'), 'v': float('nan'), 'force': float('nan')}
+            return {'q': float('nan'), 'v': float('nan'), 'force': float('nan'),
+                    'detected': None, 'width_mm': None}
         return self._gripper.state()
 
     # ---- model handles ----
@@ -193,9 +194,10 @@ class URBackend(RobotBackend):
     # ---- optional capability ----
     def grip_detected(self):
         # True/False if the gripper can say whether its jaws met an object,
-        # None if it cannot. ADVISORY ONLY -- nothing branches on it, and it is
-        # not part of the RobotBackend contract (that is why MujocoBackend has
-        # no such method). The pick logs it as free evidence at the bench.
+        # None if it cannot. Hardware-only: not part of the RobotBackend
+        # contract (that is why MujocoBackend has no such method). It reaches
+        # Arm.grasp_state through gripper_state()['detected'] and is the verdict
+        # on hardware, where force is never reported.
         fn = getattr(self._gripper, 'grip_detected', None)
         if fn is None:
             return None
@@ -508,15 +510,21 @@ class RG2:
             return None
 
     def state(self):
-        # The (q, v, force) trio Arm.grasp_state consumes.
+        # The (q, v, force, detected) quartet Arm.grasp_state consumes.
         #
         # q maps jaw OPENING onto the sim's driver-joint convention, where q
         # RISES as the jaws CLOSE; config explains the inversion.
-        # force has no measurement at all -- the RG2 takes it as a write-only
-        # input. NaN is honest and makes grasp_state say "unknown".
+        #
+        # force has NO measurement: the RG2 takes it as a write-only input, so
+        # it is always NaN here and Arm.grasp_state must not fall back on it.
+        # `detected` is the URCap's rg_get_grip_detected -- the one bit the
+        # gripper can report about whether anything is between the jaws --
+        # read AFTER the width so the two describe the same moment.
         width = self._read_width()
+        detected = self.grip_detected()
         if width is None:
-            return {'q': float('nan'), 'v': float('nan'), 'force': float('nan')}
+            return {'q': float('nan'), 'v': float('nan'), 'force': float('nan'),
+                    'detected': detected, 'width_mm': None}
         width = min(max(width, 0.0), _cfg.GRIP_WIDTH_FULL_MM)
         q = _cfg.GRIP_Q_FULL * (1.0 - width / _cfg.GRIP_WIDTH_FULL_MM)
         now = time.monotonic()
@@ -526,7 +534,8 @@ class RG2:
             if dt > 1e-6:
                 v = (q - self._last_q) / dt
         self._last_q, self._last_t = q, now
-        return {'q': float(q), 'v': float(v), 'force': float('nan')}
+        return {'q': float(q), 'v': float(v), 'force': float('nan'),
+                'detected': detected, 'width_mm': float(width)}
 
     def close(self):
         # No connection is held open and no program is left running.

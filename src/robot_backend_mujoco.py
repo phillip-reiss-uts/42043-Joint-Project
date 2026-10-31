@@ -194,7 +194,8 @@ class MujocoBackend(RobotBackend):
     def gripper_state(self):
         # The jaw registers, from the gripper's own DOF and its actuator. A
         # URBackend returns the same trio from the RG2's XML-RPC width, which is
-        # what lets Arm.grasp_state be identical on both.
+        # what lets Arm.grasp_state be identical on both. 'detected' is None
+        # here: the simulator has no contact sensor.
         #
         # q is reported as a 0..1 FRACTION of stroke, not metres, so thresholds
         # like GRASP_CLOSED_Q keep their meaning across gripper models.
@@ -209,6 +210,13 @@ class MujocoBackend(RobotBackend):
             # arm so the same verdict logic works on both.
             'force': float(self.data.actuator_force[self._grip_act])
             / (GRIP_LEVER_MM / 1000.0),
+            # Contact sensing does not exist in the simulator; None means "no
+            # opinion", which is what the hardware field also reports when the
+            # URCap will not answer.
+            'detected': None,
+            # No millimetre readback in the simulator; the settle loop is
+            # hardware-only and never asks for it.
+            'width_mm': None,
         }
 
     def _grip_pos(self, which):

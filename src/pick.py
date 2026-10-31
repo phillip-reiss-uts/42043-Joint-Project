@@ -169,36 +169,25 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
     # converging, which reports success after grasping empty air: the arm
     # reaches its committed pose either way.
     #
-    # On this cell the RG2 has no force readback, so grasp_state() returns
-    # 'unknown'. The pickup is therefore OPEN LOOP by design:
-    # 'unknown' means there is no evidence either way, so it proceeds; only an
-    # explicit 'empty' abandons the pick. With a gripper that reports force --
-    # the simulator, a Robotiq -- behaviour is unchanged.
+    # On this cell the RG2 reports NO force (write-only input), so the verdict
+    # comes from jaw width plus the URCap's contact bit: 'closed' means the jaws
+    # stopped on something, 'empty' means they shut past it. 'unknown' still
+    # means no evidence either way, and the pickup proceeds on that and on
+    # 'closed'. Only an explicit 'empty' abandons the pick. With a gripper that
+    # reports force -- the simulator -- behaviour is unchanged.
     g = arm.grasp_state()
     print(f'[GRASP] {g["state"]}: finger {g["q"]:.3f}  force {g["force"]:+.2f}  '
-          f'vel {g["vel"]:+.4f}')
+          f'vel {g["vel"]:+.4f}  detected {g.get("detected")}')
     push(viewer, 'gripper', 'grasp %s' % g['state'],
          'q %.3f  f %+.2f' % (g['q'], g['force']))
 
-    # Advisory only, never a gate: the gripper can sometimes say
-    # whether its jaws met an object (RG2 XML-RPC rg_get_grip_detected). It is
-    # logged because it is free evidence at the bench; the pickup proceeds
-    # regardless of the answer. Backends without the capability return None and
-    # this prints nothing.
-    _detect = getattr(arm.backend, 'grip_detected', None)
-    if _detect is not None:
-        try:
-            detected = _detect()
-        except Exception:
-            detected = None
-        if detected is not None:
-            print('[GRASP] gripper reports %s'
-                  % ('an object' if detected else 'nothing between the jaws'))
-            push(viewer, 'gripper', 'detected %s'
-                 % ('object' if detected else 'nothing'))
-
     if g['state'] == 'unknown':
         print('[GRASP] no gripper feedback -- open loop, carrying on')
+    elif g['state'] == 'closed':
+        # Hardware success: width stopped short of the closed width (and the
+        # URCap did not report the jaws empty). No force exists to check.
+        print('[GRASP] jaws closed on something -- no force sensor, so this is '
+              'a width verdict, not a measured grip')
     elif not g['held']:
         # Lift clear and read again. A first reading can be taken while the
         # fingers are still travelling, and if the cube was merely resting

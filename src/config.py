@@ -151,9 +151,19 @@ PLACE_DX = 0.0
 PLACE_DY = 0.0
 PLACE_CLEARANCE = 0.002
 STEPS_CLOSE = 3000
-# Gripper command is quantised to this many levels: the URCap retargets on
-# every distinct width, so a smooth ramp makes it stutter.
+# SIMULATOR ONLY: the finger DOF is a servo, so it is stepped through these
+# levels. A real gripper gets ONE rg_grip per action and never uses them.
 GRIP_RAMP_LEVELS = 8
+# A real gripper receives ONE rg_grip per action. rg_grip is treated as
+# blocking (the URCap holds the request until the stroke ends), so the only wait
+# after it is this short hold, which keeps the arm's servo stream running while
+# the jaws finish. The width is read once, afterwards.
+GRIP_HOLD_S = 0.3
+# Removed with the settle loop (2026-11-01). Restore if G.1 shows rg_grip does
+# NOT block: width must not change by more than TOL for SETTLE_S, cap MAX_S.
+# GRIP_SETTLE_TOL_MM = 0.5
+# GRIP_SETTLE_S = 0.15
+# GRIP_STROKE_MAX_S = 2.0
 STEPS_RELEASE = 2000
 DROP_HOLD_STEPS = 500                     # hold open after a drop
 
@@ -320,7 +330,7 @@ RG2_CLOSE_PROGRAM = '/programs/rg_close.urp'
 # Grip is sent as GRIP_OPEN..GRIP_CLOSED (0..255); interpolate onto these widths.
 # Jaw widths stay in MILLIMETRES: rg_grip(width_mm) and the datasheet speak mm.
 RG2_OPEN_WIDTH_MM = 110.0                 # datasheet full stroke
-RG2_CLOSE_WIDTH_MM = 56.0                 # jaws squeeze ~4 mm on the 60 mm cube
+RG2_CLOSE_WIDTH_MM = 40.0                 # grip width: jaws close past the 60 mm cube
 # Force requested from rg_grip(width_mm, force_N). Write-only input, never
 # readable. The RG2 will not grip reliably below 3 N; do not set it lower.
 RG2_MIN_GRIP_FORCE_N = 3.0
