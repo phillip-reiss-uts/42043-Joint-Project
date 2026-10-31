@@ -160,12 +160,9 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
                           + np.array([0.0, 0.0, LIFT_Z]),
                           arm.backend.joint_positions(), R_target=R)
 
-    # The close returns a verdict on hardware -- (ok, width_mm, verdict) from the
-    # settled jaw width -- and None in the simulator, where grasp_state has a
-    # real force reading and does the judging instead. An explicit False is the
-    # jaws having run PAST the commanded width with nothing between them: that is
-    # known-empty, and carrying on would lift air to the release point and call
-    # it a success.
+    # close_gripper returns (ok, width_mm, verdict) on hardware, None on the
+    # simulator. ok False means the jaws ran past the commanded width with
+    # nothing between them, so the grasp is known empty.
     verdict = arm.close_gripper(STEPS_CLOSE, viewer, estop=estop, stop=stopped)
     if stopped():
         return False, None, None
@@ -175,17 +172,8 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
         arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stopped)
         return False, None, None
 
-    # Ask the jaws whether they got anything -- but only when the gripper can
-    # actually answer. Without this the result is inferred from the servo
-    # converging, which reports success after grasping empty air: the arm
-    # reaches its committed pose either way.
-    #
-    # On this cell the RG2 reports NO force (write-only input), so the verdict
-    # comes from jaw width plus the URCap's contact bit: 'closed' means the jaws
-    # stopped on something, 'empty' means they shut past it. 'unknown' still
-    # means no evidence either way, and the pickup proceeds on that and on
-    # 'closed'. Only an explicit 'empty' abandons the pick. With a gripper that
-    # reports force -- the simulator -- behaviour is unchanged.
+    # The jaws' own verdict. The pickup proceeds on 'unknown' and 'closed' and
+    # abandons only on an explicit 'empty'.
     g = arm.grasp_state()
     print(f'[GRASP] {g["state"]}: finger {g["q"]:.3f}  force {g["force"]:+.2f}  '
           f'vel {g["vel"]:+.4f}  detected {g.get("detected")}')

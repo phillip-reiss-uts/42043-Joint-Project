@@ -486,9 +486,7 @@ def step_pick_height(cell, session, snaps, log):
     print('   MOVE THE CUBE OUT OF THE WAY first: you are judging the jaws.')
     session.pick_z_above_table = _ask_float(
         '  tool height above table, m', session.pick_z_above_table)
-    # Close ONCE through the same call the pick makes, then descend holding it.
-    # The old path sent GRIP_CLOSED straight at the backend while descending,
-    # which is the command stream that clicked.
+    # Close once, through the same call the pick makes, then descend holding it.
     cell.arm().close_gripper(cfg.STEPS_CLOSE)
     p = cell.tool_pose()
     z = session.pick_z()
@@ -533,7 +531,7 @@ def step_grip_width(cell, session, snaps, log):
                    grip=cfg.GRIP_OPEN, rate=cfg.FEED / 2.0)
         input('  place the cube between the jaws, then Enter > ')
 
-        # The SAME path the pick uses: one rg_grip, a short hold, one width read.
+        # The same close the pick makes.
         result = arm.close_gripper(cfg.STEPS_CLOSE)
         if result is None:
             print('  close_gripper gave no verdict -- is this a real gripper?')

@@ -115,17 +115,13 @@ class URBackend(RobotBackend):
         self._grip_cmd = float(grip)
 
     def _gripper_send(self, force=False):
-        # Throttle gripper commands: the close/open ramps change the command
-        # every control cycle, and the RG2 must not be commanded at 125 Hz.
+        # Send the pending grip command, no faster than gripper_period.
+        # _grip_sent tracks the command, not the send, so a throttled target is
+        # not retried on the next cycle.
         if self._gripper is None:
             return
         target = int(round(np.clip(self._grip_cmd, 0.0, 255.0)))
         now = time.monotonic()
-        # The bookkeeping describes the COMMAND, not the send: a target that is
-        # dropped by the throttle is still the current target, so _grip_sent
-        # tracks it either way. Before this, a dropped send left _grip_sent on
-        # the OLD value, so the next cycle saw a "change" that had already been
-        # decided and re-fired the same command.
         if force or target != self._grip_sent:
             if (now - self._grip_t) >= self.gripper_period:
                 self._gripper.move(target)
@@ -198,11 +194,9 @@ class URBackend(RobotBackend):
 
     # ---- optional capability ----
     def grip_detected(self):
-        # True/False if the gripper can say whether its jaws met an object,
-        # None if it cannot. Hardware-only: not part of the RobotBackend
-        # contract (that is why MujocoBackend has no such method). It reaches
-        # Arm.grasp_state through gripper_state()['detected'] and is the verdict
-        # on hardware, where force is never reported.
+        # Whether the jaws met an object: True/False, or None if the URCap does
+        # not answer. Hardware only; reaches Arm.grasp_state via
+        # gripper_state()['detected'].
         fn = getattr(self._gripper, 'grip_detected', None)
         if fn is None:
             return None
@@ -433,10 +427,8 @@ class RG2:
                 and abs(width - self._sent_width) < self.min_step_mm):
             return
         last = None
-        # ONE RETRY. A single timeout is not a dead route, and the old code
-        # treated it as one: the first exception disabled XML-RPC for the whole
-        # session and dropped to the dashboard programs, which are discrete and
-        # blind. A retry costs one round trip and keeps the proportional route.
+        # One retry, so a single timeout does not disable the route for the
+        # session.
         for _attempt in (0, 1):
             try:
                 with _quiet():
@@ -453,12 +445,9 @@ class RG2:
             self._move_dashboard(position)
 
     def _move_dashboard(self, position):
-        # Discrete jaws: act only when the command crosses the midpoint.
-        #
-        # It must NOT be run without a stroke time. The program is fired and this
-        # method returns immediately, so the caller moves the arm while the jaws
-        # are still travelling -- a dropped or crushed cube, silently. Raising is
-        # the honest outcome: no stroke time means no timed fallback.
+        # Discrete jaws: run a program when the command crosses the midpoint.
+        # Refuses without a stroke time, since the program returns immediately
+        # and the caller would move the arm mid-stroke.
         if not self.stroke_time:
             raise RuntimeError(
                 'RG2 fell back to the dashboard programs, which are discrete and '
@@ -535,14 +524,10 @@ class RG2:
     def state(self):
         # The (q, v, force, detected) quartet Arm.grasp_state consumes.
         #
-        # q maps jaw OPENING onto the sim's driver-joint convention, where q
-        # RISES as the jaws CLOSE; config explains the inversion.
-        #
-        # force has NO measurement: the RG2 takes it as a write-only input, so
-        # it is always NaN here and Arm.grasp_state must not fall back on it.
-        # `detected` is the URCap's rg_get_grip_detected -- the one bit the
-        # gripper can report about whether anything is between the jaws --
-        # read AFTER the width so the two describe the same moment.
+        # q is jaw opening mapped onto the sim's driver-joint convention, so it
+        # rises as the jaws close. force is unmeasured and always NaN: the RG2
+        # takes it as a write-only input. detected is the URCap's contact bit,
+        # read after the width so the two describe the same moment.
         width = self._read_width()
         detected = self.grip_detected()
         if width is None:

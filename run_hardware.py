@@ -55,13 +55,9 @@ ACTIVE_EMPTY_RUN = 3
 
 
 class VisibleWorld:
-    # RealObjectWorld plus the one scene question the task policy asks:
-    # "is there anything on the table?".
-    #
-    # The boundary deliberately has no `active()` -- a hardware world cannot
-    # enumerate an object pool -- so this caches the last camera look. "Active"
-    # therefore means "the camera saw something the last time we asked", which
-    # is the honest hardware equivalent.
+    # RealObjectWorld plus the scene question the task asks: is anything on the
+    # table? Derived from the last camera look, since a hardware world cannot
+    # enumerate an object pool.
 
     def __init__(self, world, cache_frames=False):
         self.world = world
@@ -92,20 +88,12 @@ class VisibleWorld:
 
     # ---- scene questions (hardware meaning) ----
     def visible_now(self):
-        # The raw reading: did the last look see anything?
+        # Whether the last look saw anything.
         return [0] if self.last else []
 
     def active(self):
-        # What the TASK asks: "is there something on the table?".
-        #
-        # visible_now() is literally "the last look saw nothing", so ONE
-        # obscured or out-of-frame look used to drop the task out of TRACK: the
-        # arm stopped being driven, and the next look that found the cube
-        # re-entered TRACK with a fresh servo and no memory -- which reads as the
-        # arm going home and then swinging back. A cube leaving the FRAME is not
-        # a cube leaving the TABLE, so TRACK survives up to ACTIVE_EMPTY_RUN
-        # consecutive empty looks. Short enough that a cube genuinely removed
-        # still empties the table, long enough to ride out a nudge.
+        # Whether there is something on the table. Tolerates a run of empty
+        # looks, so a cube leaving the frame does not empty the table.
         self._empty_run = 0 if self.last else self._empty_run + 1
         return [0] if self._empty_run < ACTIVE_EMPTY_RUN else []
 
@@ -270,28 +258,21 @@ def main(argv=None):
     grip = GRIP_OPEN
 
     def _relatch():
-        # Re-latch the pose the front-end streams while the policy is idle.
-        # servo() commands its own targets and returns; without this the hold
-        # pose stays at whatever it was before the chunk, and the arm drifts to
-        # a stop under the servoJ lookahead instead of holding where it finished.
+        # Re-read the hold pose after a servo chunk, which commands its own
+        # targets.
         nonlocal held_q
         held_q = np.array(backend.joint_positions(), float)
 
     def _reacquire():
-        # One look for the target. The servo calls this only when it has lost the
-        # object, and it is deliberately a LOOK, not a sweep: on hardware the
-        # camera is on the arm, so sweeping to find a cube the operator can see
-        # would move the arm away from it.
+        # One look for a lost target. A look rather than a sweep: the camera is
+        # on the arm.
         return bool(world.refresh())
 
     def track_step():
-        # One short closed-loop look-and-follow chunk. The task calls this from
-        # TRACK; on hardware the operator-paced loop means one chunk is enough.
+        # One closed-loop look-and-follow chunk, called from TRACK.
         #
-        # track=True and a search callback are NOT optional here. Without them
-        # the servo's lost-target branch (servo.py, `track and search is not
-        # None`) is unreachable, so a cube that leaves the frame silently runs
-        # the chunk to its iteration cap and returns with nothing printed.
+        # track and search are both required: the servo's lost-target branch is
+        # gated on them.
         from src.servo import PBVSServo
         sv = PBVSServo(None, None, arm, world)
         sv.servo(cfg.SERVO_STANDOFF, max_iters=cfg.UR_TRACK_CHUNK,

@@ -214,11 +214,8 @@ def check_calibration():
 
 
 def check_yaw():
-    # The yaw path, against real face shapes taken from shots/. Nothing else in
-    # the gate looks at orientation: the estimator can be exact on a synthetic
-    # square and still freeze on a real ragged face, and the estimate the servo
-    # carries can stall at the 90-deg seam. Both failures are silent -- the pick
-    # simply rotates to the wrong angle -- so they are checked here.
+    # The only orientation check in the gate. Both failure modes are silent:
+    # the pick simply rotates to the wrong angle.
     section("9. tests/test_yaw_sweep.py  (yaw, from the real snapshots)")
     run_test("yaw tracks a known rotation", "tests/test_yaw_sweep.py")
 

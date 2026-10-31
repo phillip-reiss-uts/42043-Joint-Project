@@ -1,38 +1,12 @@
-"""Artificial 360-degree yaw test, built from the real snapshots.
+"""Yaw tracking tests, using real cube faces taken from the cell's snapshots.
 
-WHY THIS EXISTS
----------------
-The yaw estimator cannot be validated at the cell, and the simulator's cube is
-too clean to be a fair test. The PNGs in tests/fixtures/shots/ are real depth
-frames of the real cell: a real cube face, real ragged edges, real dropouts,
-real table.
+The cube's top face is extracted from a fixture frame as a polygon, rotated in
+the world plane to a known angle, and checked at two levels: that the estimator
+follows the rotation, and that the estimate the servo carries follows a full
+revolution without stalling or jumping.
 
-This test takes the CUBE'S TOP FACE out of one of those frames as a polygon,
-rotates that polygon in the world plane to a KNOWN angle, and checks two
-things:
-
-  1. THE ESTIMATOR (_calipers + _top_band, i.e. what src/world_real.detect does)
-     must track the rotation exactly. The absolute yaw at the unrotated angle is
-     not known -- no ground-truth angle was ever recorded on the cell -- so the
-     assertion is on the CHANGE: rotating by theta must move the detected yaw by
-     exactly theta, modulo 90 (a square face is 4-fold symmetric).
-
-  2. THE ESTIMATE THE SERVO CARRIES (PBVSServo._fold_yaw) must track a cube
-     being turned through a full revolution without freezing and without ever
-     commanding a large single-look change of the tool orientation.
-
-Why the second matters, and what was wrong before: the estimate used to be
-clamped into [-45, 45). Two readings either side of the 90-degree seam (+44 and
--44) are 2 degrees apart as angles but 88 apart in that clamped coordinate, so a
-tie rule froze the estimate near the seam. Tracking a cube through 360 degrees,
-the old code accumulated up to 20 degrees of error, sat over 10 degrees for 39
-of 360 looks, and jumped the stored estimate by up to 68 degrees in ONE look --
-which is a wrist swing across most of a right angle for a grasp that did not
-need it.
-
-What this test does NOT prove: that the face in a live frame is extracted the
-same way, or that the cube is where perception thinks. It is a test of the yaw
-path only, on real face shapes.
+Absolute yaw is not known for these frames -- no ground-truth angle was recorded
+on the cell -- so the assertions are on the CHANGE in angle, modulo 90.
 
 Run: python tests/test_yaw_sweep.py
 """
@@ -50,33 +24,21 @@ if ROOT not in sys.path:
 from src.perception import _calipers                      # noqa: E402
 from src.servo import PBVSServo, _wrap90                  # noqa: E402
 
-# The two frames this test is built on, COPIED into tests/fixtures so the test
-# does not depend on the operator's snapshot directory -- shots/ is working
-# output and can be cleared between sessions, and a test that silently finds
-# nothing there is worse than no test.
+# Fixture frames, copied here so the test does not depend on the operator's
+# snapshot directory.
 SHOTS = os.path.join(HERE, 'fixtures', 'shots')
 
-# The cube's top face in each snapshot: (image patch, depth band in mm). The
-# band is the face's own depth mode -- the camera looks down, so the cube top is
-# CLOSER than the table and shows up as the near plateau inside the patch. All
-# three frames put the face at 295-325 mm against a table at ~372 mm.
-#
-# The three are deliberately different qualities of the same face:
-#   snap_005  extents 36.2 x 35.4 px  ratio 1.02   the cleanest
-#   snap_003  extents 34.5 x 40.0 px  ratio 1.16
-#   snap_001  extents 47.8 x 36.3 px  ratio 1.32   the ragged one -- taken while
-#             the gripper was HOLDING the cube, so the jaws clip the face
+# Cube top face in each fixture: (image patch, depth band in mm). The camera
+# looks down, so the face is nearer than the table and forms a plateau inside
+# the patch. All three sit at 295-325 mm against a table at ~372 mm.
 FACES = {
     'snap_005': ((250, 355, 295, 400), (295, 325)),
     'snap_003': ((250, 355, 295, 400), (295, 325)),
     'snap_001': ((250, 355, 295, 400), (295, 325)),
 }
 
-# Above this a face is not a square and the extraction is wrong. The real faces
-# sit at 1.02-1.32; a wrong depth band (the table instead of the face) measures
-# ~1.6. The limit sits between the two rather than close to the real maximum,
-# because a limit tuned to 1.35 would fail on a slightly worse frame and say
-# "extraction" when the extraction was fine.
+# Rectangle aspect above which the extraction is taken to be wrong. Real faces
+# measure 1.02-1.32; a wrong depth band measures ~1.6.
 FACE_RATIO_MAX = 1.40
 
 NEAR_M, FAR_M = 0.15, 1.60          # liveview.depth_image's colour map range

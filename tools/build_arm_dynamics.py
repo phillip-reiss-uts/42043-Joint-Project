@@ -29,7 +29,6 @@ WHAT GETS MERGED, AND WHY
     approximation, and it is why this file is regenerated rather than tuned.
 
 USAGE
-    cd "assignment 4"
     python tools/build_arm_dynamics.py           # rewrite the JSON
     python tests/test_ur_kinematics.py           # must pass
 """
