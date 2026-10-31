@@ -145,38 +145,6 @@ def spawn_one(model, data, reg, rng, viewer=None, world=None):
     return None
 
 
-def spawn_now(model, data, reg, rng, viewer=None):
-    # Drop a parked object onto the table immediately -- no settle loop.
-    parked = reg.parked()
-    if not parked:
-        return None
-
-    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'gripper/base')
-    base_xy = np.array(data.xpos[base_id][:2], float)
-
-    i = parked[0]
-    for k in range(120):
-        # hard positions first, easy band once they are exhausted or occupied
-        cand = np.array(_choose_spawn_xy(rng, fallback=(k >= 60)))
-        # clear of the arm/gripper
-        if np.linalg.norm(cand - base_xy) < SPAWN_ARM_CLEARANCE:
-            continue
-        # clear of every cube already on the table
-        if not _separation_ok(reg, data, cand):
-            continue
-
-        yaw = rng.uniform(0.0, np.pi / 2.0) if RANDOMIZE_YAW else 0.0
-        reg.teleport(data, i,
-                     [cand[0], cand[1], TABLE_HEIGHT + SPAWN_CLEARANCE],
-                     quat=(np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)))
-        reg.state[i] = 'active'
-        reg.freeze(data, i)
-        mujoco.mj_forward(model, data)
-        return i
-
-    return None
-
-
 def _hold_arm(model, data, q_hold, grip):
     # Command a joint hold, with the arm's gravity load fed forward.
     #
