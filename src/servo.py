@@ -9,7 +9,7 @@ gets geometry from arm.kin (src/kinematics.py) and steps through arm.backend
 import numpy as np
 
 from src.config import (
-    ARM_DOF, PICK_Z, TOOL_MOUNT_POS, R_DOWN, JOINT_RANGE,
+    ARM_DOF, PICK_Z, TOOL_MOUNT_POS, R_DOWN, JOINT_RANGE, YAW_LIMIT_DEG,
     GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
     SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD,
@@ -50,6 +50,20 @@ def _tool_yaw(R):
     # A commanded orientation is Rz(yaw) @ R_DOWN, so R @ R_DOWN.T is Rz(yaw).
     Rz = np.asarray(R, float) @ R_DOWN.T
     return float(np.degrees(np.arctan2(Rz[1, 0], Rz[0, 0])))
+
+
+def _bounded_yaw(yaw_ref, yaw_now, limit=YAW_LIMIT_DEG):
+    # The tool yaw to command for a face at yaw_ref, given the tool is at
+    # yaw_now. A square face makes every yaw in {yaw_ref + 90k} an equally valid
+    # grasp, so: take the member nearest the current tool angle, restricted to
+    # members within +-limit of HOME. Restricting it is what stops the command
+    # following the cube round the wrist; if the tool is outside the limit, the
+    # nearest in-limit member pulls it back.
+    cands = [yaw_ref + 90.0 * k for k in range(-4, 5)]
+    inside = [c for c in cands if abs(c) <= limit + 1e-9]
+    if not inside:                       # limit below 45 cannot happen for a square
+        inside = [min(cands, key=abs)]
+    return float(min(inside, key=lambda c: abs(c - yaw_now)))
 
 
 # Yaw disagreement above which a reading replaces the estimate instead of
@@ -373,16 +387,12 @@ class PBVSServo:
         # while the cube did not move -- and driving the wrist to that moving
         # label swings the gripper instead of holding it pointed down. The
         # object's yaw belongs to the object, so the best look wins.
-        # The cube's face is the SET {yaw + 90k}, and every member is an equally
-        # valid grasp. Take the member nearest the orientation the tool already
-        # holds, so the wrist is never sent to a distant branch and the
-        # commanded turn stays within +-45 deg of where the arm is.
-        # yaw_ref is the object's angle in the WORLD frame; this is where it
-        # becomes an arm-relative command.
+        # yaw_ref is the object's angle in the WORLD frame. Turning it into a
+        # command picks which of the equivalent grasps to use, bounded by
+        # YAW_LIMIT_DEG so the wrist cannot wind.
         yaw_ref = self.best_yaw if self.best_yaw is not None else self.yaw_est
         _p_cur, R_cur = self.current_pose()
-        yaw_now = _tool_yaw(R_cur)
-        yaw_cmd = yaw_now + float(_wrap90(yaw_ref - yaw_now))
+        yaw_cmd = _bounded_yaw(yaw_ref, _tool_yaw(R_cur))
         R_des = rotation_with_yaw(yaw_cmd, R_DOWN)
         return p_des, R_des
 

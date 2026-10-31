@@ -275,6 +275,12 @@ SERVO_DAMP_NEAR_RAD = 0.15
 # Yaw blend gain, separate from the position blend: a square top face reads as
 # yaw or yaw+90, and the raw label flips between looks.
 SERVO_YAW_SMOOTH = 0.35
+# How far the tool may twist from its HOME yaw, degrees. A square face is
+# reachable at any of {yaw + 90k}, so this bounds which of those the wrist is
+# allowed to use: a command outside it is replaced by the nearest one inside.
+# Must not be 45 (+ 90k): both candidate branches then sit exactly on the
+# boundary and the command alternates between them as readings cross it.
+YAW_LIMIT_DEG = 60.0
 
 # ---- tracking a moving target --------------------------------------------
 # Chase until the object has held still for the dwell, then commit open loop.
