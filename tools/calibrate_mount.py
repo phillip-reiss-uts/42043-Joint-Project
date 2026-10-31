@@ -239,6 +239,15 @@ def _ask_yes(prompt, default=True):
     return raw.strip().lower().startswith('y')
 
 
+def _grip_pos(width_mm):
+    # Jaw width in mm -> the 0..255 command space the arm and the backend use.
+    span = cfg.GRIP_CLOSED - cfg.GRIP_OPEN
+    lo, hi = cfg.RG2_OPEN_WIDTH_MM, cfg.RG2_CLOSE_WIDTH_MM
+    frac = (width_mm - lo) / (hi - lo) if hi != lo else 0.0
+    return float(np.clip(cfg.GRIP_OPEN + span * frac,
+                         cfg.GRIP_OPEN, cfg.GRIP_CLOSED))
+
+
 def _move_tool(cell, session, xy, z, grip=cfg.GRIP_OPEN, rate=None):
     # One IK solve to a flange pose, then a plain joint move. Keeps the current
     # orientation, matching what the servo holds.
@@ -477,6 +486,10 @@ def step_pick_height(cell, session, snaps, log):
     print('   MOVE THE CUBE OUT OF THE WAY first: you are judging the jaws.')
     session.pick_z_above_table = _ask_float(
         '  tool height above table, m', session.pick_z_above_table)
+    # Close ONCE through the same call the pick makes, then descend holding it.
+    # The old path sent GRIP_CLOSED straight at the backend while descending,
+    # which is the command stream that clicked.
+    cell.arm().close_gripper(cfg.STEPS_CLOSE)
     p = cell.tool_pose()
     z = session.pick_z()
     if not _move_tool(cell, session, p[:2], z, grip=cfg.GRIP_CLOSED,
@@ -502,59 +515,61 @@ def step_grip_width(cell, session, snaps, log):
     print()
     print('6  GRIP WIDTH -- the jaws close to a width, lift %.0f mm and put the'
           % (GRIP_TEST_LIFT * 1e3))
-    print('   cube back. If the cube comes up, the width held. Force stays at')
-    print('   %.1f N throughout.' % cfg.RG2_GRIP_FORCE_N)
-    back = cell.backend()
+    print('   cube back. If the cube comes up and the jaws stop ABOVE 50 mm,')
+    print('   the width held. Force stays at %.1f N throughout.'
+          % cfg.RG2_GRIP_FORCE_N)
+    print('   The close is ONE rg_grip, the same call the pick makes.')
+    arm = cell.arm()
     while True:
         width = _ask_float('  closing width, mm', session.close_width_mm)
         if width < cfg.RG2_MIN_STEP_MM:
             print('  below the %.1f mm minimum step' % cfg.RG2_MIN_STEP_MM)
             continue
+        if width > cfg.RG2_OPEN_WIDTH_MM:
+            print('  wider than the %.1f mm full stroke' % cfg.RG2_OPEN_WIDTH_MM)
+            continue
+        pos = _grip_pos(width)
         _move_tool(cell, session, cell.tool_pose()[:2], session.pick_z(),
                    grip=cfg.GRIP_OPEN, rate=cfg.FEED / 2.0)
         input('  place the cube between the jaws, then Enter > ')
-        # Commanded width -> the 0..255 space, then ramp to it so the URCap
-        # sees a few clean steps rather than one jump.
-        span = cfg.GRIP_CLOSED - cfg.GRIP_OPEN
-        pos = cfg.GRIP_OPEN + span * (width - cfg.RG2_OPEN_WIDTH_MM) / (
-            cfg.RG2_CLOSE_WIDTH_MM - cfg.RG2_OPEN_WIDTH_MM)
-        pos = float(np.clip(pos, cfg.GRIP_OPEN, cfg.GRIP_CLOSED))
-        n = 6
-        start = cfg.GRIP_OPEN
-        for k in range(1, n + 1):
-            g = start + (pos - start) * k / n
-            for _ in range(int(0.15 / back.dt)):
-                back.command(back.joint_positions(), g)
-                back.step()
-        for _ in range(int(0.6 / back.dt)):
-            back.command(back.joint_positions(), pos)
-            back.step()
-        print('  closed to %.1f mm; lifting %.0f mm'
-              % (width, GRIP_TEST_LIFT * 1e3))
+
+        # The SAME path the pick uses: one rg_grip, a short hold, one width read.
+        result = arm.close_gripper(cfg.STEPS_CLOSE)
+        if result is None:
+            print('  close_gripper gave no verdict -- is this a real gripper?')
+            return
+        ok, settled, verdict = result
+        print('  closed: verdict %s, jaws stopped at %s mm'
+              % (verdict, '?' if settled is None else '%.1f' % settled))
+
         cell_z = cell.tool_pose()[2]
         xy = cell.tool_pose()[:2]
+        print('  lifting %.0f mm' % (GRIP_TEST_LIFT * 1e3))
         _move_tool(cell, session, xy, cell_z + GRIP_TEST_LIFT,
                    grip=pos, rate=cfg.FEED / 2.0)
-        if _ask_yes('  did the cube come up with the jaws?', True):
-            print('  lowering and releasing')
-            _move_tool(cell, session, xy, cell_z, grip=pos, rate=cfg.FEED / 2.0)
-            back._grip_cmd = cfg.GRIP_OPEN
-            for _ in range(int(0.8 / back.dt)):
-                back.command(back.joint_positions(), cfg.GRIP_OPEN)
-                back.step()
+        came_up = _ask_yes('  did the cube come up with the jaws?', True)
+        print('  lowering and releasing')
+        _move_tool(cell, session, xy, cell_z, grip=pos, rate=cfg.FEED / 2.0)
+        arm.open_gripper(cfg.STEPS_RELEASE)
+
+        if came_up:
             session.close_width_mm = width
-            log['grip_width'] = dict(width_mm=width,
+            log['grip_width'] = dict(width_mm=width, pos=pos,
                                      force_n=cfg.RG2_GRIP_FORCE_N,
+                                     settled_mm=settled, verdict=verdict,
                                      lifted=True)
             print('  RG2_CLOSE_WIDTH_MM -> %.1f' % width)
+            if settled is not None and not ok:
+                print('  NOTE: it lifted, but the settled width %.1f is not '
+                      'above the 50 mm midpoint.' % settled)
+                print('        The pick would still call this a FAIL. Fix the '
+                      'midpoint or the close width.')
             return
-        print('  lowering and releasing; try a smaller width')
-        _move_tool(cell, session, xy, cell_z, grip=pos, rate=cfg.FEED / 2.0)
-        for _ in range(int(0.8 / back.dt)):
-            back.command(back.joint_positions(), cfg.GRIP_OPEN)
-            back.step()
-        log.setdefault('grip_tries', []).append(dict(width_mm=width,
-                                                     lifted=False))
+
+        log.setdefault('grip_tries', []).append(
+            dict(width_mm=width, settled_mm=settled, verdict=verdict,
+                 lifted=False))
+        print('  it did not hold -- try another width')
 
 
 def step_readback(cell, session, snaps, log):
