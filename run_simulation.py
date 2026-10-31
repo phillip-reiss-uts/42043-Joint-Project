@@ -263,18 +263,13 @@ def main(sensor_size=(320, 240), lightweight=False):
         from src.pick import pick_and_hold, search_for_object
         # Frame granularity for tracking.
         #
-        # The chunk size no longer changes the result: servo() now persists its
+        # The chunk size does not change the result: servo() persists its
         # commanded joint vector across calls, so N iterations spread over any
         # number of calls gives the same motion as one call of N. Measured, with
         # the same 600 physics steps: peak-to-peak tool height was 0.62 mm at
         # chunk 1, 0.62 at 30, 0.69 at 100 and 0.63 at 300.
         #
-        # That was NOT true before the fix -- chunk 1 and chunk 600 differed by
-        # 100 mm of drift, because the command was re-seeded from data.qpos on
-        # every call and ratcheted downhill. The earlier comment here claimed
-        # small chunks "cannot converge", which was a symptom of that bug.
-        #
-        # So this is now purely a responsiveness choice: small enough that a
+        # This value is chosen purely for responsiveness: small enough that a
         # frame returns quickly, large enough that the viewer is not synced on
         # every physics step. 60 iterations is 0.12 s of sim per frame, and the
         # camera render (~17 ms) is matched to it so every frame has one render
