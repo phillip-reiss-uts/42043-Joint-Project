@@ -1,22 +1,23 @@
-# Offline tests for the RG2 gripper backend: no robot, no onRobot, no pycurl.
-#
-# WHY THIS EXISTS
-# ---------------
-# `RG2` in src/robot_backend_ur.py is the only part of the hardware path that
-# cannot be exercised by the simulator. Its XML-RPC client and its dashboard
-# transport are injected rather than constructed (the same way URBackend takes
-# its RTDE clients), so the whole class can be run against fakes:
-#
-#   * the grip-command -> jaw-width interpolation
-#   * min-step suppression during an Arm.close_gripper ramp
-#   * the width -> q direction, and that force is NaN rather than invented
-#   * demotion to the dashboard when XML-RPC fails, and that it happens ONCE
-#   * that a failed width READ does not take out control
-#
-# What this cannot prove: that the URCap answers, or that the dashboard accepts
-# the programs. That is the bench, run order step 2 in todo-inlab.txt.
-#
-# Run: python tests/test_gripper_backend.py
+"""Offline tests for the RG2 gripper backend: no robot, no onRobot, no pycurl.
+
+WHY THIS EXISTS
+---------------
+`RG2` in src/robot_backend_ur.py is the only part of the hardware path that
+cannot be exercised by the simulator. Its XML-RPC client and its dashboard
+transport are injected rather than constructed (the same way URBackend takes
+its RTDE clients), so the whole class can be run against fakes:
+
+  * the grip-command -> jaw-width interpolation
+  * min-step suppression during an Arm.close_gripper ramp
+  * the width -> q direction, and that force is NaN rather than invented
+  * demotion to the dashboard when XML-RPC fails, and that it happens ONCE
+  * that a failed width READ does not take out control
+
+What this cannot prove: that the URCap answers, or that the dashboard accepts
+the programs. That is the bench, run order step 2 in todo-inlab.txt.
+
+Run: python tests/test_gripper_backend.py
+"""
 
 import os
 import sys

@@ -1,11 +1,12 @@
-# Regression test: analytic M(q)/g(q) must match the simulator.
-#
-# This is the check that makes `AnalyticKinematics` trustworthy as a hardware
-# replacement for `MujocoKinematics`. It caught three real bugs during
-# development (merged gripper mass, merged gripper COM, and a wrong cross-term
-# formula), so keep it.
-#
-# Run: python tests/test_dynamics.py
+"""Regression test: analytic M(q)/g(q) must match the simulator.
+
+This is the check that makes `AnalyticKinematics` trustworthy as a hardware
+replacement for `MujocoKinematics`. It caught three real bugs during
+development (merged gripper mass, merged gripper COM, and a wrong cross-term
+formula), so keep it.
+
+Run: python tests/test_dynamics.py
+"""
 
 import os
 import sys

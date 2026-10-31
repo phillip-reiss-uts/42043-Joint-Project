@@ -1,17 +1,18 @@
-# Task-flow test: the pickup key is a toggle, and a grasp does not release.
-#
-# WHY THIS EXISTS
-# ---------------
-# The operator-facing rule is: press the pickup key and the robot TAKES the
-# cube and holds it; press again and it sets it down. That rule used to be
-# violated inside the pick routine, which grasped, carried and released in one
-# call -- so the second press had nothing to do.
-#
-# The fix split the release out of the pick (src/pick.py: pick_and_hold) and
-# made the state machine own the toggle. This test pins that behaviour with
-# stubs, so it runs without MuJoCo and without a robot.
-#
-# Run: python tests/test_task_flow.py
+"""Task-flow test: the pickup key is a toggle, and a grasp does not release.
+
+WHY THIS EXISTS
+---------------
+The operator-facing rule is: press the pickup key and the robot TAKES the
+cube and holds it; press again and it sets it down. That rule used to be
+violated inside the pick routine, which grasped, carried and released in one
+call -- so the second press had nothing to do.
+
+The fix split the release out of the pick (src/pick.py: pick_and_hold) and
+made the state machine own the toggle. This test pins that behaviour with
+stubs, so it runs without MuJoCo and without a robot.
+
+Run: python tests/test_task_flow.py
+"""
 
 import os
 import sys

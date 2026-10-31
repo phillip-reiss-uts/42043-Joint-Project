@@ -1,8 +1,9 @@
-# State observer for the arm: estimates joint velocity from position encoders.
-#
-# KINEMATICS: M(q), g(q) and the servo gains come from a Kinematics provider
-# (src/kinematics.py), injected via `kin=`. The default builds a MuJoCo one, so
-# no behaviour changes, but this module no longer imports mujoco at top level.
+"""State observer for the arm: estimates joint velocity from position encoders.
+
+KINEMATICS: M(q), g(q) and the servo gains come from a Kinematics provider
+(src/kinematics.py), injected via `kin=`. The default builds a MuJoCo one;
+pass a provider to run on hardware.
+"""
 
 import numpy as np
 from scipy.linalg import expm, solve_discrete_are

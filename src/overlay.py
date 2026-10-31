@@ -1,12 +1,12 @@
-# Live viewer overlays for the passive viewer.
-#
-# The passive viewer exposes an MjvScene (viewer.user_scn) drawn on top of the
-# model, plus set_texts / set_images for 2D overlays. Nothing in the project
-# used them before.
-#
-# The hook is viewer.sync: we wrap it, so every existing sync call -- in
-# Arm.move, the servo loop, the hold loops -- draws the overlay first. No
-# plumbing through the call chain, and overlays appear wherever sync happens.
+"""Live viewer overlays for the passive viewer.
+
+Draws into the viewer's MjvScene (viewer.user_scn) and uses set_texts /
+set_images for 2D panels.
+
+Hooked by wrapping viewer.sync, so every sync call -- Arm.move, the servo
+loop, the hold loops -- draws the overlay first, with no plumbing through the
+call chain.
+"""
 
 import time
 

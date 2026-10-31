@@ -1,9 +1,10 @@
-# Linearised state-space model of the manipulator: plant A/B, position output C
-# and the LQR gain the observer uses.
-#
-# M(q), g(q) and the servo gains come from a Kinematics provider when one is
-# supplied; the (model, data) pair is only the legacy fallback, which builds a
-# MuJoCo provider.
+"""Linearised state-space model of the manipulator: plant A/B, position output C
+and the LQR gain the observer uses.
+
+M(q), g(q) and the servo gains come from a Kinematics provider when one is
+supplied; the (model, data) pair is only the legacy fallback, which builds a
+MuJoCo provider.
+"""
 
 import numpy as np
 

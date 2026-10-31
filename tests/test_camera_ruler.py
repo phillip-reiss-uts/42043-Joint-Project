@@ -1,38 +1,39 @@
-# Checklist Test 5: the camera ruler check -- does a detected cube land where
-# it physically is, compared with a tape measure?
-#
-# WHY THIS IS THE HARD ONE
-# ------------------------
-# Every other camera test is self-consistent: the deprojection round-trips, the
-# intrinsics are sane, the table filter separates object from surface. All of
-# that can pass while the estimate is 30 mm out, because every one of those
-# checks uses the same camera model to make its claim. Only a measurement taken
-# with a ruler and a pair of hands catches that, and this script exists to
-# record exactly those numbers.
-#
-# WHAT TO DO
-# ----------
-#   1. Put the cube at a spot you have measured, in the ROBOT BASE FRAME.
-#      The easy way is to jog the closed gripper to the cube first and read
-#      getActualTCPPose(); that gives you (x, y) without a tape measure.
-#   2. Run this with --truth x,y in METRES, relative to the base.
-#      Do it for the centre of the table, a near corner and a far corner.
-#   3. Compare the printed error. The checklist expects 3-5 mm at the centre
-#      and worse at the corners.
-#
-# The tool frame is the one thing that will be wrong first: CAM_MOUNT_POS/QUAT
-# in src/config.py are still the SIMULATOR's bracket placement, so a bias here
-# is expected until they are measured. A constant bias across all three spots
-# is the mount; an error that GROWS across the table is the extrinsics or a
-# scale mistake.
-#
-# Run:
-#     python tests/test_camera_ruler.py --truth 0.0,-0.27
-#     python tests/test_camera_ruler.py --truth 0.15,-0.15 \
-#         --no-robot --cam-pos 0.1,-0.1,0.9 --cam-target 0.0,-0.27,0.0
-#
-# A live D435i is the only depth source, so the camera must be attached.
-# --no-robot is for when the camera is here but the arm is not.
+"""Checklist Test 5: the camera ruler check -- does a detected cube land where
+it physically is, compared with a tape measure?
+
+WHY THIS IS THE HARD ONE
+------------------------
+Every other camera test is self-consistent: the deprojection round-trips, the
+intrinsics are sane, the table filter separates object from surface. All of
+that can pass while the estimate is 30 mm out, because every one of those
+checks uses the same camera model to make its claim. Only a measurement taken
+with a ruler and a pair of hands catches that, and this script exists to
+record exactly those numbers.
+
+WHAT TO DO
+----------
+  1. Put the cube at a spot you have measured, in the ROBOT BASE FRAME.
+     The easy way is to jog the closed gripper to the cube first and read
+     getActualTCPPose(); that gives you (x, y) without a tape measure.
+  2. Run this with --truth x,y in METRES, relative to the base.
+     Do it for the centre of the table, a near corner and a far corner.
+  3. Compare the printed error. The checklist expects 3-5 mm at the centre
+     and worse at the corners.
+
+The tool frame is the one thing that will be wrong first: CAM_MOUNT_POS/QUAT
+in src/config.py are still the SIMULATOR's bracket placement, so a bias here
+is expected until they are measured. A constant bias across all three spots
+is the mount; an error that GROWS across the table is the extrinsics or a
+scale mistake.
+
+Run:
+    python tests/test_camera_ruler.py --truth 0.0,-0.27
+    python tests/test_camera_ruler.py --truth 0.15,-0.15 \
+        --no-robot --cam-pos 0.1,-0.1,0.9 --cam-target 0.0,-0.27,0.0
+
+A live D435i is the only depth source, so the camera must be attached.
+--no-robot is for when the camera is here but the arm is not.
+"""
 
 import argparse
 import os

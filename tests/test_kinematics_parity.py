@@ -1,27 +1,28 @@
-# Regression test: the two kinematics must agree, in the CELL frame.
-#
-# WHY THIS EXISTS SEPARATELY FROM test_ur_kinematics.py
-# ----------------------------------------------------
-# That test compares the chain against the simulator through five quantities at
-# once -- position, rotation, Jacobian, mass matrix, gravity. It works, and the
-# mass matrix is what actually caught a stale payload, but it is an indirect
-# statement about a frame convention: to read it you have to trust that M and g
-# were built from the same frames you care about.
-#
-# This one asserts the convention DIRECTLY, on the number a porting bug moves
-# first: the TCP pose. A 180 deg error in the base heading shows up here as a
-# plain sign flip on x and y, with no interpretation needed. That is the exact
-# bug this project has already hit once -- the chain described the unrotated model while the cell
-# is turned half a turn -- and it survived several weeks because nothing checked
-# the pose itself.
-#
-# The second check is the important one: with root_yaw left at zero the chain
-# MUST disagree, by precisely Rz(UR_ROOT_YAW). A test that only ever passes with
-# the right flag cannot tell you the flag is being read.
-#
-# Runs OFFLINE. No robot and no ur_rtde: both sides are pure maths.
-#
-# Run: python tests/test_kinematics_parity.py
+"""Regression test: the two kinematics must agree, in the CELL frame.
+
+WHY THIS EXISTS SEPARATELY FROM test_ur_kinematics.py
+----------------------------------------------------
+That test compares the chain against the simulator through five quantities at
+once -- position, rotation, Jacobian, mass matrix, gravity. It works, and the
+mass matrix is what actually caught a stale payload, but it is an indirect
+statement about a frame convention: to read it you have to trust that M and g
+were built from the same frames you care about.
+
+This one asserts the convention DIRECTLY, on the number a porting bug moves
+first: the TCP pose. A 180 deg error in the base heading shows up here as a
+plain sign flip on x and y, with no interpretation needed. That is the exact
+bug this project has already hit once -- the chain described the unrotated model while the cell
+is turned half a turn -- and it survived several weeks because nothing checked
+the pose itself.
+
+The second check is the important one: with root_yaw left at zero the chain
+MUST disagree, by precisely Rz(UR_ROOT_YAW). A test that only ever passes with
+the right flag cannot tell you the flag is being read.
+
+Runs OFFLINE. No robot and no ur_rtde: both sides are pure maths.
+
+Run: python tests/test_kinematics_parity.py
+"""
 
 import os
 import sys

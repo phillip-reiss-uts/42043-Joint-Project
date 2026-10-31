@@ -1,25 +1,25 @@
-# The manipulation task: what the robot does, independent of how it is driven.
-#
-# HARDWARE PORTABILITY
-# --------------------
-# This module is part of the robot side and must run on a real UR3e. It
-# therefore contains NO mujoco, NO viewer, NO scene, NO key bindings and NO
-# object pool. It expresses the task purely in terms of:
-#
-#   * an arm-like object with move()/hold()/grasp_state()
-#   * an ObjectWorld (src/world.py) it can observe
-#   * callbacks for "should I stop?" and "should I pause?"
-#
-# Everything simulation-specific -- the passive viewer, the keyboard, the cube
-# spawn, the moving-target demo -- lives in run_simulation.py, which drives the
-# TaskStateMachine below and supplies those callbacks.
-#
-# The state machine itself is the part worth reusing on hardware: it encodes
-# WHEN to search, how to handle a pause mid-motion, and what an interrupted
-# search means. None of that depends on being a simulation.
-#
-# tests/test_layering.py enforces the no-mujoco rule for this module.
+"""The manipulation task: what the robot does, independent of how it is driven.
 
+HARDWARE PORTABILITY
+--------------------
+This module is part of the robot side and must run on a real UR3e. It
+therefore contains NO mujoco, NO viewer, NO scene, NO key bindings and NO
+object pool. It expresses the task purely in terms of:
+
+  * an arm-like object with move()/hold()/grasp_state()
+  * an ObjectWorld (src/world.py) it can observe
+  * callbacks for "should I stop?" and "should I pause?"
+
+Everything simulation-specific -- the passive viewer, the keyboard, the cube
+spawn, the moving-target demo -- lives in run_simulation.py, which drives the
+TaskStateMachine below and supplies those callbacks.
+
+The state machine itself is the part worth reusing on hardware: it encodes
+WHEN to search, how to handle a pause mid-motion, and what an interrupted
+search means. None of that depends on being a simulation.
+
+tests/test_layering.py enforces the no-mujoco rule for this module.
+"""
 
 # Task modes.
 #

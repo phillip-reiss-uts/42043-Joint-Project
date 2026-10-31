@@ -1,32 +1,33 @@
-# Hardware smoke test: does THIS machine drive the arm -- and is its config the
-# cell's, not the simulator's?
-#
-# WHY A SEPARATE FILE FROM test_hardware.py
-# -----------------------------------------
-# test_hardware.py used to carry a --real mode that was a stub: it listed what
-# should be checked and recorded every item as SKIP, so it could not fail. That
-# mode has been deleted. This file is the opposite: a small number of checks
-# that really run against the controller and really fail.
-#
-# The config check comes FIRST and is not advisory. Everything measured on this
-# cell -- the 180 deg root yaw, the table centre at -y, the true home -- lives in
-# src/config.py. That file is committed now, so a fresh clone carries it; the
-# silent failure left is a checkout of one of the OTHER branches (multi-object,
-# origin/simulation), whose config describes a different workcell. Every test
-# below would then pass against the wrong cell. So the values are asserted, not
-# printed.
-#
-# WHAT IT DOES
-# ------------
-#   1. config is the measured cell          (no motion)
-#   2. RTDE connects and returns joints     (no motion)
-#   3. one joint moves 2 deg at the paced 125 Hz rate   (MOTION, ~2 deg)
-#
-# Run:
-#     python3 tests/test_arm_control.py --config-only
-#     python3 tests/test_arm_control.py
-#
-# --config-only skips 2 and 3, so it is safe with the arm anywhere.
+"""Hardware smoke test: does THIS machine drive the arm -- and is its config the
+cell's, not the simulator's?
+
+WHY A SEPARATE FILE FROM test_hardware.py
+-----------------------------------------
+test_hardware.py used to carry a --real mode that was a stub: it listed what
+should be checked and recorded every item as SKIP, so it could not fail. That
+mode has been deleted. This file is the opposite: a small number of checks
+that really run against the controller and really fail.
+
+The config check comes FIRST and is not advisory. Everything measured on this
+cell -- the 180 deg root yaw, the table centre at -y, the true home -- lives in
+src/config.py. That file is committed now, so a fresh clone carries it; the
+silent failure left is a checkout of one of the OTHER branches (multi-object,
+origin/simulation), whose config describes a different workcell. Every test
+below would then pass against the wrong cell. So the values are asserted, not
+printed.
+
+WHAT IT DOES
+------------
+  1. config is the measured cell          (no motion)
+  2. RTDE connects and returns joints     (no motion)
+  3. one joint moves 2 deg at the paced 125 Hz rate   (MOTION, ~2 deg)
+
+Run:
+    python3 tests/test_arm_control.py --config-only
+    python3 tests/test_arm_control.py
+
+--config-only skips 2 and 3, so it is safe with the arm anywhere.
+"""
 
 import argparse
 import os

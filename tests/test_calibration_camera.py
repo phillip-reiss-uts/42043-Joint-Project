@@ -1,14 +1,15 @@
-# Camera extrinsic calibration: offline tests, no robot and no camera.
-#
-# The wrist solvers in src/calibration_camera.py are pure maths, so they can be
-# checked against a synthetic camera whose pose is known. That is the only way
-# to know a calibration tool is right before pointing it at a real cell.
-#
-# Wrist (eye-in-hand) only. The fixed-camera solvers (solve_touch,
-# transform_to_pos_target) were removed from src/calibration_camera.py: nothing
-# used them once the fixed-camera modes left tools/calibrate_camera.py.
-#
-# Run: python tests/test_calibration_camera.py
+"""Camera extrinsic calibration: offline tests, no robot and no camera.
+
+The wrist solvers in src/calibration_camera.py are pure maths, so they can be
+checked against a synthetic camera whose pose is known. That is the only way
+to know a calibration tool is right before pointing it at a real cell.
+
+Wrist (eye-in-hand) only. The fixed-camera solvers (solve_touch,
+transform_to_pos_target) were removed from src/calibration_camera.py: nothing
+used them once the fixed-camera modes left tools/calibrate_camera.py.
+
+Run: python tests/test_calibration_camera.py
+"""
 
 import os
 import sys

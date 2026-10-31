@@ -1,19 +1,20 @@
-# Offline tests for the hardware backend: no robot, no ur_rtde.
-#
-# WHY THIS EXISTS
-# ---------------
-# `src/robot_backend_ur.py` is the one part of the port that cannot be exercised
-# by the simulator. Everything it does can still be tested, because its RTDE and
-# gripper dependencies are injected rather than constructed: the fakes below
-# stand in for the controller and the gripper, and the assertions are the
-# RobotBackend contract.
-#
-# What this proves: the plumbing (servoj pacing, joint readback, the gripper
-# command and its throttle, the grasp trio) and that the hardware front-end
-# imports without the simulator. What it cannot prove: that the real controller
-# accepts these calls -- that is `tests/test_arm_control.py`.
-#
-# Run: python tests/test_ur_backend.py
+"""Offline tests for the hardware backend: no robot, no ur_rtde.
+
+WHY THIS EXISTS
+---------------
+`src/robot_backend_ur.py` is the one part of the port that cannot be exercised
+by the simulator. Everything it does can still be tested, because its RTDE and
+gripper dependencies are injected rather than constructed: the fakes below
+stand in for the controller and the gripper, and the assertions are the
+RobotBackend contract.
+
+What this proves: the plumbing (servoj pacing, joint readback, the gripper
+command and its throttle, the grasp trio) and that the hardware front-end
+imports without the simulator. What it cannot prove: that the real controller
+accepts these calls -- that is `tests/test_arm_control.py`.
+
+Run: python tests/test_ur_backend.py
+"""
 
 import os
 import sys

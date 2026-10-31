@@ -1,4 +1,4 @@
-# Object perception from the wrist RGB-D camera.
+"""Object perception from the wrist RGB-D camera."""
 
 from dataclasses import dataclass
 

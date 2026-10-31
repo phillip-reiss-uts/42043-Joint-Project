@@ -1,9 +1,10 @@
-# Position-Based Visual Servoing for the grasp approach.
-#
-# HARDWARE BOUNDARY: this module is robot-side and contains no `import mujoco`.
-# It observes the world only through src.world.ObjectWorld (TargetView records),
-# gets geometry from arm.kin (src/kinematics.py) and steps through arm.backend
-# (src/robot_backend.py). It never imports the object pool or the cube driver.
+"""Position-Based Visual Servoing for the grasp approach.
+
+HARDWARE BOUNDARY: this module is robot-side and contains no `import mujoco`.
+It observes the world only through src.world.ObjectWorld (TargetView records),
+gets geometry from arm.kin (src/kinematics.py) and steps through arm.backend
+(src/robot_backend.py). It never imports the object pool or the cube driver.
+"""
 
 import numpy as np
 

@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-# Entry point. Dispatches to a front-end.
-#
-#   python main.py              -> simulation (current default)
-#   python main.py --sim        -> simulation, explicit
-#   python main.py --hardware   -> real robot (run_hardware.py)
-#
-#   python main.py --lightweight   simulation with no camera panels; for older
-#                                  machines. See the flag's help.
-#
-# This file is deliberately minimal: it decides WHICH front-end runs and does
-# nothing else. All simulation concerns live in run_simulation.py; all hardware
-# concerns in run_hardware.py; all portable task logic lives in src/task.py.
-#
-# When called without arguments, this file will run the simulation. On the
-# cell call --hardware or --real. Simulation can also be run by calling --sim.
+"""Entry point. Dispatches to a front-end.
+
+  python main.py              -> simulation (current default)
+  python main.py --sim        -> simulation, explicit
+  python main.py --hardware   -> real robot (run_hardware.py)
+
+  python main.py --lightweight   simulation with no camera panels; for older
+                                 machines. See the flag's help.
+
+This file is deliberately minimal: it decides WHICH front-end runs and does
+nothing else. All simulation concerns live in run_simulation.py; all hardware
+concerns in run_hardware.py; all portable task logic lives in src/task.py.
+
+When called without arguments, this file will run the simulation. On the
+cell call --hardware or --real. Simulation can also be run by calling --sim.
+"""
 
 import argparse
 import sys

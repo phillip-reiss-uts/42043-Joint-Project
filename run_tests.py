@@ -1,15 +1,16 @@
-# Headless test harness.
-#
-# Runs the closed-loop approach repeatedly against randomised spawns, optionally
-# with the object walking, and records the servo path, the object's own path and
-# the estimate error at every viewer sync. Writes a summary table plus graphs.
-#
-#   python run_tests.py                       # 6 trials, static object, KF on
-#   python run_tests.py --trials 8 --band medium
-#   python run_tests.py --kf both --band fast --trials 4
-#
-# Everything is headless: the viewer is replaced by a recorder that samples
-# state on the sync calls the servo and the arm already make.
+"""Headless test harness.
+
+Runs the closed-loop approach repeatedly against randomised spawns, optionally
+with the object walking, and records the servo path, the object's own path and
+the estimate error at every viewer sync. Writes a summary table plus graphs.
+
+  python run_tests.py                       # 6 trials, static object, KF on
+  python run_tests.py --trials 8 --band medium
+  python run_tests.py --kf both --band fast --trials 4
+
+Everything is headless: the viewer is replaced by a recorder that samples
+state on the sync calls the servo and the arm already make.
+"""
 
 import argparse
 import csv

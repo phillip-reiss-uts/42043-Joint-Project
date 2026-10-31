@@ -1,32 +1,33 @@
-# Arm motion: IK, trajectory execution, gripper, and view repositioning.
-#
-# HARDWARE BOUNDARY: this module is the robot. It knows about joints, the
-# gripper and the viewer, and it knows NOTHING about the object pool, the cube
-# driver or the demonstration. It has no reference to any object, and no code
-# path here reads or writes object state.
-#
-# The `on_step` callback replaces the old `viewer=` argument so that this
-# module no longer imports the overlay: on hardware there is no viewer, and the
-# trajectory executor must compile without one. `main.py` passes viewer.sync.
-#
-# TWO SEAMS, NO MUJOCO
-# --------------------
-# This module contains no `import mujoco`. Everything simulator-specific is
-# behind a provider, and both providers are REQUIRED constructor arguments:
-#
-#   src/kinematics.py     FK, Jacobian, M(q), g(q)   -- geometry
-#   src/robot_backend.py  stepping, joint I/O, gripper readback -- the clock
-#
-# The implementations live with their own layer and are never imported here:
-#
-#   simulation   src/kinematics_mujoco.py  MujocoKinematics
-#                src/robot_backend_mujoco.py  MujocoBackend
-#   hardware     URKinematics / URBackend, talking to the controller instead
-#
-# The entry point decides which pair to build, so this module does not change
-# between simulation and hardware. `model`/`data` are still accepted because
-# the simulation implementations are constructed from them; nothing here
-# dereferences them for control.
+"""Arm motion: IK, trajectory execution, gripper, and view repositioning.
+
+HARDWARE BOUNDARY: this module is the robot. It knows about joints, the
+gripper and the viewer, and it knows NOTHING about the object pool, the cube
+driver or the demonstration. It has no reference to any object, and no code
+path here reads or writes object state.
+
+Progress is reported through the `on_step` callback, not a viewer: on hardware
+there is no overlay, and this module must compile without one. Pass
+`on_step=viewer.sync` to pace a simulation.
+
+TWO SEAMS, NO MUJOCO
+--------------------
+This module contains no `import mujoco`. Everything simulator-specific is
+behind a provider, and both providers are REQUIRED constructor arguments:
+
+  src/kinematics.py     FK, Jacobian, M(q), g(q)   -- geometry
+  src/robot_backend.py  stepping, joint I/O, gripper readback -- the clock
+
+The implementations live with their own layer and are never imported here:
+
+  simulation   src/kinematics_mujoco.py  MujocoKinematics
+               src/robot_backend_mujoco.py  MujocoBackend
+  hardware     URKinematics / URBackend, talking to the controller instead
+
+The entry point decides which pair to build, so this module does not change
+between simulation and hardware. `model`/`data` are still accepted because
+the simulation implementations are constructed from them; nothing here
+dereferences them for control.
+"""
 
 import numpy as np
 

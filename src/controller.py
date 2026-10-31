@@ -1,4 +1,4 @@
-# Feedback control running on the observer's estimated state.
+"""Feedback control running on the observer's estimated state."""
 
 import numpy as np
 

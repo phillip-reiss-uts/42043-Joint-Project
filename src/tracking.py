@@ -1,14 +1,15 @@
-# Constant-velocity Kalman filter on the tracked object's world position.
-#
-# The camera gives an independent position measurement every perceive_every
-# servo iterations. At 320x240 that measurement carries ~1.5 mm of error, it is
-# biased toward the visible part of the object once the jaws start clipping it,
-# and it disappears entirely for stretches when the object sits in the camera's
-# own shadow. The filter turns that intermittent, noisy stream into a continuous
-# estimate: it smooths the noise, propagates through the gaps, supplies a
-# velocity the servo can lead with, and gates out gross outliers.
-#
-# State is [x, y, z, vx, vy, vz]; the measurement is position only.
+"""Constant-velocity Kalman filter on the tracked object's world position.
+
+The camera gives an independent position measurement every perceive_every
+servo iterations. At 320x240 that measurement carries ~1.5 mm of error, it is
+biased toward the visible part of the object once the jaws start clipping it,
+and it disappears entirely for stretches when the object sits in the camera's
+own shadow. The filter turns that intermittent, noisy stream into a continuous
+estimate: it smooths the noise, propagates through the gaps, supplies a
+velocity the servo can lead with, and gates out gross outliers.
+
+State is [x, y, z, vx, vy, vz]; the measurement is position only.
+"""
 
 import numpy as np
 

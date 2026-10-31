@@ -1,20 +1,21 @@
-# Object motion for the robustness demonstration.
-#
-# SIMULATION ONLY. This module drives the cube as a ghost: it writes the
-# object's velocity directly into MuJoCo's state every step. There is no
-# hardware equivalent -- you cannot write `qvel` on a real table -- so nothing
-# here is part of the robot. Robot-side code must never import this module, and
-# tests/test_layering.py enforces that.
-#
-# Motion is a straight glide at one of three speed bands, in a direction that
-# is re-randomised on a timer and mirrored off the spawn bounds, so it stays on
-# the table and inside the camera footprint.
-#
-# NOTE: this driver deliberately does NOT know where the robot is. An earlier
-# version took the gripper position and halted the cube when the arm came
-# close, which made the cube's motion law depend on the robot. That coupling is
-# gone: the robot now waits for the object to hold still rather than forcing it
-# to stop, so the demo needs no knowledge of the arm at all.
+"""Object motion for the robustness demonstration.
+
+SIMULATION ONLY. This module drives the cube as a ghost: it writes the
+object's velocity directly into MuJoCo's state every step. There is no
+hardware equivalent -- you cannot write `qvel` on a real table -- so nothing
+here is part of the robot. Robot-side code must never import this module, and
+tests/test_layering.py enforces that.
+
+Motion is a straight glide at one of three speed bands, in a direction that
+is re-randomised on a timer and mirrored off the spawn bounds, so it stays on
+the table and inside the camera footprint.
+
+NOTE: this driver deliberately does NOT know where the robot is. An earlier
+version took the gripper position and halted the cube when the arm came
+close, which made the cube's motion law depend on the robot. That coupling is
+gone: the robot now waits for the object to hold still rather than forcing it
+to stop, so the demo needs no knowledge of the arm at all.
+"""
 
 import numpy as np
 

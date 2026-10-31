@@ -1,16 +1,17 @@
-# Regression test: the HARDWARE kinematics must match the simulator.
-#
-# `src/kinematics_ur.py` is what a real UR3e build uses: FK/Jacobian from the
-# link chain in src/arm_dynamics.py, M(q)/g(q) from the same. The chain numbers
-# are derived from the arm + payload link data, which is a property of the
-# hardware, not of MuJoCo -- but MuJoCo is the only independent implementation
-# of the same geometry available here, so it is the reference.
-#
-# This runs OFFLINE. No robot, no ur_rtde: it proves that the code path a
-# hardware front-end would use computes the same FK, Jacobian, M and g as the
-# simulation, so a porting bug shows up here rather than on the arm.
-#
-# Run: python tests/test_ur_kinematics.py
+"""Regression test: the HARDWARE kinematics must match the simulator.
+
+`src/kinematics_ur.py` is what a real UR3e build uses: FK/Jacobian from the
+link chain in src/arm_dynamics.py, M(q)/g(q) from the same. The chain numbers
+are derived from the arm + payload link data, which is a property of the
+hardware, not of MuJoCo -- but MuJoCo is the only independent implementation
+of the same geometry available here, so it is the reference.
+
+This runs OFFLINE. No robot, no ur_rtde: it proves that the code path a
+hardware front-end would use computes the same FK, Jacobian, M and g as the
+simulation, so a porting bug shows up here rather than on the arm.
+
+Run: python tests/test_ur_kinematics.py
+"""
 
 import os
 import sys

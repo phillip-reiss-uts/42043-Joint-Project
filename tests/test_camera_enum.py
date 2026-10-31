@@ -1,28 +1,29 @@
-# RealSense D435i first contact: is the device there, and can it stream?
-#
-# WHAT THIS PROVES
-# ----------------
-# Three separate questions, in the order they fail:
-#
-#   1. does librealsense's device list contain anything?   (USB / driver)
-#   2. can a raw pipeline be started, with no project code? (SDK / OS)
-#   3. does `RealSenseSource` -- the class the pick actually uses -- work?
-#      Its docstring says it has never been executed, so this is its first run.
-#
-# Keeping 2 separate from 3 is the point: `RealSenseSource` is unverified code,
-# so a failure there must not be confused with the camera or the SDK being
-# broken. Run the steps in order and stop at the first one that fails.
-#
-# PLATFORM NOTES (measured 2026-10-23)
-# ------------------------------------
-# macOS fails at step 2 with "failed to set power state": the camera enumerates
-# (system_profiler shows it at 5 Gb/s, 720 mA, and Photo Booth can open it) but
-# librealsense cannot take exclusive UVC control. The same camera streams fine
-# on Debian, so that is a platform limitation, not a cable or a code fault.
-# On macOS the thing to try is a libusb-backed build (FORCE_RSUSB_BACKEND);
-# the pip wheel never gets there.
-#
-# Run: python tests/test_camera_enum.py
+"""RealSense D435i first contact: is the device there, and can it stream?
+
+WHAT THIS PROVES
+----------------
+Three separate questions, in the order they fail:
+
+  1. does librealsense's device list contain anything?   (USB / driver)
+  2. can a raw pipeline be started, with no project code? (SDK / OS)
+  3. does `RealSenseSource` -- the class the pick actually uses -- work?
+     Its docstring says it has never been executed, so this is its first run.
+
+Keeping 2 separate from 3 is the point: `RealSenseSource` is unverified code,
+so a failure there must not be confused with the camera or the SDK being
+broken. Run the steps in order and stop at the first one that fails.
+
+PLATFORM NOTES (measured 2026-10-23)
+------------------------------------
+macOS fails at step 2 with "failed to set power state": the camera enumerates
+(system_profiler shows it at 5 Gb/s, 720 mA, and Photo Booth can open it) but
+librealsense cannot take exclusive UVC control. The same camera streams fine
+on Debian, so that is a platform limitation, not a cable or a code fault.
+On macOS the thing to try is a libusb-backed build (FORCE_RSUSB_BACKEND);
+the pip wheel never gets there.
+
+Run: python tests/test_camera_enum.py
+"""
 
 import os
 import sys

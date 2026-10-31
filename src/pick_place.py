@@ -1,8 +1,9 @@
-# One pick-and-place attempt, end to end.
-#
-# Scene layout (spawning, the chute, the object pool) lives here, but the robot
-# reaches the world only through src.world.ObjectWorld. See src/world.py for
-# the boundary and tests/test_layering.py for the rule that enforces it.
+"""One pick-and-place attempt, end to end.
+
+Scene layout (spawning, the chute, the object pool) lives here, but the robot
+reaches the world only through src.world.ObjectWorld. See src/world.py for
+the boundary and tests/test_layering.py for the rule that enforces it.
+"""
 
 import mujoco
 import numpy as np

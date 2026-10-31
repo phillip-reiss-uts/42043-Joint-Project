@@ -1,37 +1,38 @@
-# Layering regression test: the robot must not depend on the world's guts.
-#
-# WHY THIS EXISTS
-# ---------------
-# The robot side of this project has to run on a real UR3e. The object side is
-# a simulation demonstration (a cube glided by writing qvel, teleported into
-# place, scored by reading its true pose). Mixing the two is what makes a
-# simulator-only prototype unportable, and it is the kind of coupling that
-# creeps back in one convenient `import` at a time.
-#
-# So the rule is enforced mechanically rather than by comment:
-#
-#   ROBOT modules may import only: config, overlay, perception (geometry),
-#   tracking, controller, observer, state_space, world.
-#
-#   ROBOT modules must NOT import: target_motion, pick_place, model_loader,
-#   or camera/calibration (the sensor and scene are the world's business).
-#
-# World-facing modules (main, run_tests, pick_place, world_sim, calibration,
-# model_loader, overlay, target_motion) may import anything.
-#
-# PROVIDER SEAM (second rule, no simulator behind the interfaces)
-# --------------------------------------------------------------
-# The three seams that let the same robot code drive MuJoCo or a real UR3e are:
-#
-#     src/kinematics.py       Kinematics      -> src/kinematics_mujoco.py
-#     src/robot_backend.py    RobotBackend    -> src/robot_backend_mujoco.py
-#     src/world.py            ObjectWorld     -> src/world_sim.py
-#
-# The left-hand modules are SHARED: they must not import mujoco, and must not
-# import any of the right-hand implementation modules. The implementations are
-# simulation-only and are chosen by the entry point, never by the robot layer.
-#
-# Run:  python tests/test_layering.py      (or `python -m pytest tests/`)
+"""Layering regression test: the robot must not depend on the world's guts.
+
+WHY THIS EXISTS
+---------------
+The robot side of this project has to run on a real UR3e. The object side is
+a simulation demonstration (a cube glided by writing qvel, teleported into
+place, scored by reading its true pose). Mixing the two is what makes a
+simulator-only prototype unportable, and it is the kind of coupling that
+creeps back in one convenient `import` at a time.
+
+So the rule is enforced mechanically rather than by comment:
+
+  ROBOT modules may import only: config, overlay, perception (geometry),
+  tracking, controller, observer, state_space, world.
+
+  ROBOT modules must NOT import: target_motion, pick_place, model_loader,
+  or camera/calibration (the sensor and scene are the world's business).
+
+World-facing modules (main, run_tests, pick_place, world_sim, calibration,
+model_loader, overlay, target_motion) may import anything.
+
+PROVIDER SEAM (second rule, no simulator behind the interfaces)
+--------------------------------------------------------------
+The three seams that let the same robot code drive MuJoCo or a real UR3e are:
+
+    src/kinematics.py       Kinematics      -> src/kinematics_mujoco.py
+    src/robot_backend.py    RobotBackend    -> src/robot_backend_mujoco.py
+    src/world.py            ObjectWorld     -> src/world_sim.py
+
+The left-hand modules are SHARED: they must not import mujoco, and must not
+import any of the right-hand implementation modules. The implementations are
+simulation-only and are chosen by the entry point, never by the robot layer.
+
+Run:  python tests/test_layering.py      (or `python -m pytest tests/`)
+"""
 
 import ast
 import os

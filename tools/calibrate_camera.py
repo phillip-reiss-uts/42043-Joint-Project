@@ -1,46 +1,26 @@
 #!/usr/bin/env python3
-"""Camera extrinsic calibration for the wrist (eye-in-hand) mount. Two methods,
-one kind of output:
+"""Wrist (eye-in-hand) camera extrinsics. Two modes, one output: CAM_POS /
+CAM_QUAT, which CAM_MOUNT_* alias, for src/config.py.
 
-    --aruco             a printed marker, from several arm poses
-                        -> CAM_POS / CAM_QUAT   (CAM_MOUNT_* alias them)
-    --touch             no marker: the cube IS the target
-                        -> CAM_POS / CAM_QUAT
+    python tools/calibrate_camera.py --aruco     # printed marker, several poses
+    python tools/calibrate_camera.py --touch     # touched cube, no marker
 
-    python tools/calibrate_camera.py --aruco
-    python tools/calibrate_camera.py --touch
+--aruco   Marker flat on the table; touch two adjacent corners with the TCP to
+          fix the board in the base frame; record solvePnP from several poses.
+          Each pose estimates the same tool -> camera constant, so the spread
+          is the error bar. Needs OpenCV.
 
-The marker size defaults to 0.10 m because that is the marker in models/aruco/.
-Pass --marker-size with the MEASURED edge if you print a different size: a
-wrong value here scales the whole fit, and it fails like a bad mount.
+--touch   No marker: touch the cube's top at each station to fix that point in
+          the base frame, lift it into view to fix the same point in the camera
+          frame, and fit the rigid transform (Kabsch). Camera height is
+          observable. Needs pyrealsense2.
 
---aruco   Print a marker, lay it flat on the table, touch two adjacent corners
-          with the TCP, then capture. solvePnP from one image. Needs OpenCV
-          (`opencv-contrib-python`) and observes all six degrees of freedom.
+In both, TWIST THE WRIST between poses: translation-only motion barely
+constrains the mount's rotation. --marker-size defaults to the 0.10 m marker in
+models/aruco/; measure yours and pass the real edge.
 
-          The same marker and the same two touches locate the board ONCE, in
-          the base frame. Then the arm is moved to several poses and the board
-          is photographed from each. Every pose yields one estimate of the same
-          constant -- tool -> camera -- so the SPREAD across poses is the error
-          bar, not just a number to average away. This is the eye-in-hand case:
-          the camera moves, the board does not, and no AX = XB factorisation is
-          needed because the board's base-frame pose is known from the touches.
-
-          Move mostly by TWISTING THE WRIST between poses. Translation-only
-          motion barely constrains the mount's rotation, which is the part a
-          printed clamp gets wrong.
-
---touch   The ruler method without the marker. At each station the pads are
-          lowered onto the cube's top, which fixes that cube's centre in the
-          base frame; lift so the cube is in view and capture, which fixes the
-          same point in the camera frame. The mount is the rigid transform
-          between the two point sets (Kabsch), so no marker, no PnP and no
-          touch-to-board conversion are involved. The camera height IS
-          observable here. Twist the wrist between stations for the same
-          reason as --aruco.
-
-Only the RTDE *receive* interface is used: the arm can be hand-guided in local
-mode, and nothing here commands motion. The pendant stays in charge.
+The arm is hand-guided: only the RTDE receive interface is used, and nothing
+here commands motion. The pendant stays in charge.
 """
 
 import argparse
