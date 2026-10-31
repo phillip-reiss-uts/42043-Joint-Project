@@ -17,7 +17,7 @@ from src.config import (
     HARD_SPAWNS, HARD_SPAWN_MODE, REALLY_HARD_MODE, HARD_BLIND_Y,
     RANDOMIZE_SPAWN, RANDOMIZE_YAW,
     MIN_OBJECT_SEPARATION,
-    APPROACH_Z, LIFT_Z, GRASP_TIP_OFFSET,
+    APPROACH_Z, LIFT_Z, PICK_Z,
     STEPS_RELEASE, DROP_HOLD_STEPS,
     SYNC_STEPS,
     MAX_PASSES,
@@ -254,10 +254,9 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     # random yaw) would spin the cube on the way down.
     _, R = arm.kin.pose(arm.backend.joint_positions())
 
-    # GRASP_TIP_OFFSET puts the tool at the grasp height, the same figure the
-    # pick and the hardware put-down use, so releasing at this height sets the
-    # cube down ON the table rather than several mm into or above it.
-    release_z = TABLE_HEIGHT + OBJECT_HEIGHT / 2.0 + GRASP_TIP_OFFSET
+    # PICK_Z is the one pick/place height, the same one the pick and the
+    # hardware put-down use, so releasing sets the cube down ON the table.
+    release_z = PICK_Z
     q_high = arm.solve_ik([tx, ty, release_z + APPROACH_Z],
                           arm.backend.joint_positions(), R_target=R)
     q_low = arm.solve_ik([tx, ty, release_z], q_high, R_target=R)

@@ -9,7 +9,7 @@ gets geometry from arm.kin (src/kinematics.py) and steps through arm.backend
 import numpy as np
 
 from src.config import (
-    ARM_DOF, GRASP_TIP_OFFSET, R_DOWN, JOINT_RANGE,
+    ARM_DOF, PICK_Z, TOOL_MOUNT_POS, R_DOWN, JOINT_RANGE,
     GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
     SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD,
@@ -20,8 +20,8 @@ from src.config import (
     SERVO_TRACK_MOVING, SERVO_STILL_TIME, SERVO_TRACK_ITERS, SERVO_STILL_TOL,
     SERVO_SEARCH_LIMIT, SERVO_YAW_SMOOTH, SERVO_WATCH_DESCENT,
     SERVO_MOVE_TOL, SERVO_COMMIT_TRIES,
-    TABLE_HEIGHT, GRIPPER_TO_PAD_MM, TABLE_CONTACT_CLEARANCE_MM,
-    CONTACT_SLOW_ZONE_MM, CONTACT_SLOW_FACTOR,
+    TABLE_HEIGHT, GRIPPER_TO_PAD, TABLE_CONTACT_CLEARANCE,
+    CONTACT_SLOW_ZONE, CONTACT_SLOW_FACTOR,
 )
 from src.tracking import TargetFilter
 # Pure geometry helper; carries no object or simulator state.
@@ -202,14 +202,14 @@ class PBVSServo:
         # Lowest gripper/base height the descent may command: pad bottom at the
         # tabletop plus the clearance.
         return (TABLE_HEIGHT
-                + (GRIPPER_TO_PAD_MM + TABLE_CONTACT_CLEARANCE_MM) / 1000.0)
+                + GRIPPER_TO_PAD + TABLE_CONTACT_CLEARANCE)
 
     def gate_report(self):
         # One-line description of a clamped grasp, for the terminal and overlay.
         return ('[SERVO] Z GATE: commanded grasp z %.3f is below the contact limit '
                 '%.3f (pad %.1f mm + %.1f mm clearance) -- stopped short by %.1f mm'
-                % (self.gate_requested_z, self.z_floor(), GRIPPER_TO_PAD_MM,
-                   TABLE_CONTACT_CLEARANCE_MM,
+                % (self.gate_requested_z, self.z_floor(), GRIPPER_TO_PAD * 1e3,
+                   TABLE_CONTACT_CLEARANCE * 1e3,
                    (self.z_floor() - self.gate_requested_z) * 1e3))
 
     def _control(self, state):
@@ -356,9 +356,10 @@ class PBVSServo:
         p = self.p_est
         if self.kf is not None and self.kf.ready and self.lead_s != 0.0:
             p = self.kf.lead(self.lead_s)
-        # GRASP_TIP_OFFSET already carries GRASP_CONTACT_OFFSET_MM, so the servo
-        # descent stops at the same height the commit drives to.
-        z_want = float(p[2] + GRASP_TIP_OFFSET + z_offset)
+        # PICK_Z is the grasp height in the FLANGE frame; this servo commands
+        # gripper/base, so step back down the tool axis. The grasp height is
+        # absolute, so the estimated object z no longer sets it.
+        z_want = float((PICK_Z - TOOL_MOUNT_POS[2]) + z_offset)
         # CONTACT GATE. The lowest part of the gripper is the pad bottom, well
         # below gripper/base, so a grasp commanded too low sends the pads through
         # the table. Clamp the commanded height and remember that we did: the
@@ -810,7 +811,7 @@ class PBVSServo:
         # Slow the final stretch when this run ENDS near the contact gate. The
         # quintic profile already eases out, but a descent that finishes within a
         # few millimetres of the table should arrive gently as well.
-        if p_des[2] - self.z_floor() <= CONTACT_SLOW_ZONE_MM / 1000.0:
+        if p_des[2] - self.z_floor() <= CONTACT_SLOW_ZONE:
             v_cart = max(float(v_cart) * CONTACT_SLOW_FACTOR, 1e-3)
         dist = float(np.linalg.norm(p_des - p0))
         steps = max(1, int(dist / max(float(v_cart), 1e-6) / backend.dt))
@@ -927,10 +928,9 @@ class PBVSServo:
         self.p_est = np.array(ref, float)
         self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
                              else self.best_yaw)
-        # GRASP_CONTACT_OFFSET_MM is already inside desired_pose (as part of
-        # GRASP_TIP_OFFSET), so the grasp pose and the descent share one height.
-        # The contact gate still clamps it to the pad limit, so this cannot drive
-        # into the table.
+        # One height for the grasp and the descent it replaces: PICK_Z, applied
+        # in desired_pose. The contact gate still clamps it to the pad limit, so
+        # it cannot drive into the table.
         p_des, R_des = self.desired_pose(0.0)
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:

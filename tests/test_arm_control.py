@@ -51,7 +51,7 @@ EXPECT_TABLE_HALF = [0.22, 0.15]
 # tabletop is z = 0. This used to assert 0.2315, which was never the table: it is
 # the FLANGE-to-lowest-pad TOOL length, and it now lives with the tool geometry in
 # config.py. Asserting it here failed the config gate on a correct tree.
-EXPECT_TABLE_HEIGHT = 0.0
+EXPECT_TABLE_HEIGHT = 0.015
 EXPECT_HOME0 = 1.5708          # shoulder_pan at the true home (was -0.366)
 
 STEP_DEG = 2.0

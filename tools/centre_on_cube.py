@@ -32,7 +32,8 @@ from src.world_real import RealObjectWorld, RealSenseSource
 
 
 def mount():
-    # gripper base -> camera, as config has it (CAM_MOUNT_* alias CAM_POS/QUAT)
+    # FLANGE -> camera. CAM_MOUNT_* is flange-relative, so the kinematics must
+    # report the flange frame for this to compose correctly.
     T = np.eye(4)
     T[:3, :3] = rot_from_quat(cfg.CAM_MOUNT_QUAT)
     T[:3, 3] = np.array(cfg.CAM_MOUNT_POS, float)
@@ -58,8 +59,8 @@ def main():
     # millimetres outside TABLE_XY_BOUNDS, so every look returns nothing.
     kin = URKinematics(dyn, (np.full(6, cfg.UR_SERVO_KP),
                              np.full(6, cfg.UR_SERVO_KV)),
-                       tool_pos=cfg.TOOL_MOUNT_POS,
-                       tool_quat=cfg.TOOL_MOUNT_QUAT,
+                       tool_pos=(0.0, 0.0, 0.0),
+                       tool_quat=(1.0, 0.0, 0.0, 0.0),
                        root_yaw=cfg.UR_ROOT_YAW)
     backend = connect(args.ip, activate_gripper=False, dt=cfg.UR_CYCLE_DT,
                       lookahead_time=cfg.UR_LOOKAHEAD_TIME,
@@ -73,9 +74,9 @@ def main():
         flange_pose=lambda: kin.pose(
             np.asarray(backend.joint_positions(), float)),
         T_flange_cam=mount())
-    # the same hover the servo uses: camera CAM_HOVER_HEIGHT_MM above the table
-    z_hover = (cfg.TABLE_HEIGHT + cfg.OBJECT_HEIGHT / 2.0
-               + cfg.GRASP_TIP_OFFSET + cfg.SERVO_STANDOFF)
+    # the same hover the servo uses: PICK_Z lifted by the standoff, i.e. the
+    # camera CAM_HOVER_HEIGHT above the table.
+    z_hover = cfg.PICK_Z + cfg.SERVO_STANDOFF
 
     try:
         for i in range(args.looks):

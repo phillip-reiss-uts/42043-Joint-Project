@@ -43,7 +43,7 @@ from src.arm import Arm
 from src.arm_dynamics import ArmDynamics, rot_from_quat
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED,
-    TABLE_HEIGHT, OBJECT_HEIGHT, GRASP_TIP_OFFSET, APPROACH_Z, STEPS_RELEASE,
+    PICK_Z, APPROACH_Z, STEPS_RELEASE,
 )
 from src.kinematics_ur import URKinematics
 from src.pick import pick_and_hold
@@ -121,15 +121,13 @@ def _camera_mount():
 def _put_down(arm):
     # Lower the held cube to the table directly beneath the gripper and release.
     #
-    # The descent matches the GRASP, which is the only place on this cell whose
-    # height is known to be right: GRASP_TIP_OFFSET is the geometric grasp height
-    # minus the measured correction, exactly as PBVSServo.desired_pose applies it,
-    # so the pick and the put-down close and open the jaws at one height.
+    # The descent matches the GRASP: PICK_Z, the one pick/place height, applied
+    # in the FLANGE frame like every other height in config.
     #
     # See put_cube_down in pick_place for the simulation twin (that one also
     # clamps into the spawn region, which has no meaning here).
     p, R = arm.kin.pose(arm.backend.joint_positions())
-    release_z = TABLE_HEIGHT + OBJECT_HEIGHT / 2.0 + GRASP_TIP_OFFSET
+    release_z = PICK_Z
     q_high = arm.solve_ik([p[0], p[1], release_z + APPROACH_Z],
                           arm.backend.joint_positions(), R_target=R)
     arm.move(q_high, GRIP_CLOSED, rate=RAPID)
@@ -180,7 +178,7 @@ def main(argv=None):
     # the cube vanish from the log, and it is invisible otherwise.
     print('  perception : hand filter %.0f mm (points below table+%.0f mm '
           'ignored), log every %.1f s'
-          % (cfg.HAND_FILTER_MM, cfg.HAND_FILTER_MM, cfg.PERCEPTION_LOG_S))
+          % (cfg.HAND_FILTER * 1e3, cfg.HAND_FILTER * 1e3, cfg.PERCEPTION_LOG_S))
     print('  snapshots  : %s'
           % ('v writes a PNG into %s' % args.snapshot if args.snapshot
              else 'OFF (add --snapshot DIR to arm the v key)'))
@@ -195,10 +193,13 @@ def main(argv=None):
         return 2
 
     dyn = ArmDynamics.from_file(_links_path())
+    # FLANGE frame: everything measured here (CAM_MOUNT, PICK_Z) is stated from
+    # the flange, which is what the controller reports. Servo targets and the
+    # contact gate step back to gripper/base themselves.
     kin = URKinematics(dyn, (np.full(ARM_DOF, cfg.UR_SERVO_KP),
                              np.full(ARM_DOF, cfg.UR_SERVO_KV)),
-                       tool_pos=cfg.TOOL_MOUNT_POS,
-                       tool_quat=cfg.TOOL_MOUNT_QUAT,
+                       tool_pos=(0.0, 0.0, 0.0),
+                       tool_quat=(1.0, 0.0, 0.0, 0.0),
                        root_yaw=cfg.UR_ROOT_YAW)
     arm = Arm(None, None, kinematics=kin, backend=backend)
 

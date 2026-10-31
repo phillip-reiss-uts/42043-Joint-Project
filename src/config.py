@@ -3,9 +3,9 @@ import numpy as np
 
 
 # ---- workcell -------------------------------------------------------------
-# UR3e, tabletop = robot base plane. Table is axis-aligned: 440 mm along x,
-# 300 mm deep in -y (measured 2026-10-23).
-TABLE_HEIGHT = 0.0
+# UR3e. Table is axis-aligned: 440 mm along x, 300 mm deep in -y (measured
+# 2026-10-23). The tabletop is 15 mm ABOVE the robot base plane (measured).
+TABLE_HEIGHT = 0.015
 TABLE_THICK = 0.02
 TABLE_CENTRE = [0.0, -0.270]
 TABLE_HALF = [0.22, 0.15]
@@ -14,25 +14,23 @@ TABLE_HALF = [0.22, 0.15]
 # tabletop can hold a graspable object.
 TABLE_XY_BOUNDS = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HALF[0], TABLE_HALF[1])
 
-OBJECT_SIZE = [0.03, 0.03, 0.03]
-OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]
+OBJECT_SIZE = [0.03, 0.03, 0.03]          # HALF-extents
+OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]        # full height, 60 mm
 OBJECT_MASS_KG = 0.090                    # weighed
-OBJECT_POS = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + OBJECT_SIZE[2]]
 # Sliding friction; MuJoCo takes the max of the two in a contact. Explicit
 # because both used to fall back on defaults nobody chose.
 GRIP_PAD_FRICTION = 2.5
 OBJECT_FRICTION = 1.5
 
 # ---- RG2 ----------------------------------------------------------------
-# Full-stroke arc, measured on the tool: tips sweep R = 55 mm, drop 39.2 mm,
-# stroke 110 mm. Reference only.
-RG2_MAX_OPENING_MM = 110.0
-RG2_TIP_DROP_FULL_MM = 39.2
-RG2_FINGER_RADIUS_MM = 55.0
+# Full-stroke arc, measured on the tool: tips sweep 55 mm, drop 39.2 mm, stroke
+# 110 mm. Reference only.
+RG2_MAX_OPENING = 0.110
+RG2_TIP_DROP_FULL = 0.0392
+RG2_FINGER_RADIUS = 0.055
 
-# The one grasp-height correction, mm. Positive = tip travels LOWER than the
-# geometric figure. Set from a cell measurement; see grasp / place below.
-GRASP_CONTACT_OFFSET_MM = 30.0
+# ---- pick height ---------------------------------------------------------
+# Derived in the grasp / place section below, once TABLE_HEIGHT exists.
 
 # ---- object pool ---------------------------------------------------------
 POOL_SIZE = 1
@@ -45,10 +43,10 @@ PLACE_EDGE_MARGIN = 0.10
 PARK_POS = [5.0, 5.0, -0.6]
 
 # ---- camera --------------------------------------------------------------
-# Gripper base -> D435i optical frame. +z runs DOWN the approach, so z is
-# measured downward from the mount face. The x term carries a 72 mm in-cell
-# correction for the arm's servo shortfall; remove it only if picks overshoot.
-CAM_POS = (0.046, -0.0080, 0.07689)
+# TOOL FLANGE -> D435i optical frame (flange, not gripper base). Measured pair
+# on the cell: tool0 300 mm and lens 186 mm above the base plane, i.e. the lens
+# is 114 mm below the flange, so CAM_POS_z = 0.114 m.
+CAM_POS = (0.046, -0.0080, 0.114)
 CAM_QUAT = (0.008026, -0.695654, -0.718261, -0.010057)
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
 MESH_POS = CAM_POS
@@ -88,10 +86,14 @@ FEED_MIN_STEPS = 400
 # gripper base -> lowest pad, jaws OPEN (the descent runs open). The descent
 # may never command the pads nearer the table than the clearance, so a wrong
 # grasp height stops the arm instead of driving through the table.
-GRIPPER_TO_PAD_MM = 220.7
-TABLE_CONTACT_CLEARANCE_MM = 2.0
+GRIPPER_TO_PAD = 0.2207
+# wrist_3_link -> gripper base. +z points DOWN the approach at R_DOWN, so the
+# flange->gripper-top distance is POSITIVE. UNMEASURED; needed by the MODEL and
+# by the gripper-base conversion, not by calibration.
+TOOL_MOUNT_POS = (1.0e-06, -3.0e-06, 2.30e-02)
+TABLE_CONTACT_CLEARANCE = 0.002
 # Descents ending within the slow zone are run at the slow factor.
-CONTACT_SLOW_ZONE_MM = 30.0
+CONTACT_SLOW_ZONE = 0.030
 CONTACT_SLOW_FACTOR = 0.3
 
 # Viewer frame pacing: sync once per ~16 ms of simulated time (~60 Hz).
@@ -105,9 +107,9 @@ DEPTH_MAX = 5.0
 # Lowest height above the tabletop that counts as object. Raised above the
 # ~20-30 mm a flat hand sits at, so a hand cannot outcompete the cube; too high
 # and every detection disappears. Does not move the grasp height.
-HAND_FILTER_MM = 15.0
+HAND_FILTER = 0.015
 # The one z floor both paths use: max() of the two independent rules above.
-SURFACE_Z_MIN = TABLE_HEIGHT + max(SURFACE_BAND, HAND_FILTER_MM / 1000.0)
+SURFACE_Z_MIN = TABLE_HEIGHT + max(SURFACE_BAND, HAND_FILTER)
 MIN_OBJECT_POINTS = 1500
 # Seconds between [PERC] console lines on hardware; 0 disables. A change in
 # detection count always prints.
@@ -136,12 +138,19 @@ LQR_Q_VEL = 1.0e-4                        # state cost, velocity error (rad/s)^2
 LQR_R = 5.0e-2                            # command cost (rad^2); sets gain level
 
 # ---- grasp / place -------------------------------------------------------
-# Commanded tool height for a grasp: p_des.z = object_z + GRASP_TIP_OFFSET
-# + z_offset. Geometric figure minus the one measured correction; servo
-# applies it, so the pick, put-down and sim put-down all share one height.
-GRIPPER_PAD_HEIGHT_MM = 29.8              # measured pad face; reference only
-TIP_OFFSET = ((GRIPPER_TO_PAD_MM / 1000.0) - OBJECT_HEIGHT / 2.0)
-GRASP_TIP_OFFSET = TIP_OFFSET - GRASP_CONTACT_OFFSET_MM / 1000.0
+# ---- grasp / place -------------------------------------------------------
+# The pick/place height: TOOL FLANGE above the tabletop, METRES. THIS IS THE
+# ONE NUMBER TO EDIT. Every grasp, descent and put-down in both paths reads it.
+PICK_Z_ABOVE_TABLE = 0.220
+# World-space tool z for the grasp (flange frame, metres).
+PICK_Z = TABLE_HEIGHT + PICK_Z_ABOVE_TABLE
+
+# TIP_OFFSET is kept only as the geometric tool length: flange -> the cube's
+# centre with the pads on the tabletop. Nothing derives a height from it.
+GRIPPER_PAD_HEIGHT = 0.0298               # measured pad face; reference only
+# Flange -> lowest pad, from the 242.3 mm measured with the pads on the table.
+FLANGE_TO_PAD = GRIPPER_TO_PAD + TOOL_MOUNT_POS[2]
+TIP_OFFSET = FLANGE_TO_PAD - OBJECT_HEIGHT / 2.0
 APPROACH_Z = 0.10
 FINAL_Z = 0.03
 LIFT_Z = 0.15
@@ -232,13 +241,11 @@ SERVO_RETREAT_STEP = 0.02                 # m per backup step
 SERVO_RETREAT_MAX = 15                    # cap on backup steps
 SERVO_RETREAT_V = 0.03                    # m/s for backup and open-loop commit
 
-# Hover height is defined by the camera: the standoff follows so the camera
-# sits CAM_HOVER_HEIGHT_MM above the table. Operator-set viewing choice.
-CAM_HOVER_HEIGHT_MM = 380.0
-SERVO_STANDOFF = (CAM_HOVER_HEIGHT_MM / 1000.0
-                  - OBJECT_HEIGHT / 2.0
-                  - GRASP_TIP_OFFSET
-                  + CAM_POS[2])
+# Hover = PICK_Z lifted by this standoff, so the camera sits CAM_HOVER_HEIGHT
+# above the table. Operator-set viewing choice. The tool-mount offset back to
+# gripper base is applied in servo.desired_pose.
+CAM_HOVER_HEIGHT = 0.380
+SERVO_STANDOFF = CAM_HOVER_HEIGHT - CAM_POS[2] - PICK_Z + TABLE_HEIGHT
 
 # Moving-target demo: bands cycled live with '.', index 0 is off. All below
 # SERVO_V_TRANSIT so the arm can close the gap.
@@ -366,9 +373,8 @@ UR_HOME_Q = (1.5708, -1.6299, 0.9853, -0.9276, -1.5708, 0.0)
 # hardware homes to UR_HOME_Q).
 SIM_HOME_Q = (1.2564, -1.6585, 1.0695, -0.9818, -1.5708, 1.2564)
 
-# wrist_3_link -> gripper base, the frame the robot controls. +z points DOWN
-# the approach at R_DOWN, so the flange->gripper-top distance is POSITIVE.
-TOOL_MOUNT_POS = (1.0e-06, -3.0e-06, 2.30e-02)
+# wrist_3_link -> gripper base ROTATION. The position is up by the contact
+# guard, because the flange-to-pad length needs it.
 TOOL_MOUNT_QUAT = (0.7071068, -0.0001, 0.0002, 0.7071068)
 
 # Model base frame -> cell base frame: the cell is turned 180 deg about z
@@ -382,9 +388,14 @@ R_DOWN = np.array([[_c_yaw, -_s_yaw, 0.0],
                    [0.0, 0.0, 1.0]]) @ R_DOWN
 
 # ---- camera mount: wrist (eye-in-hand) -----------------------------------
-# The same pose feeds the simulator's depth_cam and the hardware path.
+# FLANGE -> camera. This is the reference everywhere on the hardware path.
+# gripper base is CAM_MOUNT_POS minus TOOL_MOUNT_POS, and exists only because
+# the simulated gripper's geometry is attached there.
 CAM_MOUNT_POS = CAM_POS
 CAM_MOUNT_QUAT = CAM_QUAT
+# Same mount, in the gripper-base frame the MJCF builds the gripper in.
+CAM_MOUNT_POS_GRIPPER = tuple(np.array(CAM_POS, float)
+                              - np.array(TOOL_MOUNT_POS, float))
 # Hardware-only measured correction on top of the above. Identity = unmeasured.
 HW_CAM_DELTA_POS = (0.0, 0.0, 0.0)
 HW_CAM_DELTA_QUAT = (1.0, 0.0, 0.0, 0.0)  # wxyz

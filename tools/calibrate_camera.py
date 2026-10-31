@@ -71,29 +71,27 @@ def _kinematics():
     # fits cancel the base rotation, so this changes nothing for --aruco.
     return URKinematics(dyn,
                         (np.full(6, cfg.UR_SERVO_KP), np.full(6, cfg.UR_SERVO_KV)),
-                        tool_pos=cfg.TOOL_MOUNT_POS,
-                        tool_quat=cfg.TOOL_MOUNT_QUAT,
+                        # FLANGE frame: CAM_MOUNT_* is flange-relative.
+                        tool_pos=(0.0, 0.0, 0.0),
+                        tool_quat=(1.0, 0.0, 0.0, 0.0),
                         root_yaw=cfg.UR_ROOT_YAW)
 
 
 def _base_xy(receive, kin):
-    # The CONTACT POINT, not the gripper base.
+    # The CONTACT POINT, not the flange.
     #
-    # The operator touches the marker with the pads, so the FK pose (gripper
-    # base) has to be moved down the tool axis by base->pad before it is a point
-    # on the board. Using the base directly put the board GRIPPER_TO_PAD_MM above
-    # the table, which shifts every camera estimate and makes the error grow as
-    # the wrist turns -- the "spread 132 mm / 117 deg" failure, not a flexing
-    # mount. The tool axis is +z, pointing down the approach.
+    # The operator touches the marker with the pads, so the FK pose (now the
+    # FLANGE) has to be moved down the tool axis by flange->pad before it is a
+    # point on the board. The tool axis is +z, pointing down the approach.
     q = receive.getActualQ()
     p, R = kin.pose(np.asarray(q, float))
     return np.asarray(p, float) + np.asarray(R, float)[:, 2] * (
-        cfg.GRIPPER_TO_PAD_MM / 1000.0)
+        cfg.FLANGE_TO_PAD)
 
 
 def _tool_pose(receive, kin):
-    # Full pose of the controlled frame (gripper base). The eye-in-hand product
-    # is inv(this) @ T_base_cam, so the rotation matters as much as the origin.
+    # Full pose of the FLANGE. The eye-in-hand product is inv(this) @ T_base_cam,
+    # so the rotation matters as much as the origin.
     q = receive.getActualQ()
     p, R = kin.pose(np.asarray(q, float))
     T = np.eye(4)
@@ -359,7 +357,7 @@ def run_touch(args):
             q_touch = np.asarray(receive.getActualQ(), float)
             p, R = kin.pose(q_touch)
             contact = np.asarray(p, float) + np.asarray(R, float)[:, 2] * (
-                cfg.GRIPPER_TO_PAD_MM / 1000.0)
+                cfg.GRIPPER_TO_PAD)
             if abs(contact[2] - z_top) > 0.015:
                 print('    contact z %.1f mm, cube top is %.1f mm -- lower the '
                       'pads until they just touch it'

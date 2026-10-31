@@ -9,7 +9,8 @@ _MODELS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
 
 from src.config import (
-    CAM_QUAT, CAM_POS, CAM_BRACKET_MASS_KG, MESH_QUAT, MESH_POS,
+    CAM_QUAT, CAM_POS, CAM_MOUNT_POS_GRIPPER, CAM_BRACKET_MASS_KG,
+    MESH_QUAT, MESH_POS,
     TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
     OBJECT_SIZE, OBJECT_MASS_KG, OBJECT_FRICTION, GRIP_PAD_FRICTION,
     GRIP_FORCE_RANGE,
@@ -125,10 +126,11 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
         print('[INFO] dummy bracket mass %.3f kg at the midpoint of the camera '
               'offset' % CAM_BRACKET_MASS_KG)
 
-    # 3. Camera element on the gripper base (must come after attach)
+    # 3. Camera element on the gripper base (must come after attach). CAM_POS is
+    # FLANGE-relative, so convert to the gripper-base frame the MJCF builds in.
     gripper_base.add_camera(
         name="depth_cam",
-        pos=CAM_POS,
+        pos=CAM_MOUNT_POS_GRIPPER,
         quat=CAM_QUAT,
         fovy=60.0,
     )
