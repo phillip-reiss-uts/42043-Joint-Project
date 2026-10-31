@@ -1,20 +1,41 @@
-# Simulation entry point: MuJoCo viewer, keyboard, scene, moving cube.
-#
-# THIS FILE IS SIMULATION-ONLY. It may import mujoco, the viewer, the object
-# pool and the cube driver. Nothing here is expected to run on hardware.
-#
-# The task logic it drives -- WAIT/SEARCH, pause, abort -- lives in
-# src/task.py and is hardware-portable. The split is deliberate:
-#
-#   run_simulation.py   viewer, keys, scene reset, cube motion   (sim only)
-#   src/task.py         state machine, pause semantics           (portable)
-#   src/arm.py          joint moves, gripper, grasp readback     (portable)
-#   src/servo.py        visual servo, occlusion recovery         (portable)
-#   src/world.py        the boundary between the two
-#
-# Run directly, or via `python main.py` / `python main.py --sim`:
-#
-#     python run_simulation.py
+#!/usr/bin/env python3
+"""Simulation front-end: MuJoCo viewer, keyboard, scene, moving cube.
+
+DESCRIPTION
+-----------
+The counterpart of run_hardware.py. It builds the same robot (`Arm`) and the
+same task policy (`TaskStateMachine`) and the same pick sequence (`src/pick.py`),
+and supplies the three providers for the simulator:
+
+    simulation                       hardware
+    ----------                       --------
+    MujocoKinematics                 URKinematics   (chain FK + analytic M/g)
+    MujocoBackend                    URBackend      (RTDE servoj + RG2)
+    SimObjectWorld                   RealObjectWorld (RealSense depth)
+
+Nothing above that layer changes, which is the point of the seams. This module
+is the composition root: it chooses the providers, wires the callbacks, and
+runs the viewer.
+
+WHAT IS NOT PORTABLE, AND IS NOT HERE
+-------------------------------------
+THIS FILE IS SIMULATION-ONLY. It may import mujoco, the viewer, the object
+pool and the cube driver. Nothing here is expected to run on hardware. The
+task logic it drives -- WAIT/SEARCH, pause, abort -- lives in src/task.py and
+is hardware-portable. The split is deliberate:
+
+    run_simulation.py   viewer, keys, scene reset, cube motion   (sim only)
+    src/task.py         state machine, pause semantics           (portable)
+    src/arm.py          joint moves, gripper, grasp readback     (portable)
+    src/servo.py        visual servo, occlusion recovery         (portable)
+    src/world.py        the boundary between the two
+
+RUNNING
+-------
+Run directly, or via `python main.py` / `python main.py --sim`:
+
+    python run_simulation.py
+"""
 
 import numpy as np
 import mujoco
@@ -84,7 +105,7 @@ def main(sensor_size=(320, 240), lightweight=False):
                         height=sensor_size[1])
     _log(f'[INFO] intrinsics K:\n{camera.K}')
 
-    # COMMANDS
+    # ---- COMMANDS --------------------------------------------------------
     # Keys 6-9 plus '.': the viewer maps a-z onto its 26 render flags (S toggles
     # shadows, E constraints, P contact-split, R reflection) and 0-5 onto geom
     # groups, so no letter or low digit is available to us.
@@ -234,7 +255,7 @@ def main(sensor_size=(320, 240), lightweight=False):
                                  estop=estop, world=world, xy=xy,
                                  stop=stopped)
 
-        # --- TRACK: follow the object, never descend -----------------------
+        # ---- TRACK: follow the object, never descend ---------------------
         #
         # A long-lived servo, not one per frame: the Kalman filter it holds is
         # the target's velocity estimate, and rebuilding it each frame would
@@ -322,7 +343,7 @@ def main(sensor_size=(320, 240), lightweight=False):
                           np.round(_R[:, 2], 3), np.round(_pd, 3),
                           float(np.linalg.norm(_p1 - _pd))))
 
-        # --- PICK: one explicit grasp attempt ------------------------------
+        # ---- PICK: one explicit grasp attempt ----------------------------
         def pick_object():
             active = world.active()
             if not active:

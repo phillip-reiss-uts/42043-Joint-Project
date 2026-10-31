@@ -12,11 +12,8 @@
 # nothing else. All simulation concerns live in run_simulation.py; all hardware
 # concerns in run_hardware.py; all portable task logic lives in src/task.py.
 #
-# NOTE ON THE DEFAULT
-# -------------------
-# The default is simulation for now so the project is runnable as-is. On the
-# cell the sensible default becomes the real robot and simulation should
-# require --sim. That is a one-line change in `_parse` below.
+# When called without arguments, this file will run the simulation. On the
+# cell call --hardware or --real. Simulation can also be run by calling --sim.
 
 import argparse
 import sys
@@ -35,9 +32,8 @@ def _parse(argv=None):
     ap.add_argument('--lightweight', action='store_true',
                     help='simulation only: drop the camera image and '
                          'point-cloud panels. Each is its own GL render per '
-                         'frame, so this is the big win on old hardware and it '
-                         'shortens a pick in wall time a lot. The 3D scene, '
-                         'trail, detections and text panels all stay.')
+                         'frame, inteded for older hardware, or resource constrained environments. it '
+                         'The 3D scene, trail, detections and text panels all stay.')
     # Anything else belongs to the chosen front-end (e.g. --ip, --no-gripper),
     # so it is collected here rather than rejected.
     args, rest = ap.parse_known_args(argv)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hardware front-end: UR3e + OnRobot RG2 + D435i, no simulator.
 
-WHAT THIS IS
-------------
+DESCRIPTION
+-----------
 The counterpart of run_simulation.py. It builds the same robot (`Arm`) and the
 same task policy (`TaskStateMachine`) and the same pick sequence (`src/pick.py`),
 and swaps the three providers:
@@ -26,10 +26,9 @@ table and a person putting a cube on it; there is nothing to spawn.
 SAFETY
 ------
 This drives a real arm. There is no e-stop button in this program: the UR
-teach pendant's own stop is the authority. Ctrl-C now QUITS the loop (it used to
-be swallowed and resume the pick); it still cannot stop a `servoj` stream the
-instant it is sent, so press the pendant stop if the arm is moving. Speed is
-deliberately slow (FEED); raise it only after the geometry checks pass.
+teach pendant's own stop is the authority. Ctrl-C  QUITS the loop 
+it still cannot stop a `servoj` stream the instant it is sent, so press the pendant stop 
+if the arm is moving. Speed is deliberately slow (FEED); raise it only after the geometry checks pass.
 """
 
 import argparse
@@ -67,7 +66,7 @@ class VisibleWorld:
         self.last = []
         # The snapshot feature needs the frame that produced the last views. It
         # stays OFF unless run_hardware was given --snapshot, so a normal run
-        # keeps nothing and behaves exactly as it did before the feature existed.
+        # keeps nothing.
         if hasattr(world, 'cache_frames'):
             world.cache_frames = bool(cache_frames)
 
@@ -120,7 +119,7 @@ def _camera_mount():
     return T
 
 
-def _fixed_camera_transform():
+def _fixed_camera_transform(): # DEPRECATED
     # camera -> base, from a measured position and aim point.
     pos = np.array(cfg.FIXED_CAM_POS, float)
     target = np.array(cfg.FIXED_CAM_TARGET, float)
@@ -236,7 +235,7 @@ def main(argv=None):
                              cache_frames=bool(args.snapshot))
         print('[HW] camera: wrist-mounted (eye-in-hand)')
 
-    # Snapshot writer: only built when the feature was asked for, so a normal run
+    # Snapshot writer only. A normal run
     # never imports src.liveview and never touches cv2.
     shots = None
     if args.snapshot:
@@ -283,31 +282,30 @@ def main(argv=None):
         arm=arm, world=world)
     task.on_put_object = lambda: _put_down(arm)
 
-    # START IN TRACK, NOT WAIT. Nothing perceives while the task is in WAIT, so
-    # world.active() would stay false and the arm would hold the home pose until
-    # p -- the opposite of "watch the cube until a pick is commanded". One look
-    # here seeds the cache and drops the task straight into TRACK, where it
-    # servos over the cube and p starts the pick.
-    if world.perceive():
-        task.enter_track('object on the table at startup')
+    # START IN WAIT, AND STAY THERE. The arm holds the home pose until an
+    # explicit command, but the camera still looks once a second (see the loop
+    # below), so a cube placed in view is reported the moment it appears. It is
+    # NOT tracked until `t` releases the hold; nothing perceives while the task
+    # is in WAIT, so the entering of TRACK can only be done on that command.
+    sighted = [False]
 
     # ---- operator console ------------------------------------------------
     print()
     print('  p = pick up / put down (toggle)')
     print('  h = go home    s = status    q or Ctrl-C = quit')
     print('  space = pause / resume (holds position; p is ignored while paused)')
-    print('  t = tracking on / off (off holds position)')
+    print('  t = start / stop tracking (starts held; nothing moves until t)')
     if shots is not None:
         print('  v = save an annotated depth PNG of the last camera look')
     print()
-    if task.mode != TRACK:
-        print('[STATE] WAIT  (place the cube, then press p)')
+    print('[STATE] WAIT  (place the cube in view; it is reported, then press t '
+          'to track it, or p to pick it)')
 
     held_q = np.array(backend.joint_positions(), float)
     grip = GRIP_OPEN
     mode_seen = None
     paused = False
-    track_on = True
+    track_on = False
     last_look = 0.0
 
     while True:
@@ -374,30 +372,47 @@ def main(argv=None):
         elif key in ('t', 'T'):
             # TRACK / HOLD. Off means the policy stops advancing, so the arm
             # stays where it is instead of following the cube; on picks the
-            # follow up again from there. It does NOT re-home (enter_wait would)
-            # and it does not consume a look, so switching it back on resumes
-            # around the same estimate.
+            # follow up again from there. It does NOT re-home and it does not
+            # consume a look, so switching it back on resumes around the same
+            # estimate.
+            #
+            # On is the explicit command to TRACK, and the only way the task
+            # leaves WAIT on someone else's cue: releasing the hold while a cube
+            # is in view enters TRACK here, rather than the task doing it the
+            # moment it first sees one.
             track_on = not track_on
             held_q = np.array(backend.joint_positions(), float)
-            print('[HW] tracking %s' % ('on' if track_on else 'off -- holding'))
+            print('[HW] tracking %s' % ('on (entering TRACK if a cube is in view)'
+                                        if track_on else 'off -- holding'))
+            if track_on and not paused and task.mode == WAIT:
+                if world.refresh():
+                    task.enter_track('object in view, tracking released')
+                else:
+                    print('[HW] no cube in view -- place one to track')
 
         # Advance the policy. This is where a pick runs; it blocks until the
         # grasp (or the put-down) finishes, streaming servoj targets itself.
+        # Holding it while tracking is off lets the front-end own the
+        # WAIT -> TRACK transition. In WAIT, look once a second: the hardware
+        # world has no object pool, so active() only changes when something
+        # looks, and the task never looks for itself in WAIT. Each look costs
+        # ~65 ms, which is fine while holding still.
+        #   tracking off -> report a cube that appears or leaves, stay in WAIT
+        #   tracking on  -> a cube in view is enough to start tracking
+        if track_on and not paused and task.mode == WAIT:
+            now = time.monotonic()
+            if now - last_look >= 1.0:
+                last_look = now
+                seen = bool(world.perceive())
+                if seen != sighted[0]:
+                    sighted[0] = seen
+                    print('[HW] cube %s' % ('in view -- p picks it up, t starts '
+                                            'tracking it'
+                                            if seen else 'no longer in view'))
         if paused or not track_on:
             # Still streaming held_q at the top of the loop; just do not let the
             # policy run. "continue" is what keeps the servoj stream fed.
             continue
-        # WAIT NEVER PERCEIVES. The hardware world has no object pool, so
-        # active() only changes when something looks. Without this the arm sits
-        # in WAIT until p even with the cube right under the camera; with it,
-        # placing the cube in view is enough to start tracking. One look a
-        # second: each costs ~65 ms, which is fine while holding still.
-        if task.mode == WAIT:
-            now = time.monotonic()
-            if now - last_look >= 1.0:
-                last_look = now
-                if world.perceive():
-                    task.enter_track('object in view')
 
         try:
             task.step()
