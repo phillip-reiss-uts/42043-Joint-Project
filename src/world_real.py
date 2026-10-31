@@ -352,12 +352,14 @@ class DepthWorld(ObjectWorld):
 
             _, Hh, z_band = _top_band(pts, 0.004)
             rect = _calipers(Hh) if Hh is not None else None
+            yaw_ok = True
             if rect is not None:
                 centre_xy, yaw = rect[0], rect[1]
             else:
                 centre_xy = 0.5 * (pts[:, :2].min(axis=0)
                                    + pts[:, :2].max(axis=0))
                 yaw = 0.0
+                yaw_ok = False
 
             centre = np.array([centre_xy[0], centre_xy[1],
                                TABLE_HEIGHT + OBJECT_HEIGHT / 2.0])
@@ -366,7 +368,8 @@ class DepthWorld(ObjectWorld):
             views.append(TargetView(centre=centre, yaw=float(yaw),
                                     span=np.asarray(span, float),
                                     score=float(score_cluster(span, len(pts))),
-                                    n_points=int(len(pts)), hull=hull))
+                                    n_points=int(len(pts)), hull=hull,
+                                    yaw_ok=bool(yaw_ok)))
 
         views.sort(key=lambda v: v.score, reverse=True)
         return views[:self.n_objects_max]

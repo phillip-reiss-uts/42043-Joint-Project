@@ -50,6 +50,10 @@ def _wrap90(d):
 # them apart; within this window the robot keeps the side it already has instead
 # of swapping. See PBVSServo._fold_yaw.
 YAW_TIE_DEG = 5.0
+# Above this disagreement with the stored estimate the new reading REPLACES it
+# rather than being blended in. Well below the ~45 deg a diagonal snap produces,
+# and well above the few degrees of normal reading noise.
+YAW_JUMP_DEG = 20.0
 
 
 class PBVSServo:
@@ -272,6 +276,16 @@ class PBVSServo:
                 and cand * self.yaw_est < 0.0):
             return float(self.yaw_est)
         step = float(_wrap90(cand - self.yaw_est))
+        # A LARGE disagreement is a new measurement, not a tie to average.
+        #
+        # Blending a 45 deg jump by yaw_smooth (0.35) moves the estimate 15 deg
+        # per look; if the next look reports the other answer it moves back 15,
+        # and the estimate oscillates at the look rate instead of converging.
+        # That is exactly what a ragged hull produced: the calipers snapping to
+        # a diagonal for one look and not the next. Averaging cannot fix a
+        # bimodal reading -- take the new one.
+        if abs(step) > YAW_JUMP_DEG:
+            return float(np.clip(cand, -45.0, 45.0))
         # Clamp rather than wrap: crossing the seam would be a 90 deg wrist move
         # for a grasp that is already at the best orientation available.
         return float(np.clip(self.yaw_est + self.yaw_smooth * step,
@@ -299,6 +313,10 @@ class PBVSServo:
             best = min(dets, key=lambda d: np.linalg.norm(d.centre[:2] - near[:2]))
         new_est = np.array(best.centre, float)
         new_yaw = float(best.yaw)
+        # A look with NO top-face rectangle has yaw = 0.0 as a placeholder, which
+        # is not a measurement. Its CENTRE is still good, so the position
+        # estimate takes it; only the yaw is held over from the last real one.
+        yaw_ok = bool(getattr(best, 'yaw_ok', True))
         self.raw_est = new_est.copy()
         if self.kf is not None:
             # propagate to now, then fold the measurement in; a gated-out
@@ -306,14 +324,21 @@ class PBVSServo:
             self.kf.advance_to(float(self.arm.backend.time()))
             fresh = self.kf.update(new_est)
             self.p_est = self.kf.position
-            self.yaw_est = self._fold_yaw(new_yaw)
+            if yaw_ok:
+                self.yaw_est = self._fold_yaw(new_yaw)
         elif self.p_est is None:
             self.p_est = new_est
-            self.yaw_est = self._fold_yaw(new_yaw)
+            if yaw_ok:
+                self.yaw_est = self._fold_yaw(new_yaw)
         else:
             a = self.smooth
             self.p_est = self.p_est + a * (new_est - self.p_est)
-            self.yaw_est = self._fold_yaw(new_yaw)
+            if yaw_ok:
+                self.yaw_est = self._fold_yaw(new_yaw)
+        if self.yaw_est is None:
+            # Every look so far has had an unusable yaw. Fall back to the first
+            # reading rather than to None, which nothing downstream expects.
+            self.yaw_est = float(_wrap90(new_yaw))
         self.obs_ok += 1
         self.stage_obs += 1
         span = getattr(best, 'span', None)

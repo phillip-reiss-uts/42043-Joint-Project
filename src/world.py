@@ -48,6 +48,7 @@ class TargetView:
     score: float = 0.0                 # quality score; higher = cleaner, denser
     n_points: int = 0                  # points in the accepted cluster
     hull: Optional[np.ndarray] = None  # (M,3) top-face convex hull
+    yaw_ok: bool = True                # False: no top-face rectangle, yaw is a placeholder
 
     @property
     def ok(self):
