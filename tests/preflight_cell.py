@@ -24,7 +24,10 @@ It checks everything that can be checked offline:
   8. tests/test_calibration_camera.py passes: the camera extrinsic solvers
      recover a known pose and the cv/MuJoCo conventions round-trip -- the
      wrist calibration is only as good as this maths
-  9. opencv has aruco + solvePnP         (informational; calibration only)
+  9. tests/test_yaw_sweep.py passes: the yaw estimator and the estimate the
+     servo carries track a KNOWN rotation, using real face shapes rotated out
+     of the snapshots in shots/ -- the only check of the orientation path
+ 10. opencv has aruco + solvePnP         (informational; calibration only)
 
 Tests 3-7 are the offline suites. They are here rather than left to be run by
 hand because each one covers something this gate would otherwise wave through:
@@ -210,6 +213,16 @@ def check_calibration():
     run_test("camera extrinsics solvers", "tests/test_calibration_camera.py")
 
 
+def check_yaw():
+    # The yaw path, against real face shapes taken from shots/. Nothing else in
+    # the gate looks at orientation: the estimator can be exact on a synthetic
+    # square and still freeze on a real ragged face, and the estimate the servo
+    # carries can stall at the 90-deg seam. Both failures are silent -- the pick
+    # simply rotates to the wrong angle -- so they are checked here.
+    section("9. tests/test_yaw_sweep.py  (yaw, from the real snapshots)")
+    run_test("yaw tracks a known rotation", "tests/test_yaw_sweep.py")
+
+
 def check_kinematics_payload():
     # The shipped link data vs the model it was generated from. This is the only
     # check that notices a stale models/ur3e/arm_dynamics.json, which happens
@@ -294,6 +307,7 @@ def main(argv=None):
     check_kinematics_payload()
     check_kinematics_frame()
     check_calibration()
+    check_yaw()
     check_realsense(mods)
     check_opencv(mods)
 

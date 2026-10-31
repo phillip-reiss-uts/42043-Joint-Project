@@ -45,14 +45,13 @@ def _wrap90(d):
     return (np.asarray(d) + 45.0) % 90.0 - 45.0
 
 
-# Tie window for the yaw label, degrees from the +-45 deg boundary. The top face
-# is square, so yaw and yaw+90 are the same grasp and the calipers cannot tell
-# them apart; within this window the robot keeps the side it already has instead
-# of swapping. See PBVSServo._fold_yaw.
-YAW_TIE_DEG = 5.0
 # Above this disagreement with the stored estimate the new reading REPLACES it
-# rather than being blended in. Well below the ~45 deg a diagonal snap produces,
-# and well above the few degrees of normal reading noise.
+# rather than being blended in. Well above a few degrees of reading noise, and
+# below the 45 deg a genuinely re-aimed cube can present.
+#
+# There is deliberately no tie window any more: the estimate is a continuous
+# angle rather than one clamped into [-45, 45), so two readings either side of
+# the 90-deg seam are neighbours and need no special case. See _fold_yaw.
 YAW_JUMP_DEG = 20.0
 
 
@@ -252,44 +251,45 @@ class PBVSServo:
     def _fold_yaw(self, new_yaw):
         # Fold a mod-90 caliper reading into the yaw estimate.
         #
-        # Every yaw in {new_yaw + 90k} is the same grasp of a square top face,
-        # so the one to command is the one closest to the HOME orientation --
-        # that is `_wrap90`, which maps the reading into [-45, 45) about R_DOWN.
-        # Storing the raw modulo-90 value instead put a cube that was aligned
-        # with home at 89.9 deg (measured), which commanded a full 90 deg wrist
-        # twist for a cube that needed none, and made the estimate flick back
-        # and forth across the 90/0 seam as the reading drifted over it.
+        # Every yaw in {new_yaw + 90k} is the same grasp of a square top face, so
+        # the estimate is tracked as a CONTINUOUS angle that is only equivalent
+        # mod 90. It is deliberately NOT clamped into [-45, 45).
         #
-        # At the +-45 seam the two labels are genuinely equidistant, and that is
-        # the "two equal possibilities" the wrist used to hunt between: each look
-        # picked the other one, swinging the jaw 90 deg every perception cycle.
-        # Inside YAW_TIE_DEG of the seam the estimate therefore keeps the side it
-        # is already on. Everywhere else it blends along the shorter arc as
-        # before, with its own gain -- the position gain is too fast for a label
-        # this noisy, and taking the raw reading left err_rot permanently above
-        # the commit gate.
+        # WHY NOT CLAMPED. A stored estimate confined to [-45, 45) cannot
+        # represent the two readings on either side of the seam as neighbours:
+        # +44 and -44 are 2 deg apart as angles but 88 deg apart in that
+        # coordinate. The code used to resolve that with a tie rule -- inside
+        # a few degrees of the seam, keep the side already held -- which FREEZES
+        # the estimate. Measured offline on a cube sweeping 40 -> 52 deg, one
+        # look per degree:
+        #
+        #     true 44 : estimate 42.5  (error 1.5)
+        #     true 48 : estimate 42.5  (error 5.5)   <- frozen, error growing
+        #     true 52 : estimate 45.0  (error 7.0)
+        #
+        # The estimate could not follow the cube and the error accumulated with
+        # no bound. Storing the angle continuously fixes it at the source: the
+        # shortest step between any two readings is then always <= 45 deg, and
+        # the same sweep tracks with a maximum error of 1.9 deg (the smoothing
+        # lag, not a freeze).
+        #
+        # The 90 deg wrist swings the tie rule was written to prevent came from
+        # the clamp, not from the readings: with a continuous estimate the
+        # command can only move by one step, so it cannot jump 90.
         cand = float(_wrap90(new_yaw))
         if self.yaw_est is None:
             return cand
-        if (abs(cand) > 45.0 - YAW_TIE_DEG
-                and abs(self.yaw_est) > 45.0 - YAW_TIE_DEG
-                and cand * self.yaw_est < 0.0):
-            return float(self.yaw_est)
         step = float(_wrap90(cand - self.yaw_est))
         # A LARGE disagreement is a new measurement, not a tie to average.
-        #
-        # Blending a 45 deg jump by yaw_smooth (0.35) moves the estimate 15 deg
-        # per look; if the next look reports the other answer it moves back 15,
-        # and the estimate oscillates at the look rate instead of converging.
-        # That is exactly what a ragged hull produced: the calipers snapping to
-        # a diagonal for one look and not the next. Averaging cannot fix a
-        # bimodal reading -- take the new one.
+        # Blending one by yaw_smooth (0.35) would move 15 deg per look and, if
+        # the next look disagreed again, move back -- oscillating at the look
+        # rate instead of converging. Take the reading.
         if abs(step) > YAW_JUMP_DEG:
-            return float(np.clip(cand, -45.0, 45.0))
-        # Clamp rather than wrap: crossing the seam would be a 90 deg wrist move
-        # for a grasp that is already at the best orientation available.
-        return float(np.clip(self.yaw_est + self.yaw_smooth * step,
-                             -45.0, 45.0))
+            return float(self.yaw_est + step)
+        # Blend along the shorter arc. Its own gain, because the position gain
+        # is too fast for a label this noisy and taking the raw reading left
+        # err_rot permanently above the commit gate.
+        return float(self.yaw_est + self.yaw_smooth * step)
 
     def observe(self, near=None):
         # Re-observe the object. Keeps the estimate nearest the previous one.
