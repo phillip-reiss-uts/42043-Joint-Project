@@ -1,35 +1,24 @@
 #!/usr/bin/env python3
-"""Camera extrinsic calibration. Three methods, two kinds of output:
+"""Camera extrinsic calibration for the wrist (eye-in-hand) mount. Two methods,
+one kind of output:
 
-    --touch / --aruco   a FIXED (eye-to-hand) camera
-                        -> FIXED_CAM_POS / TARGET / UP
-    --wrist             a WRIST (eye-in-hand) camera, printed marker
+    --aruco             a printed marker, from several arm poses
                         -> CAM_POS / CAM_QUAT   (CAM_MOUNT_* alias them)
-    --wrist-touch       a WRIST camera, no marker: the cube IS the target
+    --touch             no marker: the cube IS the target
                         -> CAM_POS / CAM_QUAT
 
-    python tools/calibrate_camera.py --touch
     python tools/calibrate_camera.py --aruco
-    python tools/calibrate_camera.py --wrist
-    python tools/calibrate_camera.py --wrist-touch
+    python tools/calibrate_camera.py --touch
 
 The marker size defaults to 0.10 m because that is the marker in models/aruco/.
 Pass --marker-size with the MEASURED edge if you print a different size: a
 wrong value here scales the whole fit, and it fails like a bad mount.
 
---touch   The robot is the ruler. Place the cube, centre the closed gripper
-          over it, lower until it just touches the top, press Enter. Repeat at
-          six or more positions spread over the table. No OpenCV, no target.
-
-          The camera HEIGHT is not observable this way (see solve_touch), so it
-          is taken from the current config value. Measure it first, or use
-          --aruco.
-
 --aruco   Print a marker, lay it flat on the table, touch two adjacent corners
           with the TCP, then capture. solvePnP from one image. Needs OpenCV
           (`opencv-contrib-python`) and observes all six degrees of freedom.
 
---wrist   The same marker and the same two touches locate the board ONCE, in
+          The same marker and the same two touches locate the board ONCE, in
           the base frame. Then the arm is moved to several poses and the board
           is photographed from each. Every pose yields one estimate of the same
           constant -- tool -> camera -- so the SPREAD across poses is the error
@@ -41,15 +30,14 @@ wrong value here scales the whole fit, and it fails like a bad mount.
           motion barely constrains the mount's rotation, which is the part a
           printed clamp gets wrong.
 
---wrist-touch
-          The ruler method without the marker. At each station the pads are
+--touch   The ruler method without the marker. At each station the pads are
           lowered onto the cube's top, which fixes that cube's centre in the
           base frame; lift so the cube is in view and capture, which fixes the
           same point in the camera frame. The mount is the rigid transform
           between the two point sets (Kabsch), so no marker, no PnP and no
           touch-to-board conversion are involved. The camera height IS
-          observable here, unlike the fixed --touch. Twist the wrist between
-          stations for the same reason as --wrist.
+          observable here. Twist the wrist between stations for the same
+          reason as --aruco.
 
 Only the RTDE *receive* interface is used: the arm can be hand-guided in local
 mode, and nothing here commands motion. The pendant stays in charge.
@@ -108,8 +96,8 @@ def _kinematics():
     # root_yaw is required for anything that runs the PERCEPTION: the table
     # filters (TABLE_XY_BOUNDS, SURFACE_Z_MIN) live in the cell frame, and
     # without it the deprojected cloud lands in the mirrored quadrant and every
-    # look is rejected -- which is why --wrist-touch never saw the cube. The
-    # marker fits cancel the base rotation, so this changes nothing for --wrist.
+    # look is rejected -- which is why --touch never saw the cube. The marker
+    # fits cancel the base rotation, so this changes nothing for --aruco.
     return URKinematics(dyn,
                         (np.full(6, cfg.UR_SERVO_KP), np.full(6, cfg.UR_SERVO_KV)),
                         tool_pos=cfg.TOOL_MOUNT_POS,
@@ -145,9 +133,8 @@ def _tool_pose(receive, kin):
 
 def _board_from_touches(receive, kin, args):
     # Two adjacent marker corners, touched with the TCP, fix the board's pose in
-    # the base frame. Shared by both marker modes so the operator is asked for
-    # the same thing either way, and so the diagonal-vs-edge mistake is caught
-    # in one place.
+    # the base frame, so the operator is asked for the same thing every run and
+    # so the diagonal-vs-edge mistake is caught in one place.
     print('  Touch corner 0 with the CLOSED pads\' midpoint over it, then Enter.')
     input('  > ')
     a = _base_xy(receive, kin)
@@ -177,143 +164,7 @@ def _board_from_touches(receive, kin, args):
     return board_pose_from_two_touches(a, b)
 
 
-def _report(T, rms, method, out_json=None):
-    pos, target, up = transform_to_pos_target(T)
-    print()
-    print('=' * 72)
-    print('RESULT  (%s)  rms %.2f mm' % (method, rms * 1e3))
-    print('=' * 72)
-    print('FIXED_CAM_POS    = (%.5f, %.5f, %.5f)' % tuple(pos))
-    print('FIXED_CAM_TARGET = (%.5f, %.5f, %.5f)' % tuple(target))
-    print('FIXED_CAM_UP     = (%.5f, %.5f, %.5f)' % tuple(up))
-    print()
-    print('Paste those into src/config.py, set CAMERA_MODE = \'fixed\', and')
-    print('re-run the ruler check: place the cube at three measured spots and')
-    print('compare the detected centre. A wrong fit shows as a bias that grows')
-    print('across the table.')
-    if out_json:
-        with open(out_json, 'w') as fh:
-            json.dump({'T_base_cam': T.tolist(),
-                       'FIXED_CAM_POS': list(map(float, pos)),
-                       'FIXED_CAM_TARGET': list(map(float, target)),
-                       'FIXED_CAM_UP': list(map(float, up)),
-                       'rms_m': float(rms)}, fh, indent=2)
-        print('wrote %s' % out_json)
-
-
-def run_touch(args):
-    from src.world_real import RealSenseSource
-
-    receive = _connect(args.ip)
-    kin = _kinematics()
-    src = RealSenseSource()
-
-    print()
-    print('TOUCH CALIBRATION')
-    print('  For each station: place the cube, centre the CLOSED gripper over')
-    print('  it, lower until the pads just touch the top face.')
-    print('  Spread the stations over the table: near, far, left, right.')
-    print('  At least 4; 6-8 gives a better fit. The camera height is taken')
-    print('  from the current config (%.3f m).' % cfg.FIXED_CAM_POS[2])
-
-    frames, targets = [], []
-    try:
-        while True:
-            line = input('[Enter] capture  [d] done  (%d so far) > '
-                         % len(frames)).strip().lower()
-            if line == 'd':
-                break
-            depth, K = src.capture()
-            p = _base_xy(receive, kin)
-            frames.append((depth, K))
-            targets.append((float(p[0]), float(p[1])))
-            print('  captured at x %.4f  y %.4f' % (p[0], p[1]))
-    finally:
-        src.close()
-
-    if len(frames) < 4:
-        print('[CAL] need at least 4 stations, got %d' % len(frames))
-        return 2
-
-    T0 = _config_transform()
-    T, rms, n = solve_touch(frames, targets, T0)
-    _report(T, rms, 'touch, %d stations' % n, args.json)
-    return 0 if rms < 0.010 else 1
-
-
 def run_aruco(args):
-    try:
-        import pyrealsense2 as rs
-    except ImportError:
-        print('[CAL] pyrealsense2 is not installed')
-        return 2
-
-    receive = _connect(args.ip)
-    kin = _kinematics()
-
-    print()
-    print('ARUCO CALIBRATION')
-    print('  Marker: %s, edge %.1f mm' % (args.dict, args.marker_size * 1e3))
-    print('  Lay it FLAT on the table, matte side up, no tape wrinkles.')
-    print()
-
-    # Capture FIRST, then touch. The board must not move between the image and
-    # the touches that locate it.
-    pipe = rs.pipeline()
-    conf = rs.config()
-    conf.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-    conf.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-    pipe.start(conf)
-    align = rs.align(rs.stream.color)
-    try:
-        input('  Press Enter to capture the marker > ')
-        fs = align.process(pipe.wait_for_frames())
-        colour = np.asanyarray(fs.get_color_frame().get_data())
-        i = fs.get_color_frame().profile.as_video_stream_profile() \
-            .get_intrinsics()
-        K = np.array([[i.fx, 0.0, i.ppx],
-                      [0.0, i.fy, i.ppy],
-                      [0.0, 0.0, 1.0]], float)
-    finally:
-        pipe.stop()
-
-    from src.calibration_camera import aruco_corners
-    found = aruco_corners(colour, args.dict)
-    if not found:
-        print('[CAL] no marker detected -- check lighting, focus and the '
-              'dictionary name')
-        return 2
-
-    # cv2's corner order encodes the marker's own orientation: the printed bits
-    # break the square's 90-degree symmetry, so corner 0 is a specific physical
-    # corner. Show the operator which.
-    path = _annotate(colour, found)
-    print('  detected %d marker(s); annotated image: %s'
-          % (len(found), path))
-    print('  Open it and find the corners labelled 0 and 1.')
-    print()
-
-    Tb = _board_from_touches(receive, kin, args)
-    if Tb is None:
-        return 2
-
-    T_cv, err = solve_aruco(colour, K, Tb, args.marker_size,
-                            dict_name=args.dict, T_init=_config_transform())
-    # solvePnP works in the OpenCV camera frame (y down, z forward); everything
-    # that consumes these numbers -- camera_transform, world_points_from_depth,
-    # FixedCameraWorld -- is in the MuJoCo one (y up, z backward). Converting
-    # here is the difference between a camera looking at the table and one
-    # looking at the ceiling. See CAM_CV_TO_MJ in src/calibration_camera.py.
-    T = cam_cv_to_mjocam(T_cv)
-    # Convert the reprojection error to metres at the board's distance, so the
-    # touch and ArUco modes report the same kind of number.
-    dist = float(np.linalg.norm(T[:3, 3] - Tb[:3, 3]))
-    rms_m = err * dist / max(abs(K[0, 0]), 1e-9)
-    _report(T, rms_m, 'aruco, %.2f px reprojection' % err, args.json)
-    return 0 if err < 2.0 else 1
-
-
-def run_wrist(args):
     # Eye-in-hand. The board lies still on the table; the camera rides the arm.
     #
     # Each pose gives T_base_cam straight from PnP and T_base_tool straight from
@@ -333,7 +184,7 @@ def run_wrist(args):
     kin = _kinematics()
 
     print()
-    print('WRIST CALIBRATION  (eye-in-hand)')
+    print('ARUCO CALIBRATION  (eye-in-hand)')
     print('  Marker: %s, edge %.1f mm' % (args.dict, args.marker_size * 1e3))
     print('  Lay it FLAT on the table, matte side up, no tape wrinkles, and do')
     print('  not move it again -- every pose is measured against it.')
@@ -493,7 +344,7 @@ def run_wrist(args):
     return 0 if (dev_t < 5e-3 and dev_r < 2.0) else 1
 
 
-def run_wrist_touch(args):
+def run_touch(args):
     # Eye-in-hand from KNOWN POINTS -- the ruler method without the marker.
     #
     # Each station gives the SAME physical point twice: the cube's top centre,
@@ -521,7 +372,7 @@ def run_wrist_touch(args):
     z_top = cfg.TABLE_HEIGHT + cfg.OBJECT_HEIGHT
 
     print()
-    print('WRIST CALIBRATION  (robot as ruler, no marker)')
+    print('TOUCH CALIBRATION  (robot as ruler, no marker)')
     print('  %d stations, spread over the table. At each one:' % args.stations)
     print('    1. lay the cube down and lower the CLOSED pads until they')
     print('       just touch its top (the same touch the board mode uses)')
@@ -611,7 +462,7 @@ def _report_mount(X, dev_t, dev_r, n, X_nom, out_json=None):
 
     print()
     print('=' * 72)
-    print('RESULT  (wrist, %d poses)  spread %.2f mm / %.2f deg'
+    print('RESULT  (%d poses)  spread %.2f mm / %.2f deg'
           % (n, dev_t * 1e3, dev_r))
     print('=' * 72)
     print('CAM_POS  = (%.5f, %.5f, %.5f)' % tuple(pos))
@@ -775,49 +626,42 @@ def _rot_z(deg):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='calibrate_camera.py',
-        description='Camera extrinsics: fixed (eye-to-hand) or wrist '
-                    '(eye-in-hand).')
+        description='Wrist (eye-in-hand) camera extrinsics.')
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument('--touch', action='store_true',
-                   help='robot touches the cube at several stations (fixed)')
     g.add_argument('--aruco', action='store_true',
-                   help='printed marker, solvePnP (needs OpenCV; fixed)')
-    g.add_argument('--wrist', action='store_true',
-                   help='printed marker from several arm poses (wrist)')
-    g.add_argument('--wrist-touch', action='store_true',
-                   help='wrist camera from touched cube positions, no marker')
+                   help='printed marker, solvePnP, from several arm poses '
+                        '(needs OpenCV)')
+    g.add_argument('--touch', action='store_true',
+                   help='cube touched at several stations, no marker')
     ap.add_argument('--ip', default=cfg.UR_IP)
     ap.add_argument('--marker-size', type=float, default=0.10,
-                    help='marker edge length in metres (aruco/wrist). The '
-                         'default is the shipped 100 mm marker; measure and '
-                         'pass the real edge if you print another size')
+                    help='marker edge length in metres (aruco). The default is '
+                         'the shipped 100 mm marker; measure and pass the real '
+                         'edge if you print another size')
     ap.add_argument('--dict', default='DICT_4X4_50',
-                    help='ArUco dictionary name (aruco/wrist)')
+                    help='ArUco dictionary name (aruco)')
     ap.add_argument('--poses', type=int, default=12,
-                    help='arm poses to average over (wrist; at least 3)')
+                    help='arm poses to average over (aruco; at least 3)')
     ap.add_argument('--stations', type=int, default=6,
-                    help='cube positions to touch (wrist-touch; at least 4)')
+                    help='cube positions to touch (touch; at least 4)')
     ap.add_argument('--json', default=None,
                     help='also write the result to this file')
     args = ap.parse_args(argv)
 
     print('=' * 72)
-    print('CAMERA EXTRINSICS  (%s camera)'
-          % ('wrist' if (args.wrist or args.wrist_touch) else 'fixed'))
+    print('CAMERA EXTRINSICS  (wrist camera)')
     print('=' * 72)
     print('  robot  : %s (receive only; hand-guide the arm)' % args.ip)
     print('  table  : TABLE_HEIGHT = %.4f m -- the fit trusts this'
           % cfg.TABLE_HEIGHT)
     try:
-        if args.wrist:
-            return run_wrist(args)
-        if args.wrist_touch:
-            return run_wrist_touch(args)
-        return run_aruco(args) if args.aruco else run_touch(args)
+        if args.aruco:
+            return run_aruco(args)
+        return run_touch(args)
     except ImportError as exc:
         print('[CAL] missing dependency: %s' % exc)
-        print('      marker modes need opencv-contrib-python and '
-              'pyrealsense2; touches need ur_rtde')
+        print('      --aruco needs opencv-contrib-python and pyrealsense2; '
+              '--touch needs pyrealsense2 and ur_rtde')
         return 2
     except KeyboardInterrupt:
         print('\n[CAL] cancelled')

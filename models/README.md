@@ -58,7 +58,7 @@ Adapted for this project:
 
 Both are the same artwork. The PDF's page is 140 mm, so it must be printed at
 **100%, never "fit to page"** — scaled to A4 the square comes out at 150 mm while
-`--marker-size` still says 0.10. `tools/calibrate_camera.py --wrist` defaults to
+`--marker-size` still says 0.10. `tools/calibrate_camera.py --aruco` defaults to
 100 mm to match this file.
 
 ## Why the arm is not from `mujoco_menagerie`

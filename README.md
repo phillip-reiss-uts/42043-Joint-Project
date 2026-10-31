@@ -90,10 +90,12 @@ ruler check read 65.9 mm error at truth (0, -0.25). It is not the calibration
 route for this cell's wrist.
 
 A camera on a stand instead of the wrist (`CAMERA_MODE = 'fixed'`) is the
-fallback. Its two modes print `FIXED_CAM_POS/TARGET/UP` rather than the mount:
+fallback. There is no fixed-camera routine in this tool any more: a camera on a
+stand is aimed by hand and measured with a tape, and the wrist mount is what
+`--aruco` and `--touch` calibrate:
 
-    python tools/calibrate_camera.py --touch     # robot touches the cube
-    python tools/calibrate_camera.py --aruco     # one marker image
+    python tools/calibrate_camera.py --aruco     # printed marker, several poses
+    python tools/calibrate_camera.py --touch     # touched cube positions
 
 ## Tests
 
