@@ -1,8 +1,12 @@
 # Camera extrinsic calibration: offline tests, no robot and no camera.
 #
-# The two solvers in src/calibration_camera.py are pure maths, so they can be
+# The wrist solvers in src/calibration_camera.py are pure maths, so they can be
 # checked against a synthetic camera whose pose is known. That is the only way
 # to know a calibration tool is right before pointing it at a real cell.
+#
+# Wrist (eye-in-hand) only. The fixed-camera solvers (solve_touch,
+# transform_to_pos_target) were removed from src/calibration_camera.py: nothing
+# used them once the fixed-camera modes left tools/calibrate_camera.py.
 #
 # Run: python tests/test_calibration_camera.py
 
@@ -19,10 +23,8 @@ if ROOT not in sys.path:
 from src.calibration_camera import (
     board_pose_from_two_touches, cam_cv_to_mjocam, cam_mjocam_to_cv,
     CAM_CV_TO_MJ, mean_transform, pnp_pose, quat_from_rot, R_to_rotvec,
-    rotvec_to_R, solve_touch, transform_from, transform_to_pos_target,
-    wrist_mount,
+    rotvec_to_R, transform_from, wrist_mount,
 )
-from src.world_real import camera_transform
 
 
 def check(name, ok, detail=''):
@@ -48,47 +50,6 @@ def main():
     failures += not check('the near-pi case is handled',
                           np.allclose(R_to_rotvec(R_pi), [np.pi - 1e-7, 0, 0],
                                       atol=1e-6))
-
-    # ---------------- config round trip ----------------
-    print('\nCONFIG ROUND TRIP')
-    T = transform_from([0.15, -0.42, 0.83], [0.2, -0.1, 0.05])
-    pos, target, up = transform_to_pos_target(T, table_z=0.02)
-    T2 = camera_transform(pos, target - pos, up)
-    failures += not check(
-        'pos/target/up reproduce the pose through camera_transform',
-        np.allclose(T2, T, atol=1e-9),
-        'max diff %.2e' % np.max(np.abs(T2 - T)))
-    failures += not check(
-        'the target lies on the table plane',
-        abs(target[2] - 0.02) < 1e-9, 'target z %.4f' % target[2])
-
-    # ---------------- touch solver ----------------
-    # Synthetic camera: a known pose, a handful of 3D points in the camera
-    # frame, and a detector that projects them through the candidate pose.
-    print('\nTOUCH SOLVER')
-    T_true = transform_from([0.10, -0.40, 0.78], [0.10, -0.08, 0.03])
-    Xc = [np.array(v, float) for v in (
-        (-0.10, -0.05, 0.70), (0.05, -0.08, 0.66), (0.14, 0.02, 0.72),
-        (-0.12, 0.09, 0.68), (0.02, 0.12, 0.75), (0.11, -0.11, 0.69),
-    )]
-
-    def detect(T, depth, K):
-        # `depth` carries the frame index.
-        p = T @ np.r_[Xc[int(depth)], 1.0]
-        return p[:2]
-
-    targets = [(T_true @ np.r_[p, 1.0])[:2] for p in Xc]
-    frames = [(i, None) for i in range(len(Xc))]
-    # The solver holds z fixed (xy residuals cannot observe camera height),
-    # so the initial guess must carry the measured height.
-    T0 = transform_from([0.13, -0.37, 0.78], [0.12, -0.05, 0.01])
-
-    T_fit, rms, n = solve_touch(frames, targets, T0, detect=detect)
-    failures += not check(
-        'recovers a known camera pose from touch correspondences',
-        np.allclose(T_fit, T_true, atol=1e-7),
-        'max diff %.2e m, rms %.2e m' % (np.max(np.abs(T_fit - T_true)), rms))
-    failures += not check('reports the station count', n == len(Xc))
 
     # ---------------- aruco board frame ----------------
     print('\nARUCO BOARD FRAME')

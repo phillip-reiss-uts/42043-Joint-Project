@@ -1,40 +1,23 @@
-"""Camera extrinsic calibration: the two methods, as maths.
+"""Camera extrinsic calibration: the ArUco method, as maths.
 
 WHY THIS MODULE IS SEPARATE
 ---------------------------
-Both methods produce the same thing -- the 4x4 pose of the camera in the robot
-base frame -- but from different data. Keeping the solvers here (numpy, plus
-OpenCV only for ArUco) means they can be tested offline, and the hardware I/O
-lives in `tools/calibrate_camera.py`.
+The solver produces the 4x4 pose of the camera in the robot base frame. Keeping
+it here (numpy, plus OpenCV only for ArUco) means it can be tested offline, and
+the hardware I/O lives in `tools/calibrate_camera.py`.
 
-METHOD 1 — TOUCH  (`solve_touch`)
----------------------------------
-The robot is the ruler. The operator places the cube, centres the closed
-gripper over it and lowers until it just touches the top face. At that instant
-the cube's top-face centre in the base frame is the gripper base's (x, y) --
-the pad midpoint sits on the tool axis -- and its z is known by construction
-(TABLE_HEIGHT + OBJECT_HEIGHT). Repeat at N >= 4 positions spread over the
-table and fit the camera pose that makes the deprojected detections land on
-those points.
-
-This needs no OpenCV and no printed target. Its weakness is orientation: the
-robot's hand is only as repeatable as the operator, so the fit relies on the
-spread of the stations.
-
-METHOD 2 — ARUCO  (`solve_aruco`, `board_pose_from_two_touches`)
----------------------------------------------------------------
+ARUCO  (`solve_aruco`, `board_pose_from_two_touches`)
+-----------------------------------------------------
 Print a marker, lay it flat on the table, touch two adjacent corners with the
 TCP. Those two points fix the marker's plane and yaw in the base frame, so
 solvePnP against the detected corners yields the camera pose from a single
-view. Better orientation than the touch method, but needs OpenCV and a board.
+view. Every pose then gives one estimate of the same tool -> camera constant.
 
-BOTH are only as good as the model they are fitted against: a wrong
-TABLE_HEIGHT shifts every z, and a bent board cannot be rescued by maths.
+The fit is only as good as the model it is fitted against: a wrong TABLE_HEIGHT
+shifts every z, and a bent board cannot be rescued by maths.
 """
 
 import numpy as np
-
-from src.config import TABLE_HEIGHT
 
 
 # --------------------------------------------------------------------------
@@ -78,24 +61,6 @@ def transform_from(pos, rotvec):
     T[:3, :3] = rotvec_to_R(rotvec)
     T[:3, 3] = np.asarray(pos, float)
     return T
-
-
-def transform_to_pos_target(T, table_z=TABLE_HEIGHT):
-    # Convert a camera pose into the three numbers src/config.py stores.
-    #
-    # Returns (pos, target, up): the camera position, the point where its
-    # optical axis meets the table plane, and the image-up direction. Feeding
-    # these back through world_real.camera_transform() reproduces T exactly.
-    T = np.asarray(T, float)
-    pos = T[:3, 3].copy()
-    forward = -T[:3, 2].copy()
-    forward /= max(np.linalg.norm(forward), 1e-12)
-    up = T[:3, 1].copy()
-    if forward[2] < -1e-6:
-        t = (table_z - pos[2]) / forward[2]
-        if t > 0:
-            return pos, pos + forward * t, up
-    return pos, pos + forward * 1.0, up
 
 
 # --------------------------------------------------------------------------
@@ -214,89 +179,6 @@ def mean_transform(Ts):
         c = float(np.clip((np.trace(R.T @ T[:3, :3]) - 1.0) / 2.0, -1.0, 1.0))
         worst_r = max(worst_r, float(np.degrees(np.arccos(c))))
     return T_mean, worst_t, worst_r
-
-
-# --------------------------------------------------------------------------
-# METHOD 1: TOUCH
-# --------------------------------------------------------------------------
-class _FrameSource:
-    # Minimal DepthSource over a stored frame, so the production detector can
-    # run on a capture taken earlier without touching the camera again.
-
-    def __init__(self, depth, K):
-        self._depth = depth
-        self._K = K
-
-    def capture(self):
-        return self._depth, self._K
-
-    @property
-    def size(self):
-        return self._depth.shape[1], self._depth.shape[0]
-
-    def close(self):
-        pass
-
-
-def detect_xy(T, depth, K):
-    # Deproject + detect one frame with camera pose T; return the best detection
-    # centre's (x, y) in the base frame, or None.
-    #
-    # This is exactly the production path (FixedCameraWorld), so the calibration
-    # is fitted to the same detector the robot will use.
-    from src.world_real import FixedCameraWorld
-    world = FixedCameraWorld(_FrameSource(depth, K),
-                             lambda: (np.zeros(3), np.eye(3)), T)
-    views = world.perceive()
-    if not views:
-        return None
-    return np.array(views[0].centre[:2], float)
-
-
-def solve_touch(frames, targets, T0, detect=None, max_nfev=600):
-    # Fit the camera pose so the detected cube centres land on the touched
-    # points. Returns (T, rms_metres, n_used).
-    #
-    # frames  : list of (depth_uint16, K) captures
-    # targets : list of (x, y) base-frame touch points, one per frame
-    # T0      : initial guess (src/config.py's values)
-    #
-    # Only x and y are compared: the detector reports a fixed z
-    # (TABLE_HEIGHT + half the cube), so z carries no information here.
-    #
-    # That also means the camera's HEIGHT is not observable from these
-    # residuals: translating the camera along +z moves no base-frame x or y.
-    # The height is therefore taken from T0 (measure it), and the remaining
-    # five degrees of freedom -- x, y, and the orientation -- are solved here.
-    # If the height is uncertain, use the ArUco method: PnP observes it.
-    from scipy.optimize import least_squares
-
-    if len(frames) != len(targets):
-        raise ValueError('one target per frame')
-    if len(frames) < 4:
-        raise ValueError('need at least 4 stations (8 residuals for 5 params)')
-
-    detect = detect or detect_xy
-    targets = [np.asarray(t, float) for t in targets]
-    z_fixed = float(np.asarray(T0, float)[2, 3])
-
-    def residuals(p):
-        T = transform_from([p[0], p[1], z_fixed], p[2:])
-        out = []
-        for (depth, K), tgt in zip(frames, targets):
-            c = detect(T, depth, K)
-            if c is None:
-                out.extend([0.25, 0.25])      # a metre off: reject this station
-            else:
-                out.extend([c[0] - tgt[0], c[1] - tgt[1]])
-        return np.asarray(out, float)
-
-    p0 = np.r_[np.asarray(T0, float)[0, 3], np.asarray(T0, float)[1, 3],
-               R_to_rotvec(np.asarray(T0, float)[:3, :3])]
-    res = least_squares(residuals, p0, method='lm', max_nfev=max_nfev)
-    T = transform_from([res.x[0], res.x[1], z_fixed], res.x[2:])
-    rms = float(np.sqrt(np.mean(res.fun ** 2)))
-    return T, rms, len(frames)
 
 
 # --------------------------------------------------------------------------

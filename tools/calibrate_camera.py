@@ -58,8 +58,7 @@ if ROOT not in sys.path:
 from src import config as cfg
 from src.calibration_camera import (
     board_pose_from_two_touches, cam_cv_to_mjocam, cam_mjocam_to_cv,
-    mean_transform, quat_from_rot, solve_aruco, solve_touch,
-    transform_to_pos_target, wrist_mount,
+    mean_transform, quat_from_rot, solve_aruco, wrist_mount,
 )
 from src.world_real import camera_transform
 

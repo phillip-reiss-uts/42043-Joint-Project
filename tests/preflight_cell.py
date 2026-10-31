@@ -2,10 +2,9 @@
 """
 preflight_cell.py -- verify the cell stack with NO hardware attached.
 
-Lives in tests/ because it is a test, but it is also the gate you run before
-travelling to the cell. With the camera unplugged and the UR3e off the network:
+ With the camera unplugged and the UR3e off the network:
 
-    cd ~/"assignment 4"
+    cd 42043-Joint-Project
     ~/cell/bin/python tests/preflight_cell.py
 
 It checks everything that can be checked offline:
@@ -22,17 +21,21 @@ It checks everything that can be checked offline:
   6. tests/test_kinematics_parity.py passes: the chain and the model agree on
      the TCP pose in the cell frame, and that agreement needs UR_ROOT_YAW
   7. pyrealsense2 loads and enumerates   (0 devices is CORRECT here)
-  8. opencv has aruco + solvePnP         (informational; calibration only)
+  8. tests/test_calibration_camera.py passes: the camera extrinsic solvers
+     recover a known pose and the cv/MuJoCo conventions round-trip -- the
+     wrist calibration is only as good as this maths
+  9. opencv has aruco + solvePnP         (informational; calibration only)
 
-Tests 3-6 are the offline suites. They are here rather than left to be run by
+Tests 3-7 are the offline suites. They are here rather than left to be run by
 hand because each one covers something this gate would otherwise wave through:
 5 exists solely because a stale payload passed preflight once and only failed
 when somebody ran the test manually.
 
-What it CANNOT prove, and what you still run at the bench:
+What it CANNOT prove, and what still need to be run at the bench:
   tests/test_arm_control.py      does the UR3e accept these servoJ calls
   tests/test_camera_enum.py      does the D435i stream on this box
   tests/test_camera_ruler.py     is CAM_MOUNT biased
+  tools/calibrate_camera.py      does the fit survive a real board and hands
 
 Exit code 0 means every offline-checkable thing is verified.
 """
@@ -198,7 +201,15 @@ def check_config():
              ("--config-only",))
 
 
-# ------------------------------------------------------- 5+6. kinematics
+def check_calibration():
+    # The camera extrinsics solvers, against a synthetic camera whose pose is
+    # known. Runs here because tools/calibrate_camera.py now only has the wrist
+    # routes -- a wrong solvePnP seed or a flipped cv/MuJoCo convention produces
+    # a plausible-looking CAM_POS that no other offline check would catch.
+    section("7. tests/test_calibration_camera.py  (offline solvers)")
+    run_test("camera extrinsics solvers", "tests/test_calibration_camera.py")
+
+
 def check_kinematics_payload():
     # The shipped link data vs the model it was generated from. This is the only
     # check that notices a stale models/ur3e/arm_dynamics.json, which happens
@@ -219,9 +230,9 @@ def check_kinematics_frame():
              "tests/test_kinematics_parity.py")
 
 
-# --------------------------------------------------------------- 7. camera
+# --------------------------------------------------------------- 8. camera
 def check_realsense(mods):
-    section("7. pyrealsense2 loads and enumerates")
+    section("8. pyrealsense2 loads and enumerates")
     rs = mods.get("pyrealsense2")
     if rs is None:
         return record("pyrealsense2 importable", False)
@@ -242,7 +253,7 @@ def check_realsense(mods):
 
 # --------------------------------------------------------------- 8. opencv
 def check_opencv(mods):
-    section("8. opencv (calibration only -- not on the pick path)")
+    section("9. opencv (calibration only -- not on the pick path)")
     cv2 = mods.get("cv2")
     if cv2 is None:
         note("cv2 not importable; src/calibration_camera.py will not run")
@@ -264,7 +275,7 @@ def main(argv=None):
     if not os.path.isdir(os.path.join(repo, "tests")):
         print("not a project root (no tests/ directory): %s" % repo)
         print("run from the project root:")
-        print('  cd ~/"assignment 4" && ~/cell/bin/python tests/preflight_cell.py')
+        print('  cd 42043-Joint-Project && ~/cell/bin/python tests/preflight_cell.py')
         return 2
     os.chdir(repo)
     if repo not in sys.path:
@@ -282,6 +293,7 @@ def main(argv=None):
     check_config()
     check_kinematics_payload()
     check_kinematics_frame()
+    check_calibration()
     check_realsense(mods)
     check_opencv(mods)
 
