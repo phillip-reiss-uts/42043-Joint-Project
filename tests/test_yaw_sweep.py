@@ -144,7 +144,7 @@ def main():
             failures += 1
 
     print('=' * 70)
-    print('ARTIFICIAL 360-DEG YAW TEST  (real face shapes from shots/)')
+    print('ARTIFICIAL 360-DEG YAW TEST  (real faces, tests/fixtures/shots/)')
     print('=' * 70)
 
     # ---- 1. the estimator must follow the rotation exactly ----------------
