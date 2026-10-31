@@ -108,7 +108,7 @@ def main(sensor_size=(320, 240), lightweight=False):
     # ---- COMMANDS --------------------------------------------------------
     # Keys 6-9 plus '.': the viewer maps a-z onto its 26 render flags (S toggles
     # shadows, E constraints, P contact-split, R reflection) and 0-5 onto geom
-    # groups, so no letter or low digit is available to us.
+    # groups, so no letter or low digit is available.
     cmd = Commands()
     ui = {'overlay': None}
 
@@ -116,8 +116,7 @@ def main(sensor_size=(320, 240), lightweight=False):
         if keycode == ord('6'):
             cmd.place = True
         elif keycode == ord('7'):
-            # Key 7 is now PICKUP, not "start a search". Searching is no longer
-            # an operator mode: the robot tracks whatever is on the table and
+            # Key 7 will PICKUP. The robot tracks whatever is on the table and
             # only grasps on this explicit command. Recovery searches happen
             # inside a pick.
             cmd.pickup = True
@@ -152,8 +151,8 @@ def main(sensor_size=(320, 240), lightweight=False):
         # draws the overlay first -- no plumbing through the call chain.
         #
         # lightweight drops the two camera panels, each of which is its own GL
-        # render per frame. The robot does not use them; on an old machine they
-        # are most of the wall time a pick takes.
+        # render per frame. The robot does not use them; 
+        # Useful in resource constrained environments.
         overlay = Overlay(viewer, model, data, camera, cam_id, arm.base_id,
                           lightweight=lightweight)
         overlay.set_info('mode', 'WAIT', 'scene empty')
