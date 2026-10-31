@@ -8,10 +8,11 @@
 import numpy as np
 
 from src.config import (
-    ARM_DOF, TIP_OFFSET, R_DOWN, JOINT_RANGE,
+    ARM_DOF, GRASP_TIP_OFFSET, R_DOWN, JOINT_RANGE,
     GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
-    SERVO_KP, SERVO_KO, GRASP_EXTRA_Z, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD, SERVO_KI_MAX_M,
+    SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD,
+    SERVO_KI_MAX_M,
     SERVO_KI_MAX_RAD, SERVO_DAMP_GAIN, SERVO_DAMP_NEAR_M,
     SERVO_DAMP_NEAR_RAD,
     SERVO_TRACK_TOL, SERVO_TRACK_TOL_ROT, SERVO_STILL_SPEED, SERVO_LOST_LIMIT,
@@ -354,7 +355,9 @@ class PBVSServo:
         p = self.p_est
         if self.kf is not None and self.kf.ready and self.lead_s != 0.0:
             p = self.kf.lead(self.lead_s)
-        z_want = float(p[2] + TIP_OFFSET + z_offset)
+        # GRASP_TIP_OFFSET already carries GRASP_CONTACT_OFFSET_MM, so the servo
+        # descent stops at the same height the commit drives to.
+        z_want = float(p[2] + GRASP_TIP_OFFSET + z_offset)
         # CONTACT GATE. The lowest part of the gripper is the pad bottom, well
         # below gripper/base, so a grasp commanded too low sends the pads through
         # the table. Clamp the commanded height and remember that we did: the
@@ -923,11 +926,11 @@ class PBVSServo:
         self.p_est = np.array(ref, float)
         self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
                              else self.best_yaw)
-        # 30 mm LOWER than the geometric grasp pose, forced by the operator: the
-        # arm settles ~11 mm short of whatever it is given, and the first runs
-        # were closing high. The contact gate still clamps it to the pad limit,
-        # so this cannot drive the pads into the table.
-        p_des, R_des = self.desired_pose(GRASP_EXTRA_Z)
+        # GRASP_CONTACT_OFFSET_MM is already inside desired_pose (as part of
+        # GRASP_TIP_OFFSET), so the grasp pose and the descent share one height.
+        # The contact gate still clamps it to the pad limit, so this cannot drive
+        # into the table.
+        p_des, R_des = self.desired_pose(0.0)
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_target(p_des, R_des)

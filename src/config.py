@@ -56,7 +56,8 @@ import numpy as np
 # NOT YET ACTED ON: TIP_OFFSET is tuned against grasp heights that were derived
 # while the tool was modelled at 149 mm. It has NOT been retuned for a 231.5 mm
 # tool, so expect the commit to sit high until it is -- and that is a measurement
-# at the cell, not a guess here.
+# at the cell, not a guess here. Since 2026-10-31 the grasp height itself is
+# pinned by one cell constant, GRASP_CONTACT_OFFSET_MM (see grasp / place).
 TABLE_HEIGHT = 0.0
 TABLE_THICK = 0.02
 TABLE_CENTRE = [0.0, -0.270]
@@ -113,7 +114,9 @@ def rg2_pad_drop_mm(opening_mm):
     return RG2_FINGER_RADIUS_MM * (1.0 - math.cos(f * th_max))
 
 OBJECT_WIDTH_MM = 2.0 * OBJECT_SIZE[0] * 1000.0   # the cube jaw width, 60 mm
-GRASP_PAD_SAG_MM = rg2_pad_drop_mm(OBJECT_WIDTH_MM)
+# FUDGE, not a measurement: the one grasp-height correction, in mm. See the
+# TIP_OFFSET block below (grasp / place).
+GRASP_CONTACT_OFFSET_MM = 30.0
 OBJECT_POS = [TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT + OBJECT_SIZE[2]]
 
 # object pool 
@@ -367,50 +370,35 @@ LQR_R = 5.0e-2           # command cost (rad^2); sets the overall gain level
 
 # grasp / place
 #
-# TIP_OFFSET is gripper/base -> object centre at grasp, so it is fixed by the
-# GRIPPER'S GEOMETRY, not by tuning:
+# GRASP_TIP_OFFSET is where the arm COMMANDS the tool for a grasp:
+#     p_des.z = object_centre_z + GRASP_TIP_OFFSET + z_offset
+# It is the purely geometric figure plus ONE correction, and that correction is
+# the only grasp-height number a measurement has to set:
 #
-#     pad bottom at grasp  = TABLE_CONTACT_CLEARANCE_MM above the table
-#     gripper base         = pad bottom + GRIPPER_TO_PAD_MM
-#     TIP_OFFSET           = gripper base - OBJECT_HEIGHT/2
+#     geometric        = GRIPPER_TO_PAD_MM (jaws OPEN, which is what the
+#                        descent runs with) - OBJECT_HEIGHT/2
+#     GRASP_TIP_OFFSET = geometric - GRASP_CONTACT_OFFSET_MM
 #
-# With the measured 231.5 mm tool (220.7 mm base->pad) that is 192.7 mm.
+# GRASP_CONTACT_OFFSET_MM: MEASURE IT AT THE CELL. Close on the cube, read how
+# far the pads end up from where the command said the cube's top would sit, and
+# put that distance in, POSITIVE meaning the tip travels LOWER than the
+# geometric figure. It is not a tool length and must not be taken from the
+# datasheet -- it is this cell's servoJ settling short of the pose it is given.
+# src/servo.py applies it in desired_pose, so the descent, the pick, the
+# simulation put-down and the hardware put-down all use the same height.
 #
-# WHAT IT REPLACES. The old formula was 0.1094 - (GRASP_HEIGHT_FRAC - 0.5) * H
-# = 0.1274, an empirical figure describing the previous ~149 mm tool. Against the
-# 231.5 mm gripper it commanded the pads 65.3 mm THROUGH the tabletop, which is
-# the collision the z gate now catches. The old note below is kept because the
-# behaviour it describes is real, but the numbers in it belong to the old tool.
-#
-# HISTORY, superseded: measuring base->pad as 0.1401 and using base_to_tip - H/2
-# gives 0.1101, which was tried on the old build and made grasps worse, because
-# the servo drove closer before the tracking gate fired and left under 50 mm for
-# the open-loop commit. That no longer applies: the tool is a different length, so
-# the constraint it was protecting is at a different place.
-GRASP_HEIGHT_FRAC = 0.2       # kept for reference; no longer used by the offset
-# PAD CONTACT HEIGHT. The pad face is GRIPPER_PAD_HEIGHT_MM tall (measured 29.8 mm).
-#     pad TOP above the table    = OBJECT_HEIGHT - drop                  = 55.0 mm
-#     pad bottom above the table = that - pad height                     = 25.2 mm
-#
-# GRASP_DROP_BELOW_TOP_MM is how far below the cube's top edge the pad's top edge
-# sits. It was 0.0 -- top edges flush -- until 2026-10-26, when the owner asked
-# for the grasp 5 mm lower on the cube, closer to the table. It is a GRASP DEPTH
-# choice, not a measured cell constant, so it is one explicit number rather than a
-# tweak buried in the offset.
-#
-# 5 mm is safe against the contact gate: the new grasp pose is 254.9 mm and
-# z_floor is 222.7 mm, so there is 32 mm of headroom and the descent cannot clamp.
-#
-# GRASP_PAD_SAG_MM is computed above from the measured finger arc
-# (rg2_pad_drop_mm): closing the jaws lowers the pads, so the commanded base height
-# has to allow for it. It belongs to the GRASP POSE only -- the descent runs with
-# the jaws held open, which is the geometry GRIPPER_TO_PAD_MM describes.
-GRIPPER_PAD_HEIGHT_MM = 29.8
-GRASP_DROP_BELOW_TOP_MM = 5.0
-GRASP_PAD_BOTTOM_MM = (OBJECT_HEIGHT * 1000.0 - GRIPPER_PAD_HEIGHT_MM
-                       - GRASP_DROP_BELOW_TOP_MM)
-TIP_OFFSET = ((GRASP_PAD_BOTTOM_MM + GRIPPER_TO_PAD_MM + GRASP_PAD_SAG_MM) / 1000.0
+# HISTORY. Two corrections used to exist: a 2026-10-25 "GRASP_PAD_SAG_MM"
+# (9.04 mm, from the finger-arc function, justified as pad geometry it does not
+# describe) and the 2026-10-30 GRASP_EXTRA_Z (-30 mm, forced when the pick was
+# closing high). The operator confirmed the pick is right at 30 mm, so both
+# collapse into the one correction above.
+GRIPPER_PAD_HEIGHT_MM = 29.8          # measured pad face; reference only now
+# The purely geometric figure -- base to the cube's CENTRE with the pads on the
+# tabletop -- so it is what a tool-length measurement sets.
+TIP_OFFSET = ((GRIPPER_TO_PAD_MM / 1000.0)
               - OBJECT_HEIGHT / 2.0)
+# The grasp command: that figure minus one correction.
+GRASP_TIP_OFFSET = TIP_OFFSET - GRASP_CONTACT_OFFSET_MM / 1000.0
 APPROACH_Z = 0.10
 FINAL_Z = 0.03
 LIFT_Z = 0.15
@@ -550,24 +538,29 @@ SERVO_RETREAT_V = 0.03
 # surface when the servo holds at hover. The standoff that achieves it follows.
 #
 #     gripper base height above table at hover
-#         = OBJECT_HEIGHT/2 + TIP_OFFSET + SERVO_STANDOFF
+#         = OBJECT_HEIGHT/2 + GRASP_TIP_OFFSET + SERVO_STANDOFF
 #     camera height above table
 #         = that, minus CAM_POS[2]     (CAM_POS z is measured DOWN the approach,
 #                                       so the camera sits CAM_POS[2] below the base)
 #
-# Solving for the standoff at a 320 mm camera height: with the present
-# TIP_OFFSET (224.9 mm) and CAM_POS[2] (91 mm) that is 156.1 mm, giving a gripper
-# base at 411.0 mm above the table. Verified in the model: the depth camera comes
-# out at exactly 320.0 mm. The number moves whenever TIP_OFFSET or the camera
-# mount does -- that is the point of deriving it rather than hardcoding it.
+# Solving for the standoff at the present 380 mm camera height: with
+# GRASP_TIP_OFFSET (194.9 mm) and CAM_POS[2] (91 mm) that is 216.1 mm, giving a
+# gripper base at 471.0 mm above the table. The number moves whenever
+# GRASP_TIP_OFFSET or the camera mount does -- that is the point of deriving it
+# rather than hardcoding it.
 #
-# If TIP_OFFSET moves, this standoff moves with it, so the camera stays at 320 mm
-# without anyone re-fitting the hover. Nothing to re-measure by hand.
+# 380 mm, not the 320 mm an earlier derivation used: set by hand by the operator
+# for a better camera view. It is a VIEWING choice, so treat it as such -- do not
+# "correct" it back to 320.
+#
+# If GRASP_TIP_OFFSET moves, this standoff moves with it, so the camera height
+# stays at CAM_HOVER_HEIGHT_MM without anyone re-fitting the hover. Nothing to
+# re-measure by hand.
 CAM_HOVER_HEIGHT_MM = 380.0
 
 SERVO_STANDOFF = (CAM_HOVER_HEIGHT_MM / 1000.0
                   - OBJECT_HEIGHT / 2.0
-                  - TIP_OFFSET
+                  - GRASP_TIP_OFFSET
                   + CAM_POS[2])
 
 # ---- moving target (robustness demonstration) ----
@@ -630,10 +623,6 @@ SERVO_LEAD_S = 0.15
 # whose servoJ lag is 0.1 s of lookahead, so a 6/s loop has little phase margin
 # and rings. 2.0 is the calm setting; raise it only with the arm unloaded.
 SERVO_KP = 2.0
-# Commanded grasp height offset, metres, added to the geometric grasp pose.
-# -0.030 forced by the operator: the arm settles short of the pose it is given
-# on this cell, so the pick was closing high. The contact gate still clamps it.
-GRASP_EXTRA_Z = -0.030
 SERVO_KO = 2.0
 SERVO_KI = 0.0               # integral gain on the Cartesian pose error
 SERVO_KI_NEAR_M = 0.05

@@ -43,7 +43,7 @@ from src.arm import Arm
 from src.arm_dynamics import ArmDynamics, rot_from_quat
 from src.config import (
     ARM_DOF, GRIP_OPEN, GRIP_CLOSED, RAPID, FEED,
-    TABLE_HEIGHT, OBJECT_HEIGHT, TIP_OFFSET, APPROACH_Z, STEPS_RELEASE,
+    TABLE_HEIGHT, OBJECT_HEIGHT, GRASP_TIP_OFFSET, APPROACH_Z, STEPS_RELEASE,
 )
 from src.kinematics_ur import URKinematics
 from src.pick import pick_and_hold
@@ -129,12 +129,15 @@ def _fixed_camera_transform(): # DEPRECATED
 def _put_down(arm):
     # Lower the held cube to the table directly beneath the gripper and release.
     #
-    # The release height is TIP_OFFSET above the cube's resting centre, which is
-    # the same relation the grasp used -- see put_cube_down in pick_place for the
-    # simulation twin (that one also clamps into the spawn region, which has no
-    # meaning here).
+    # The descent matches the GRASP, which is the only place on this cell whose
+    # height is known to be right: GRASP_TIP_OFFSET is the geometric grasp height
+    # minus the measured correction, exactly as PBVSServo.desired_pose applies it,
+    # so the pick and the put-down close and open the jaws at one height.
+    #
+    # See put_cube_down in pick_place for the simulation twin (that one also
+    # clamps into the spawn region, which has no meaning here).
     p, R = arm.kin.pose(arm.backend.joint_positions())
-    release_z = TABLE_HEIGHT + OBJECT_HEIGHT / 2.0 + TIP_OFFSET
+    release_z = TABLE_HEIGHT + OBJECT_HEIGHT / 2.0 + GRASP_TIP_OFFSET
     q_high = arm.solve_ik([p[0], p[1], release_z + APPROACH_Z],
                           arm.backend.joint_positions(), R_target=R)
     arm.move(q_high, GRIP_CLOSED, rate=RAPID)
@@ -149,16 +152,12 @@ def _put_down(arm):
             arm.backend.step()
 
     settle(q_low)
-    # The arm settles ~11 mm ABOVE the pose it is given, so correct the measured
-    # residual before letting go: command the release height that far lower.
+    # Report the measured release height rather than correcting it. The grasp
+    # closes on the estimate the same way and is the reference: whatever
+    # residual THIS cell leaves, the put-down is now at the grasp's height.
     p_now, _ = arm.kin.pose(arm.backend.joint_positions())
-    dz = float(p_now[2]) - release_z
-    if 0.002 < dz < 0.030:
-        print('[HW] put-down settled %.0f mm high -- correcting' % (dz * 1e3))
-        q_low = arm.solve_ik([p[0], p[1], release_z - dz],
-                             arm.backend.joint_positions(), R_target=R)
-        arm.move(q_low, GRIP_CLOSED, rate=FEED)
-        settle(q_low)
+    print('[HW] put-down opened at %+.1f mm from the grasp height'
+          % ((float(p_now[2]) - release_z) * 1e3))
 
     arm.open_gripper(STEPS_RELEASE)
     return True

@@ -75,7 +75,7 @@ def main():
         T_flange_cam=mount())
     # the same hover the servo uses: camera CAM_HOVER_HEIGHT_MM above the table
     z_hover = (cfg.TABLE_HEIGHT + cfg.OBJECT_HEIGHT / 2.0
-               + cfg.TIP_OFFSET + cfg.SERVO_STANDOFF)
+               + cfg.GRASP_TIP_OFFSET + cfg.SERVO_STANDOFF)
 
     try:
         for i in range(args.looks):
