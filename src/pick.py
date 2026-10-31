@@ -160,8 +160,19 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
                           + np.array([0.0, 0.0, LIFT_Z]),
                           arm.backend.joint_positions(), R_target=R)
 
-    arm.close_gripper(STEPS_CLOSE, viewer, estop=estop, stop=stopped)
+    # The close returns a verdict on hardware -- (ok, width_mm, verdict) from the
+    # settled jaw width -- and None in the simulator, where grasp_state has a
+    # real force reading and does the judging instead. An explicit False is the
+    # jaws having run PAST the commanded width with nothing between them: that is
+    # known-empty, and carrying on would lift air to the release point and call
+    # it a success.
+    verdict = arm.close_gripper(STEPS_CLOSE, viewer, estop=estop, stop=stopped)
     if stopped():
+        return False, None, None
+    if isinstance(verdict, tuple) and verdict[0] is False:
+        print('[GRASP] the jaws closed past the commanded width -- nothing was '
+              'between them. Abandoning this pick.')
+        arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stopped)
         return False, None, None
 
     # Ask the jaws whether they got anything -- but only when the gripper can

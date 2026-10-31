@@ -309,14 +309,14 @@ class Arm:
             width = None
         return width is not None, width, GRIP_HOLD_S
 
-    # REMOVED 2026-11-01: the width settle loop. rg_grip is taken to block, so
+    # REMOVED 01.11.2026: the width settle loop. rg_grip is taken to block, so
     # after the single call the width is already final and polling for it to
     # stop changing only adds a round trip. Restore if G.1 proves otherwise.
     #
     # def _one_shot_grip(self, grip, on_step=None, stop=None):
     #     q_hold = self.backend.joint_positions()
     #     t0 = time.monotonic()
-    #     settled_since = None
+    #     settled_since = Nones
     #     width_prev = None
     #     width = None
     #     while True:

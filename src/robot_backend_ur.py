@@ -121,11 +121,16 @@ class URBackend(RobotBackend):
             return
         target = int(round(np.clip(self._grip_cmd, 0.0, 255.0)))
         now = time.monotonic()
-        if (force or target != self._grip_sent) \
-                and (now - self._grip_t) >= self.gripper_period:
-            self._gripper.move(target)
+        # The bookkeeping describes the COMMAND, not the send: a target that is
+        # dropped by the throttle is still the current target, so _grip_sent
+        # tracks it either way. Before this, a dropped send left _grip_sent on
+        # the OLD value, so the next cycle saw a "change" that had already been
+        # decided and re-fired the same command.
+        if force or target != self._grip_sent:
+            if (now - self._grip_t) >= self.gripper_period:
+                self._gripper.move(target)
+                self._grip_t = now
             self._grip_sent = target
-            self._grip_t = now
 
     def step(self):
         # One control cycle: stream the target and block for the cycle time.
@@ -427,20 +432,38 @@ class RG2:
         if (self._sent_width is not None
                 and abs(width - self._sent_width) < self.min_step_mm):
             return
-        try:
-            with _quiet():
-                self._rg.rg_grip(width, self.force_n)
-            self._sent_width = width
-        except Exception as exc:
-            # One failure is enough to stop trusting the route.
-            self._rg = False
-            self._route = 'dashboard' if self._allow_dashboard else None
-            self._warn(exc)
-            if self._route == 'dashboard':
-                self._move_dashboard(position)
+        last = None
+        # ONE RETRY. A single timeout is not a dead route, and the old code
+        # treated it as one: the first exception disabled XML-RPC for the whole
+        # session and dropped to the dashboard programs, which are discrete and
+        # blind. A retry costs one round trip and keeps the proportional route.
+        for _attempt in (0, 1):
+            try:
+                with _quiet():
+                    self._rg.rg_grip(width, self.force_n)
+                self._sent_width = width
+                return
+            except Exception as exc:
+                last = exc
+        # Two failures: stop trusting the route.
+        self._rg = False
+        self._route = 'dashboard' if self._allow_dashboard else None
+        self._warn(last)
+        if self._route == 'dashboard':
+            self._move_dashboard(position)
 
     def _move_dashboard(self, position):
         # Discrete jaws: act only when the command crosses the midpoint.
+        #
+        # It must NOT be run without a stroke time. The program is fired and this
+        # method returns immediately, so the caller moves the arm while the jaws
+        # are still travelling -- a dropped or crushed cube, silently. Raising is
+        # the honest outcome: no stroke time means no timed fallback.
+        if not self.stroke_time:
+            raise RuntimeError(
+                'RG2 fell back to the dashboard programs, which are discrete and '
+                'blind; GRIP_STROKE_TIME_S is None, so there is no way to wait for '
+                'the stroke. Set GRIP_STROKE_TIME_S (seconds) and restart.')
         mid = (float(_cfg.GRIP_OPEN) + float(_cfg.GRIP_CLOSED)) / 2.0
         want_closed = float(position) >= mid
         if self._closed is None:

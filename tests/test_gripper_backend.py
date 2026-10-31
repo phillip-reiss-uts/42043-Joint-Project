@@ -42,6 +42,7 @@ class FakeRG:
         self.width_reads = 0
 
     def rg_grip(self, width, force):
+        self.grip_attempts = getattr(self, 'grip_attempts', 0) + 1
         if self.fail_grip:
             raise RuntimeError('urcap refused rg_grip')
         self.grips.append((float(width), float(force)))
@@ -195,11 +196,17 @@ def main():
 
     # ---------------- fallback ----------------
     print('\nDASHBOARD FALLBACK')
+    # The fallback now needs a stroke time: without one the program is fired and
+    # returns at once, so the caller moves the arm mid-stroke. Refusing is the
+    # correct behaviour and is tested separately below.
     rg = FakeRG(fail_grip=True)
     dash = FakeDashboard()
-    grip = RG2('127.0.0.1', client=rg, dashboard=dash)
-    grip.move(hi)                       # rg_grip raises -> demote
-    failures += not check('falls back after one failed rg_grip',
+    grip = RG2('127.0.0.1', client=rg, dashboard=dash, stroke_time=0.5)
+    grip.move(hi)                       # rg_grip raises TWICE -> demote
+    failures += not check('one failed rg_grip is retried, not fatal',
+                          getattr(rg, 'grip_attempts', 0) >= 2,
+                          '%d rg_grip attempts' % getattr(rg, 'grip_attempts', 0))
+    failures += not check('falls back after the retry also fails',
                           grip._route == 'dashboard', str(grip._route))
     failures += not check('loads then plays the close program',
                           len(dash.calls) >= 2
@@ -213,6 +220,18 @@ def main():
                           len(dash.calls) == before,
                           '%d new calls' % (len(dash.calls) - before))
 
+    rg2 = FakeRG(fail_grip=True)
+    dash2 = FakeDashboard()
+    blind = RG2('127.0.0.1', client=rg2, dashboard=dash2, stroke_time=0)
+    raised = False
+    try:
+        blind.move(hi)
+    except RuntimeError:
+        raised = True
+    failures += not check('no stroke time -> the fallback REFUSES rather than '
+                          'firing blind', raised and not dash2.calls,
+                          'raised=%s calls=%d' % (raised, len(dash2.calls)))
+
     grip.move(lo)
     failures += not check('opening runs the open program',
                           'load %s' % cfg.RG2_OPEN_PROGRAM in dash.calls)
@@ -222,7 +241,7 @@ def main():
     # a refused play is an explicit error, not a silent no-op
     dash_fail = FakeDashboard(fail='play')
     grip_fail = RG2('127.0.0.1', client=FakeRG(fail_grip=True),
-                    dashboard=dash_fail)
+                    dashboard=dash_fail, stroke_time=0.5)
     try:
         grip_fail.move(hi)
         refused = False

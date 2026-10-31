@@ -51,6 +51,9 @@ from src.task import Commands, TaskStateMachine, TRACK, WAIT
 from src.world_real import (RealObjectWorld, RealSenseSource)
 
 
+ACTIVE_EMPTY_RUN = 3
+
+
 class VisibleWorld:
     # RealObjectWorld plus the one scene question the task policy asks:
     # "is there anything on the table?".
@@ -63,6 +66,7 @@ class VisibleWorld:
     def __init__(self, world, cache_frames=False):
         self.world = world
         self.last = []
+        self._empty_run = 0
         # The snapshot feature needs the frame that produced the last views. It
         # stays OFF unless run_hardware was given --snapshot, so a normal run
         # keeps nothing.
@@ -87,8 +91,23 @@ class VisibleWorld:
         return self.world.gripper_pose()
 
     # ---- scene questions (hardware meaning) ----
-    def active(self):
+    def visible_now(self):
+        # The raw reading: did the last look see anything?
         return [0] if self.last else []
+
+    def active(self):
+        # What the TASK asks: "is there something on the table?".
+        #
+        # visible_now() is literally "the last look saw nothing", so ONE
+        # obscured or out-of-frame look used to drop the task out of TRACK: the
+        # arm stopped being driven, and the next look that found the cube
+        # re-entered TRACK with a fresh servo and no memory -- which reads as the
+        # arm going home and then swinging back. A cube leaving the FRAME is not
+        # a cube leaving the TABLE, so TRACK survives up to ACTIVE_EMPTY_RUN
+        # consecutive empty looks. Short enough that a cube genuinely removed
+        # still empties the table, long enough to ride out a nudge.
+        self._empty_run = 0 if self.last else self._empty_run + 1
+        return [0] if self._empty_run < ACTIVE_EMPTY_RUN else []
 
     def close(self):
         src = getattr(self.world, 'src', None)
@@ -245,12 +264,42 @@ def main(argv=None):
         # Nothing is spawned on hardware: the operator puts the cube down.
         print('[HW] place the cube in view of the wrist camera')
 
+    # The pose streamed while the policy is idle. Defined before the closures
+    # below because _relatch() rebinds it.
+    held_q = np.array(backend.joint_positions(), float)
+    grip = GRIP_OPEN
+
+    def _relatch():
+        # Re-latch the pose the front-end streams while the policy is idle.
+        # servo() commands its own targets and returns; without this the hold
+        # pose stays at whatever it was before the chunk, and the arm drifts to
+        # a stop under the servoJ lookahead instead of holding where it finished.
+        nonlocal held_q
+        held_q = np.array(backend.joint_positions(), float)
+
+    def _reacquire():
+        # One look for the target. The servo calls this only when it has lost the
+        # object, and it is deliberately a LOOK, not a sweep: on hardware the
+        # camera is on the arm, so sweeping to find a cube the operator can see
+        # would move the arm away from it.
+        return bool(world.refresh())
+
     def track_step():
         # One short closed-loop look-and-follow chunk. The task calls this from
         # TRACK; on hardware the operator-paced loop means one chunk is enough.
+        #
+        # track=True and a search callback are NOT optional here. Without them
+        # the servo's lost-target branch (servo.py, `track and search is not
+        # None`) is unreachable, so a cube that leaves the frame silently runs
+        # the chunk to its iteration cap and returns with nothing printed.
         from src.servo import PBVSServo
         sv = PBVSServo(None, None, arm, world)
-        sv.servo(cfg.SERVO_STANDOFF, max_iters=cfg.UR_TRACK_CHUNK)
+        sv.servo(cfg.SERVO_STANDOFF, max_iters=cfg.UR_TRACK_CHUNK,
+                 track=True, search=_reacquire)
+        if sv.stage_obs == 0:
+            print('[TRACK] chunk ended with no fresh look -- the cube is out of '
+                  'view; the arm is held where it stopped')
+        _relatch()
 
     def pick_object():
         if not world.refresh():
@@ -277,14 +326,6 @@ def main(argv=None):
     print('  h = go home    s = status    q or Ctrl-C = quit')
     print('  space = pause / resume (holds position; p is ignored while paused)')
     print('  t = start / stop tracking (starts held; nothing moves until t)')
-    if shots is not None:
-        print('  v = save an annotated depth PNG of the last camera look')
-    print()
-    print('[STATE] WAIT  (place the cube in view; it is reported, then press t '
-          'to track it, or p to pick it)')
-
-    held_q = np.array(backend.joint_positions(), float)
-    grip = GRIP_OPEN
     mode_seen = None
     paused = False
     track_on = False
