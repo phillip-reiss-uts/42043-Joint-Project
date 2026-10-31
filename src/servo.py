@@ -20,7 +20,7 @@ from src.config import (
     SERVO_TRACK_MOVING, SERVO_STILL_TIME, SERVO_TRACK_ITERS, SERVO_STILL_TOL,
     SERVO_SEARCH_LIMIT, SERVO_YAW_SMOOTH, SERVO_WATCH_DESCENT,
     SERVO_MOVE_TOL, SERVO_COMMIT_TRIES,
-    TABLE_HEIGHT, GRIPPER_TO_PAD, TABLE_CONTACT_CLEARANCE,
+    TABLE_HEIGHT, TABLE_CONTACT_CLEARANCE,
     CONTACT_SLOW_ZONE, CONTACT_SLOW_FACTOR,
 )
 from src.tracking import TargetFilter
@@ -199,16 +199,15 @@ class PBVSServo:
         self.viewer = None
 
     def z_floor(self):
-        # Lowest gripper/base height the descent may command: pad bottom at the
-        # tabletop plus the clearance.
-        return (TABLE_HEIGHT
-                + GRIPPER_TO_PAD + TABLE_CONTACT_CLEARANCE)
+        # Lowest gripper/base height the descent may command: the tabletop plus
+        # the clearance. An arbitrary floor, not the tool's own length.
+        return TABLE_HEIGHT + TABLE_CONTACT_CLEARANCE
 
     def gate_report(self):
         # One-line description of a clamped grasp, for the terminal and overlay.
         return ('[SERVO] Z GATE: commanded grasp z %.3f is below the contact limit '
-                '%.3f (pad %.1f mm + %.1f mm clearance) -- stopped short by %.1f mm'
-                % (self.gate_requested_z, self.z_floor(), GRIPPER_TO_PAD * 1e3,
+                '%.3f (table + %.1f mm clearance) -- stopped short by %.1f mm'
+                % (self.gate_requested_z, self.z_floor(),
                    TABLE_CONTACT_CLEARANCE * 1e3,
                    (self.z_floor() - self.gate_requested_z) * 1e3))
 

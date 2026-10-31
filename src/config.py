@@ -83,15 +83,14 @@ RAPID_MIN_STEPS = 200
 FEED_MIN_STEPS = 400
 
 # ---- contact guard for the descent ---------------------------------------
-# gripper base -> lowest pad, jaws OPEN (the descent runs open). The descent
-# may never command the pads nearer the table than the clearance, so a wrong
-# grasp height stops the arm instead of driving through the table.
-GRIPPER_TO_PAD = 0.2207
+# The descent may never command gripper/base nearer the tabletop than this, so
+# a grasp height that is too low stops the arm instead of driving through the
+# table. A floor, not a model of the tool: the tool's own length is not used.
+TABLE_CONTACT_CLEARANCE = 0.002
 # wrist_3_link -> gripper base. +z points DOWN the approach at R_DOWN, so the
 # flange->gripper-top distance is POSITIVE. UNMEASURED; needed by the MODEL and
 # by the gripper-base conversion, not by calibration.
 TOOL_MOUNT_POS = (1.0e-06, -3.0e-06, 2.30e-02)
-TABLE_CONTACT_CLEARANCE = 0.002
 # Descents ending within the slow zone are run at the slow factor.
 CONTACT_SLOW_ZONE = 0.030
 CONTACT_SLOW_FACTOR = 0.3
@@ -145,12 +144,6 @@ PICK_Z_ABOVE_TABLE = 0.220
 # World-space tool z for the grasp (flange frame, metres).
 PICK_Z = TABLE_HEIGHT + PICK_Z_ABOVE_TABLE
 
-# TIP_OFFSET is kept only as the geometric tool length: flange -> the cube's
-# centre with the pads on the tabletop. Nothing derives a height from it.
-GRIPPER_PAD_HEIGHT = 0.0298               # measured pad face; reference only
-# Flange -> lowest pad, from the 242.3 mm measured with the pads on the table.
-FLANGE_TO_PAD = GRIPPER_TO_PAD + TOOL_MOUNT_POS[2]
-TIP_OFFSET = FLANGE_TO_PAD - OBJECT_HEIGHT / 2.0
 APPROACH_Z = 0.10
 FINAL_Z = 0.03
 LIFT_Z = 0.15
@@ -325,9 +318,13 @@ RG2_XMLRPC_PORT = 41414
 RG2_OPEN_PROGRAM = '/programs/rg_open.urp'
 RG2_CLOSE_PROGRAM = '/programs/rg_close.urp'
 # Grip is sent as GRIP_OPEN..GRIP_CLOSED (0..255); interpolate onto these widths.
+# Jaw widths stay in MILLIMETRES: rg_grip(width_mm) and the datasheet speak mm.
 RG2_OPEN_WIDTH_MM = 110.0                 # datasheet full stroke
 RG2_CLOSE_WIDTH_MM = 56.0                 # jaws squeeze ~4 mm on the 60 mm cube
-RG2_GRIP_FORCE_N = 2.5                    # write-only input; never readable
+# Force requested from rg_grip(width_mm, force_N). Write-only input, never
+# readable. The RG2 will not grip reliably below 3 N; do not set it lower.
+RG2_MIN_GRIP_FORCE_N = 3.0
+RG2_GRIP_FORCE_N = 3.0
 RG2_MIN_STEP_MM = 2.0                     # skip commands smaller than this
 
 # Simulated actuator is on the finger hinge, so its range is a torque: pad

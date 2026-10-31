@@ -80,13 +80,13 @@ def _kinematics():
 def _base_xy(receive, kin):
     # The CONTACT POINT, not the flange.
     #
-    # The operator touches the marker with the pads, so the FK pose (now the
-    # FLANGE) has to be moved down the tool axis by flange->pad before it is a
-    # point on the board. The tool axis is +z, pointing down the approach.
+    # The operator touches the marker with the gripper top, so the FK pose (the
+    # FLANGE) moves down the tool axis by the flange->gripper-top distance.
+    # The tool axis is +z, pointing down the approach.
     q = receive.getActualQ()
     p, R = kin.pose(np.asarray(q, float))
     return np.asarray(p, float) + np.asarray(R, float)[:, 2] * (
-        cfg.FLANGE_TO_PAD)
+        cfg.TOOL_MOUNT_POS[2])
 
 
 def _tool_pose(receive, kin):
@@ -356,8 +356,8 @@ def run_touch(args):
                   % (i + 1, args.stations))
             q_touch = np.asarray(receive.getActualQ(), float)
             p, R = kin.pose(q_touch)
-            contact = np.asarray(p, float) + np.asarray(R, float)[:, 2] * (
-                cfg.GRIPPER_TO_PAD)
+            # The touch is made at the flange itself.
+            contact = np.asarray(p, float)
             if abs(contact[2] - z_top) > 0.015:
                 print('    contact z %.1f mm, cube top is %.1f mm -- lower the '
                       'pads until they just touch it'
