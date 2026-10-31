@@ -56,18 +56,32 @@ def _camera_from_flange():
     return T
 
 
-def _world(depth_source, kin, backend, cfg):
+def _pose_from_pos_target(pos, target, up_hint=(0.0, 0.0, 1.0)):
+    # camera pose in the base frame from a position and a look-at point, in this
+    # repo's camera convention: columns are [right, up, backward], so the camera
+    # looks down its own -z.
+    pos = np.asarray(pos, float)
+    back = -(np.asarray(target, float) - pos)
+    back = back / max(float(np.linalg.norm(back)), 1e-12)
+    up = np.asarray(up_hint, float)
+    if abs(float(np.dot(up, back))) > 0.99:
+        up = np.array([0.0, 1.0, 0.0])
+        if abs(float(np.dot(up, back))) > 0.99:
+            up = np.array([1.0, 0.0, 0.0])
+    right = np.cross(up, back)
+    right = right / max(float(np.linalg.norm(right)), 1e-12)
+    up = np.cross(back, right)
+    T = np.eye(4)
+    T[:3, 0], T[:3, 1], T[:3, 2] = right, up, back
+    T[:3, 3] = pos
+    return T
+
+
+def _world(depth_source, kin, backend):
     # Exactly the wiring run_hardware.py uses, so the test exercises the same
     # path the pick does rather than a convenient one.
-    from src.world_real import RealObjectWorld, FixedCameraWorld, \
-        camera_transform
+    from src.world_real import RealObjectWorld
     flange_pose = lambda: kin.pose(backend.joint_positions())
-    if cfg.CAMERA_MODE == 'fixed':
-        pos = np.array(cfg.FIXED_CAM_POS, float)
-        tgt = np.array(cfg.FIXED_CAM_TARGET, float)
-        T = camera_transform(pos, tgt - pos, cfg.FIXED_CAM_UP)
-        return FixedCameraWorld(depth_source, flange_pose=flange_pose,
-                                T_base_cam=T)
     return RealObjectWorld(depth_source, flange_pose=flange_pose,
                            T_flange_cam=_camera_from_flange())
 
@@ -102,10 +116,9 @@ def main(argv=None):
     if args.no_robot:
         if not (args.cam_pos and args.cam_target):
             raise SystemExit('--no-robot needs --cam-pos and --cam-target')
-        from src.world_real import camera_transform
         pos = np.array([float(v) for v in args.cam_pos.split(',')])
         tgt = np.array([float(v) for v in args.cam_target.split(',')])
-        T_world_cam = camera_transform(pos, tgt - pos)
+        T_world_cam = _pose_from_pos_target(pos, tgt)
         world = _StaticCameraWorld(depth, T_world_cam)
         print('[camera] static pose from the command line')
     else:
@@ -117,9 +130,9 @@ def main(argv=None):
                            tool_pos=cfg.TOOL_MOUNT_POS,
                            tool_quat=cfg.TOOL_MOUNT_QUAT,
                            root_yaw=cfg.UR_ROOT_YAW)
-        world = _world(depth, kin, backend, cfg)
+        world = _world(depth, kin, backend)
         p, _ = kin.pose(backend.joint_positions())
-        print('[camera] %s, tool at %s' % (cfg.CAMERA_MODE, np.round(p, 3)))
+        print('[camera] wrist, tool at %s' % np.round(p, 3))
 
     # ---- detect ----------------------------------------------------------
     views = world.perceive()

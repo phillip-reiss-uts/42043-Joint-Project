@@ -230,13 +230,12 @@ class FakeDepthSource(DepthSource):
 class DepthWorld(ObjectWorld):
     # Shared hardware world: capture -> deproject -> detect.
     #
-    # The camera MOUNT is the only difference between the two concrete worlds:
+    # The camera MOUNT is the only thing a concrete world adds:
     #
     #   RealObjectWorld    eye-in-hand: camera pose = FK(q) @ T_flange_cam
-    #   FixedCameraWorld   eye-to-hand: camera pose = T_BASE_CAM (constant)
     #
     # Everything downstream -- the deprojection signs, the table filter, the
-    # clustering -- is shared, so the perception maths cannot drift between them.
+    # clustering -- is shared, so the perception maths cannot drift.
 
     def __init__(self, depth_source, flange_pose, n_objects_max=4):
         # depth_source : a DepthSource (RealSenseSource or FakeDepthSource)
@@ -398,65 +397,6 @@ class RealObjectWorld(DepthWorld):
         R_wc = np.asarray(R_f, float) @ R_fc
         p_wc = np.asarray(p_f, float) + np.asarray(R_f, float) @ t_fc
         return p_wc, R_wc
-
-
-class FixedCameraWorld(DepthWorld):
-    # Eye-to-hand: the camera does not move with the arm, so its pose in the
-    # base frame is a constant.
-    #
-    # T_base_cam : 4x4 pose of the camera in the robot base frame, in the same
-    #              convention the deprojection uses (the MuJoCo camera one):
-    #              columns are [right, up, backward], so the camera looks along
-    #              its own -z. Build it with camera_transform() from a measured
-    #              position and aim point.
-    #
-    # The robot's own pose still comes from `flange_pose`: the servo needs to
-    # know where the tool is even though the camera does not.
-
-    def __init__(self, depth_source, flange_pose, T_base_cam,
-                 n_objects_max=4):
-        super().__init__(depth_source, flange_pose, n_objects_max)
-        self.T_base_cam = np.asarray(T_base_cam, float)
-        if self.T_base_cam.shape != (4, 4):
-            raise ValueError('T_base_cam must be 4x4')
-
-    def camera_pose(self):
-        T = self.T_base_cam
-        return np.array(T[:3, 3], float), np.array(T[:3, :3], float)
-
-
-def camera_transform(pos, forward, up_hint=(0.0, 0.0, 1.0)):
-    # 4x4 pose of a camera that sits at `pos` and looks along `forward`.
-    #
-    # The rotation is in the convention the deprojection expects -- the MuJoCo
-    # camera one: columns are [right, up, backward], i.e. the camera looks down
-    # its own -z. `up_hint` only fixes the roll; it is projected onto the plane
-    # perpendicular to the view, so "world up" is usually the right choice.
-    #
-    # This is deliberately position + aim rather than a quaternion: it is what
-    # you can measure in a cell with a tape measure and a target sticker.
-    pos = np.asarray(pos, float)
-    back = -np.asarray(forward, float)
-    n = float(np.linalg.norm(back))
-    if n < 1e-9:
-        raise ValueError('camera forward vector is zero')
-    back = back / n
-
-    up = np.asarray(up_hint, float)
-    if abs(float(np.dot(up, back))) > 0.99:
-        up = np.array([0.0, 1.0, 0.0])
-        if abs(float(np.dot(up, back))) > 0.99:
-            up = np.array([1.0, 0.0, 0.0])
-    right = np.cross(up, back)
-    right = right / np.linalg.norm(right)
-    up = np.cross(back, right)
-
-    T = np.eye(4)
-    T[:3, 0] = right
-    T[:3, 1] = up
-    T[:3, 2] = back
-    T[:3, 3] = pos
-    return T
 
 
 # VALIDATION HELPERS (used by tests/test_camera_enum.py)

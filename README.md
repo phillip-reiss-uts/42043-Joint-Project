@@ -84,18 +84,17 @@ The route that works on this cell is a direct offset loop against the tool:
 The loop constrains translation only. `CAM_QUAT` is set by the mount geometry,
 not by this loop, and is good enough for this task.
 
-The marker tooling is still in the tree for the fixed-camera fallback below, but
-the wrist ArUco route was tried on 2026-10-30 and did not converge — the
-ruler check read 65.9 mm error at truth (0, -0.25). It is not the calibration
-route for this cell's wrist.
-
-A camera on a stand instead of the wrist (`CAMERA_MODE = 'fixed'`) is the
-fallback. There is no fixed-camera routine in this tool any more: a camera on a
-stand is aimed by hand and measured with a tape, and the wrist mount is what
-`--aruco` and `--touch` calibrate:
+The marker tooling is still in the tree, but the wrist ArUco route was tried on
+2026-10-30 and did not converge — the ruler check read 65.9 mm error at truth
+(0, -0.25). It is not the calibration route for this cell's wrist today; the
+offset loop above is. The tool:
 
     python tools/calibrate_camera.py --aruco     # printed marker, several poses
     python tools/calibrate_camera.py --touch     # touched cube positions
+
+Both produce `CAM_POS` / `CAM_QUAT` only. A camera on a stand is not covered:
+the fixed-camera mode, its config (`CAMERA_MODE`, `FIXED_CAM_*`) and its
+calibration routines have been removed, and the camera rides the gripper.
 
 ## Tests
 
@@ -105,10 +104,11 @@ stand is aimed by hand and measured with a tape, and the wrist mount is what
     python tests/test_ur_kinematics.py   # hardware chain vs MuJoCo
     python tests/test_kinematics_parity.py  # TCP pose + frame convention
     python tests/test_ur_backend.py      # RTDE/RG2 plumbing, no robot
-    python tests/test_fixed_camera.py    # eye-to-hand world, offline (PENDING)
     python tests/test_calibration_camera.py  # extrinsic solvers, synthetic
     python tests/test_liveview.py        # snapshot projection/drawing, and OFF
     python tests/test_hardware.py --sim  # hardware assumptions
+    python tests/test_gripper_backend.py # RG2 XML-RPC/dashboard, fakes only
+    python tests/preflight_cell.py       # the gate: everything offline, before travel
     python run_tests.py --trials 6       # end-to-end picks, writes test_output/
 
 ## Architecture
@@ -125,12 +125,10 @@ chosen by the entry point and injected into the robot layer.
 `src/pick.py`, `src/servo.py`, `src/arm.py` and `src/task.py` contain no MuJoCo
 and no device driver. `tests/test_layering.py` enforces it.
 
-The hardware world has two camera modes, chosen by `CAMERA_MODE` in
-`src/config.py`: `'wrist'` (eye-in-hand, the default) and `'fixed'`
-(eye-to-hand, for a camera on a stand). The wrist mode is the one the hardware
-path is built and calibrated for; the fixed mode exists as a fallback for a
-constrained cell and its detection path is not finished (`tests/test_fixed_camera.py`
-is marked PENDING).
+The hardware world is the wrist camera only: `RealObjectWorld` in
+`src/world_real.py` builds the camera pose as `FK(q) @ T_flange_cam`. The
+eye-to-hand variant (`CAMERA_MODE = 'fixed'`, `FixedCameraWorld`) has been
+removed; a camera on a stand is outside what the hardware path supports.
 
 ## References
 

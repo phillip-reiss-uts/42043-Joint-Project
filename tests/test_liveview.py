@@ -21,8 +21,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from src import config as cfg                          # noqa: E402
 from src.camera import world_points_from_depth         # noqa: E402
 from src.liveview import annotate, depth_image, project, Snapshotter  # noqa: E402
-from src.world_real import (FakeDepthSource, FixedCameraWorld,  # noqa: E402
-                            camera_transform)
+from src.world_real import DepthWorld, FakeDepthSource  # noqa: E402
 
 PASSED = 0
 FAILED = 0
@@ -40,16 +39,41 @@ def check(name, ok, detail=''):
             print('         %s' % detail)
 
 
+def _looking_down(pos, target, up_hint):
+    # Camera pose in the base frame from a position and a look-at point, in the
+    # deprojection's convention: columns [right, up, backward], looking along
+    # its own -z.
+    pos = np.asarray(pos, float)
+    back = -(np.asarray(target, float) - pos)
+    back = back / max(float(np.linalg.norm(back)), 1e-12)
+    up = np.asarray(up_hint, float)
+    if abs(float(np.dot(up, back))) > 0.99:
+        up = np.array([0.0, 1.0, 0.0])
+        if abs(float(np.dot(up, back))) > 0.99:
+            up = np.array([1.0, 0.0, 0.0])
+    right = np.cross(up, back)
+    right = right / max(float(np.linalg.norm(right)), 1e-12)
+    up = np.cross(back, right)
+    T = np.eye(4)
+    T[:3, 0], T[:3, 1], T[:3, 2] = right, up, back
+    T[:3, 3] = pos
+    return T
+
+
 def _world():
     # Fake source plus a camera looking straight down from the height that source
     # assumes. cam_world_z is the property that makes the synthetic depth land on
     # the tabletop; a literal here is how the fixture and the decoder disagree.
     src = FakeDepthSource()
     pos = np.array([cfg.TABLE_CENTRE[0], cfg.TABLE_CENTRE[1], src.cam_world_z])
-    T = camera_transform(pos, np.array([*cfg.TABLE_CENTRE, cfg.TABLE_HEIGHT]) - pos,
-                         (0.0, -1.0, 0.0))
-    world = FixedCameraWorld(src, lambda: (np.zeros(3), np.eye(3)), T)
-    return src, world
+    T = _looking_down(pos, np.array([*cfg.TABLE_CENTRE, cfg.TABLE_HEIGHT]),
+                      (0.0, -1.0, 0.0))
+
+    class _FixedWorld(DepthWorld):
+        def camera_pose(inner):
+            return T[:3, 3].copy(), T[:3, :3].copy()
+
+    return src, _FixedWorld(src, lambda: (np.zeros(3), np.eye(3)))
 
 
 def test_projection_round_trips_through_the_shipped_maths():

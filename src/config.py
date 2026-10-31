@@ -927,22 +927,6 @@ CAM_MOUNT_QUAT = CAM_QUAT
 HW_CAM_DELTA_POS = (0.0, 0.0, 0.0)             # hardware-only, measured (D5)
 HW_CAM_DELTA_QUAT = (1.0, 0.0, 0.0, 0.0)       # wxyz, identity = unmeasured
 
-# ---- camera mode -----------------------------------------------------------
-# 'wrist'  eye-in-hand: the camera is bolted to the gripper, so its pose is
-#          FK(q) @ CAM_MOUNT and it moves with the arm.
-# 'fixed'  eye-to-hand: the camera is on a stand or the cell frame, looking at
-#          the table. Its pose in the base frame is constant and comes from the
-#          three values below, not from the arm.
-CAMERA_MODE = 'wrist'
-
-# Fixed camera (the fallback): where it sits and what it looks at, in the ROBOT
-# BASE frame. MEASURE both with a tape measure and a target on the table, then
-# refine by comparing a detected cube against a ruler. FIXED_CAM_UP only sets
-# the roll.
-# The target is DERIVED from TABLE_CENTRE. It used to be (0.275, 0.035, 0.02),
-# the OLD simulated table -- which now points at where the table is not.
-# FIXED_CAM_MEASURED was a boolean with no consumers; removed. Whether
-# this camera has been measured is recorded by the values themselves.
-FIXED_CAM_POS = (0.0, -0.35, 0.75)                             # PLACEHOLDER
-FIXED_CAM_TARGET = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HEIGHT)
-FIXED_CAM_UP = (0.0, 0.0, 1.0)
+# REMOVED: the fixed-camera mode. CAMERA_MODE, FIXED_CAM_POS/TARGET/UP and the
+# eye-to-hand world they configured are gone with the fixed-camera calibration
+# routes; the camera rides the gripper, so its pose is FK(q) @ CAM_MOUNT.

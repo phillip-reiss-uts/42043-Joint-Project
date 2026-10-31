@@ -72,9 +72,9 @@ def transform_from(pos, rotvec):
 #     OpenCV / solvePnP    x right, y DOWN,  z FORWARD, into the scene
 #     MuJoCo / this repo   x right, y UP,    z BACKWARD, out of the scene
 #
-# Everything downstream of a calibration is in the MuJoCo one: camera_transform
-# builds it deliberately, world_points_from_depth consumes it, RealObjectWorld
-# composes it, and config's CAM_MOUNT_QUAT stores it. camera.py encodes the same
+# Everything downstream of a calibration is in the MuJoCo one:
+# world_points_from_depth consumes it, RealObjectWorld composes it from FK(q) @
+# T_flange_cam, and config's CAM_MOUNT_QUAT stores it. camera.py encodes the same
 # choice in its intrinsics -- it builds K with a NEGATIVE fx for exactly this
 # reason. cv2 is the opposite.
 #

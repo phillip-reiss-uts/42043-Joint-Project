@@ -60,14 +60,6 @@ from src.calibration_camera import (
     board_pose_from_two_touches, cam_cv_to_mjocam, cam_mjocam_to_cv,
     mean_transform, quat_from_rot, solve_aruco, wrist_mount,
 )
-from src.world_real import camera_transform
-
-
-def _config_transform():
-    # The current config values as a 4x4, used as the solver's starting point.
-    pos = np.array(cfg.FIXED_CAM_POS, float)
-    target = np.array(cfg.FIXED_CAM_TARGET, float)
-    return camera_transform(pos, target - pos, cfg.FIXED_CAM_UP)
 
 
 def _mount_from_config():

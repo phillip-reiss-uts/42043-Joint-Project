@@ -48,8 +48,7 @@ from src.config import (
 from src.kinematics_ur import URKinematics
 from src.pick import pick_and_hold
 from src.task import Commands, TaskStateMachine, TRACK, WAIT
-from src.world_real import (FixedCameraWorld, RealObjectWorld, RealSenseSource,
-                            camera_transform)
+from src.world_real import (RealObjectWorld, RealSenseSource)
 
 
 class VisibleWorld:
@@ -117,13 +116,6 @@ def _camera_mount():
     T[:3, :3] = rot_from_quat(cfg.CAM_MOUNT_QUAT)
     T[:3, 3] = cfg.CAM_MOUNT_POS
     return T
-
-
-def _fixed_camera_transform(): # DEPRECATED
-    # camera -> base, from a measured position and aim point.
-    pos = np.array(cfg.FIXED_CAM_POS, float)
-    target = np.array(cfg.FIXED_CAM_TARGET, float)
-    return camera_transform(pos, target - pos, cfg.FIXED_CAM_UP)
 
 
 def _put_down(arm):
@@ -220,19 +212,10 @@ def main(argv=None):
 
     flange_pose = lambda: kin.pose(backend.joint_positions())
     # cache_frames is the snapshot switch: True only when --snapshot was given.
-    if cfg.CAMERA_MODE == 'fixed':
-        T_base_cam = _fixed_camera_transform()
-        world = VisibleWorld(FixedCameraWorld(depth, flange_pose=flange_pose,
-                                              T_base_cam=T_base_cam),
-                             cache_frames=bool(args.snapshot))
-        print('[HW] camera: fixed (eye-to-hand) at %s, aimed at %s'
-              % (np.round(cfg.FIXED_CAM_POS, 3),
-                 np.round(cfg.FIXED_CAM_TARGET, 3)))
-    else:
-        world = VisibleWorld(RealObjectWorld(depth, flange_pose=flange_pose,
-                                             T_flange_cam=_camera_mount()),
-                             cache_frames=bool(args.snapshot))
-        print('[HW] camera: wrist-mounted (eye-in-hand)')
+    world = VisibleWorld(RealObjectWorld(depth, flange_pose=flange_pose,
+                                         T_flange_cam=_camera_mount()),
+                         cache_frames=bool(args.snapshot))
+    print('[HW] camera: wrist-mounted (eye-in-hand)')
 
     # Snapshot writer only. A normal run
     # never imports src.liveview and never touches cv2.
@@ -259,8 +242,7 @@ def main(argv=None):
 
     def place_object():
         # Nothing is spawned on hardware: the operator puts the cube down.
-        where = 'fixed camera' if cfg.CAMERA_MODE == 'fixed' else 'wrist camera'
-        print('[HW] place the cube in view of the %s' % where)
+        print('[HW] place the cube in view of the wrist camera')
 
     def track_step():
         # One short closed-loop look-and-follow chunk. The task calls this from
