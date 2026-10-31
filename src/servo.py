@@ -9,7 +9,7 @@ gets geometry from arm.kin (src/kinematics.py) and steps through arm.backend
 import numpy as np
 
 from src.config import (
-    ARM_DOF, PICK_Z, TOOL_MOUNT_POS, R_DOWN, JOINT_RANGE, YAW_LIMIT_DEG,
+    ARM_DOF, PICK_Z, R_DOWN, JOINT_RANGE, YAW_LIMIT_DEG,
     GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
     SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD,
@@ -20,7 +20,7 @@ from src.config import (
     SERVO_TRACK_MOVING, SERVO_STILL_TIME, SERVO_TRACK_ITERS, SERVO_STILL_TOL,
     SERVO_SEARCH_LIMIT, SERVO_YAW_SMOOTH, SERVO_WATCH_DESCENT,
     SERVO_MOVE_TOL, SERVO_COMMIT_TRIES,
-    TABLE_HEIGHT, TABLE_CONTACT_CLEARANCE,
+    TABLE_HEIGHT,
     CONTACT_SLOW_ZONE, CONTACT_SLOW_FACTOR,
 )
 from src.tracking import TargetFilter
@@ -218,16 +218,16 @@ class PBVSServo:
         self.viewer = None
 
     def z_floor(self):
-        # Lowest gripper/base height the descent may command: the tabletop plus
-        # the clearance. An arbitrary floor, not the tool's own length.
-        return TABLE_HEIGHT + TABLE_CONTACT_CLEARANCE
+        # Lowest TCP height the descent may command: the pick height. PICK_Z is
+        # where the jaws sit on the object, so anything lower drives them into
+        # the table.
+        return PICK_Z
 
     def gate_report(self):
         # One-line description of a clamped grasp, for the terminal and overlay.
-        return ('[SERVO] Z GATE: commanded grasp z %.3f is below the contact limit '
-                '%.3f (table + %.1f mm clearance) -- stopped short by %.1f mm'
+        return ('[SERVO] Z GATE: commanded TCP z %.3f is below the pick height '
+                '%.3f -- stopped short by %.1f mm'
                 % (self.gate_requested_z, self.z_floor(),
-                   TABLE_CONTACT_CLEARANCE * 1e3,
                    (self.z_floor() - self.gate_requested_z) * 1e3))
 
     def _control(self, state):
@@ -367,10 +367,10 @@ class PBVSServo:
         p = self.p_est
         if self.kf is not None and self.kf.ready and self.lead_s != 0.0:
             p = self.kf.lead(self.lead_s)
-        # PICK_Z is the grasp height in the FLANGE frame; this servo commands
-        # gripper/base, so step back down the tool axis. The grasp height is
-        # absolute, so the estimated object z no longer sets it.
-        z_want = float((PICK_Z - TOOL_MOUNT_POS[2]) + z_offset)
+        # PICK_Z is a TCP height and the servo measures the TCP, so this is one
+        # frame end to end. The grasp height is absolute; the estimate does not
+        # set it.
+        z_want = float(PICK_Z + z_offset)
         # CONTACT GATE. The lowest part of the gripper is the pad bottom, well
         # below gripper/base, so a grasp commanded too low sends the pads through
         # the table. Clamp the commanded height and remember that we did: the

@@ -17,6 +17,7 @@ not be able to call them. They exist here for the front-end and the harness.
 
 import numpy as np
 
+from src.config import TOOL_MOUNT_POS
 from src.world import ObjectWorld, TargetView
 
 
@@ -65,10 +66,14 @@ class SimObjectWorld(ObjectWorld):
                 for d in dets]
 
     def gripper_pose(self):
+        # The TCP, not the gripper/base body: the model's base body sits
+        # TOOL_MOUNT_POS below tool0, and every height the servo works in is a
+        # TCP height.
         import mujoco
         mujoco.mj_forward(self.model, self.data)
-        p = np.array(self.data.xpos[self.base_id], float)
         R = np.array(self.data.xmat[self.base_id], float).reshape(3, 3)
+        p = (np.array(self.data.xpos[self.base_id], float)
+             + R @ np.asarray(TOOL_MOUNT_POS, float))
         return p, R
 
     def camera_pose(self):
