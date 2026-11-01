@@ -255,7 +255,8 @@ def main(sensor_size=(320, 240), lightweight=False):
             ok = put_cube_down(model, data, arm, reg, rng, viewer=viewer,
                                estop=estop, world=world, xy=xy,
                                stop=stopped)
-            last_pick_xy[0] = None
+            if ok:
+                last_pick_xy[0] = None
             return ok
 
         # ---- TRACK: follow the object, never descend ---------------------
@@ -379,7 +380,10 @@ def main(sensor_size=(320, 240), lightweight=False):
             mission_deadline = t_pick + cfg.PICK_BUDGET_S
 
             def give_up():
-                return (cmd.pending() or not viewer.is_running()
+                # A repeat pickup key press must not abort the grasp that the
+                # previous press started. Place/reset still pre-empt, and the
+                # wall-clock budget still bounds a genuine hang.
+                return (cmd.place or cmd.reset or not viewer.is_running()
                         or _time.perf_counter() >= mission_deadline)
 
             # Grasp, lift, and carry the cube to the home pose with the jaws

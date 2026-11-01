@@ -257,9 +257,11 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     # PICK_Z is the one grasp/place height, in the same TCP frame that
     # world.gripper_pose() and the servo use.
     release_z = PICK_Z
-    q_high = arm.solve_ik([tx, ty, release_z + APPROACH_Z],
+    target_high = np.array([tx, ty, release_z + APPROACH_Z], float)
+    target_low = np.array([tx, ty, release_z], float)
+    q_high = arm.solve_ik(target_high,
                           arm.backend.joint_positions(), R_target=R)
-    q_low = arm.solve_ik([tx, ty, release_z], q_high, R_target=R)
+    q_low = arm.solve_ik(target_low, q_high, R_target=R)
     if q_high is None or q_low is None:
         return False
 
@@ -270,6 +272,16 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     arm.move(q_low, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
              stop=stop)
     if stop is not None and stop():
+        return False
+
+    # DO NOT OPEN AT WHATEVER HEIGHT THE ARM HAPPENS TO BE AT. If the descent
+    # was aborted, or IK/settle left the tool short, keep the cube in the jaws
+    # and report failure instead of dropping it.
+    p_now, _ = arm.kin.pose(arm.backend.joint_positions())
+    miss = float(np.linalg.norm(np.asarray(p_now, float) - target_low))
+    if miss > 0.010:
+        print('[PLACE] release NOT reached: %.1f mm above/short of target'
+              % (miss * 1e3))
         return False
 
     arm.open_gripper(STEPS_RELEASE, viewer, estop=estop, stop=stop)

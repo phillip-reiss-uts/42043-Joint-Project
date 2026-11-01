@@ -301,7 +301,6 @@ class TaskStateMachine:
         self.mode = PUTDOWN
         self.say('PUTDOWN  (placing the cube back on the table)')
         ok = self._put_object()
-        self.holding = False
         if not self._running():
             return
 
@@ -309,10 +308,17 @@ class TaskStateMachine:
             self._on_reset()
             return
 
-        if ok:
-            self.say('PUTDOWN  (cube released)')
-        else:
-            self.say('PUTDOWN failed -- cube may still be held')
+        if not ok:
+            # The release did not reach its target and did not open. Keep the
+            # cube in the jaws and return to HOLD; do not retract with an open
+            # command or the next key press will drop it from wherever it is.
+            self.holding = True
+            self.mode = HOLD
+            self.say('PUTDOWN failed -- cube still held; retry the place')
+            return
+
+        self.holding = False
+        self.say('PUTDOWN  (cube released)')
 
         # Retract to the home pose. The put-down leaves the tool low over the
         # table where it released, which is neither a useful standby pose nor

@@ -313,6 +313,13 @@ class Arm:
         # Returns (settled, width_mm, seconds).
         q_hold = self.backend.joint_positions()
         frames = max(1, int(GRIP_HOLD_S / self.backend.dt))
+        # The simulator's finger has to TRAVEL to the stop. Hold the single
+        # command until the jaw is actually still, not for a guessed number of
+        # frames; otherwise the pick starts lifting while the jaws are closing.
+        sim = not self._real_gripper()
+        if sim:
+            frames = max(frames, int(5.0 / self.backend.dt))
+        q_prev, stable = None, 0
         for i in range(frames):
             if stop is not None and stop():
                 break
@@ -321,6 +328,20 @@ class Arm:
             self._command_step(q_hold, grip)
             if on_step is not None and i % SYNC_STEPS == 0:
                 on_step()
+            if sim:
+                st_i = self.backend.gripper_state()
+                q_i = float(st_i.get('q', float('nan')))
+                v_i = float(st_i.get('v', float('nan')))
+                if (q_prev is not None and np.isfinite(q_i)
+                        and np.isfinite(v_i)
+                        and abs(q_i - q_prev) < 1e-4
+                        and abs(v_i) < 1e-4):
+                    stable += 1
+                    if stable >= 5 and i > int(0.20 / self.backend.dt):
+                        break
+                else:
+                    stable = 0
+                q_prev = q_i
         st = self.backend.gripper_state()
         width = st.get('width_mm')
         if width is None or not np.isfinite(width):
@@ -354,8 +375,10 @@ class Arm:
             print('[GRIP] %s: width %s mm after %.2f s'
                   % (verdict, '?' if width is None else '%.1f' % width, secs))
             return ok, width, verdict
-        self._ramp_grip(GRIP_OPEN, position, steps, viewer, estop,
-                        stop, on_step)
+        # Match the hardware: one grip command, held for GRIP_HOLD_S. The old
+        # simulated ramp retargeted the actuator through GRIP_RAMP_LEVELS, which
+        # the real RG2 does not do from the arm's side.
+        self._one_shot_grip(position, on_step, stop)
         return None
 
     def open_gripper(self, steps, viewer=None, estop=None, stop=None,
@@ -369,8 +392,8 @@ class Arm:
         if self._real_gripper():
             self._one_shot_grip(GRIP_OPEN, on_step, stop)
             return None
-        self._ramp_grip(GRIP_CLOSED, GRIP_OPEN, steps, viewer, estop,
-                        stop, on_step)
+        # Same one-shot contract as close_gripper.
+        self._one_shot_grip(GRIP_OPEN, on_step, stop)
         return None
 
     def attach_object(self, body_name):

@@ -989,7 +989,7 @@ class PBVSServo:
         # when the arm has arrived; servoJ lags it. Measuring straight away
         # reads that lag as a short descent (13 mm on the cell), so hold the
         # final target for a moment before asking where the tool is.
-        for _ in range(max(1, int(0.30 / self.arm.backend.dt))):
+        for _ in range(max(1, int(1.0 / self.arm.backend.dt))):
             self.arm.command_step(q_goal, GRIP_OPEN)
         self.descent_short = 0.0
         p_end, _ = self.world.gripper_pose()
@@ -1013,11 +1013,10 @@ class PBVSServo:
             print('[SERVO] DESCENT ABANDONED: the target moved while descending '
                   '(%.0f mm short, not closing)' % (1e3 * self.descent_short))
             return False, 0
-        # REPORT ONLY. A short descent is printed but never refuses and never
-        # retreats: the operator wants the grasp attempted wherever the arm
-        # stopped. The refusal this replaces was what turned a near miss into a
-        # visible failure.
-        if self.descent_short > 0.015:
+        # DO NOT CLOSE HIGH. If the tool did not reach the grasp pose, report a
+        # failed descent so the caller can retry; closing here is what grabbed
+        # the cube with the pads above it.
+        if self.descent_short > 0.010:
             extra = ''
             if self.descent_joint is not None:
                 j, qv, ql = self.descent_joint
@@ -1029,10 +1028,11 @@ class PBVSServo:
                 why = ('  [ik %.0f mm, joint lag %.2f rad, %d steps]'
                        % (info['ik_mm'], info['lag'], info['steps']))
             msg = ('[SERVO] DESCENT SHORT: stopped %.0f mm above the grasp pose '
-                   '(forced -- closing anyway)%s%s'
+                   '-- not closing%s%s'
                    % (1e3 * self.descent_short, extra, why))
             print(msg)
-            push(viewer, 'occlusion', 'descent short -- closing anyway', msg)
+            push(viewer, 'occlusion', 'descent short -- not closing', msg)
+            return False, 0
         if aborted is not None and aborted():
             return False, 0
         return True, 1

@@ -103,8 +103,9 @@ SYNC_STEPS = 8                            # steps between syncs
 
 # ---- perception ----------------------------------------------------------
 # Near clip for the depth cloud, metres from the lens. It must stay below the
-# lens-to-cube-top distance: at PICK_Z that is ~0.106 m, and the old 0.20
-# removed the top face exactly when the camera moved over the cube.
+# lens-to-cube-top distance: at PICK_Z the camera is ~0.137 m above the table
+# and the cube top is ~0.075 m, so the top is only ~0.062 m from the lens. The
+# old 0.20 and 0.10 both clipped it as the camera moved over the cube.
 SELF_FILTER = 0.05
 SURFACE_BAND = 0.005
 DEPTH_MAX = 5.0
@@ -165,7 +166,7 @@ STEPS_CLOSE = 3000
 GRIP_RAMP_LEVELS = 8
 # How long a real gripper's single grip command is held before moving on,
 # seconds. Assumes rg_grip blocks until the stroke ends.
-GRIP_HOLD_S = 0.3
+GRIP_HOLD_S = 2.0
 STEPS_RELEASE = 2000
 DROP_HOLD_STEPS = 500                     # hold open after a drop
 
