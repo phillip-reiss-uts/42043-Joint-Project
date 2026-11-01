@@ -52,18 +52,24 @@ def _tool_yaw(R):
     return float(np.degrees(np.arctan2(Rz[1, 0], Rz[0, 0])))
 
 
-def _bounded_yaw(yaw_ref, yaw_now, limit=YAW_LIMIT_DEG):
-    # The tool yaw to command for a face at yaw_ref, given the tool is at
-    # yaw_now. A square face makes every yaw in {yaw_ref + 90k} an equally valid
-    # grasp, so: take the member nearest the current tool angle, restricted to
-    # members within +-limit of HOME. Restricting it is what stops the command
-    # following the cube round the wrist; if the tool is outside the limit, the
-    # nearest in-limit member pulls it back.
-    cands = [yaw_ref + 90.0 * k for k in range(-4, 5)]
-    inside = [c for c in cands if abs(c) <= limit + 1e-9]
-    if not inside:                       # limit below 45 cannot happen for a square
-        inside = [min(cands, key=abs)]
-    return float(min(inside, key=lambda c: abs(c - yaw_now)))
+def _bounded_yaw(yaw_ref, yaw_last, limit=YAW_LIMIT_DEG):
+    # The tool yaw to command for a face at yaw_ref, given the last commanded
+    # yaw. A square face makes every yaw in {yaw_ref + 90k} an equally valid
+    # grasp. Start from the member nearest the LAST COMMAND, then, if that is
+    # outside +-limit, subtract/add 90 until it is back inside:
+    #
+    #     66  -> -24      100 -> 10      151 -> -29
+    #
+    # The result is always an EXACT cube face inside the limit, never a clamped
+    # angle. Latching on the last command, not the measured tool yaw, stops the
+    # 90 deg flip-flop at the boundary while the arm is still travelling.
+    k = int(round((yaw_last - yaw_ref) / 90.0))
+    cmd = float(yaw_ref + 90.0 * k)
+    while cmd > limit:
+        cmd -= 90.0
+    while cmd < -limit:
+        cmd += 90.0
+    return cmd
 
 
 # Yaw disagreement above which a reading replaces the estimate instead of
@@ -174,6 +180,9 @@ class PBVSServo:
         # held visual estimate, in world frame
         self.p_est = None
         self.yaw_est = None
+        # Last wrist yaw COMMANDED, not the measured tool yaw. Used to latch
+        # the equivalent-face branch across the +/-YAW_LIMIT boundary.
+        self._yaw_cmd_last = None
         # last raw measurement, kept unfiltered so the harness can show what
         # the filter is actually removing
         self.raw_est = None
@@ -242,6 +251,7 @@ class PBVSServo:
         # Call this when the servo is pointed at a DIFFERENT target; without it
         # a new grasp would inherit the command (and wind-up) left by the last.
         self._q_cmd = None
+        self._yaw_cmd_last = None
         self._err_int_p = np.zeros(3)
         self._err_int_o = np.zeros(3)
 
@@ -390,7 +400,13 @@ class PBVSServo:
         # YAW_LIMIT_DEG so the wrist cannot wind.
         yaw_ref = self.best_yaw if self.best_yaw is not None else self.yaw_est
         _p_cur, R_cur = self.current_pose()
-        yaw_cmd = _bounded_yaw(yaw_ref, _tool_yaw(R_cur))
+        # Latch on the last COMMAND, not the measured tool yaw. The measured
+        # yaw lags a 90 deg branch change, and using it lets boundary noise
+        # flip the branch back before the arm gets there.
+        if self._yaw_cmd_last is None:
+            self._yaw_cmd_last = _tool_yaw(R_cur)
+        yaw_cmd = _bounded_yaw(yaw_ref, self._yaw_cmd_last)
+        self._yaw_cmd_last = yaw_cmd
         R_des = rotation_with_yaw(yaw_cmd, R_DOWN)
         return p_des, R_des
 

@@ -22,7 +22,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src.perception import _calipers                      # noqa: E402
-from src.servo import PBVSServo, _wrap90                  # noqa: E402
+from src.servo import PBVSServo, _bounded_yaw, _wrap90    # noqa: E402
 
 # Fixture frames, copied here so the test does not depend on the operator's
 # snapshot directory.
@@ -165,6 +165,49 @@ def main():
     check('dithering at 45 settles ON 45, not frozen short of it',
           abs(float(_wrap90(sv.yaw_est - 45.0))) < 1.0,
           'settled %.2f' % sv.yaw_est)
+
+    # ---- 4. the command must stay inside the wrist limit -----------------
+    print('\n4. WRIST COMMAND STAYS INSIDE +-60')
+    y = 0.0
+    cmds = []
+    for ref in np.arange(0.0, 1080.0, 1.0):
+        y = _bounded_yaw(float(ref), y)
+        cmds.append(y)
+    cmds = np.array(cmds)
+    check('1080 deg of cube rotation: |command| never exceeds 60',
+          float(np.max(np.abs(cmds))) <= 60.0 + 1e-9,
+          'max %.1f' % np.max(np.abs(cmds)))
+
+    # A cube sitting at the boundary with measurement noise must latch to ONE
+    # exact branch, not alternate between +60 and the opposite face.
+    rng2 = np.random.default_rng(21)
+    last = 60.0
+    noisy = []
+    refs = []
+    for _ in range(100):
+        ref = float(60.0 + rng2.normal(0.0, 0.5))
+        last = _bounded_yaw(ref, last)
+        refs.append(ref)
+        noisy.append(last)
+    noisy = np.array(noisy)
+    flips = int(np.sum(np.abs(np.diff(np.sign(noisy))) > 0))
+    check('yaw noise at +60 latches one branch (at most one switch)',
+          flips <= 1, '%d sign changes' % flips)
+    check('every noise command is an exact face and inside the limit',
+          max(abs(_wrap90(c - r)) for c, r in zip(noisy, refs)) < 1e-9
+          and np.max(np.abs(noisy)) <= 60.0 + 1e-9,
+          'range %.1f..%.1f' % (noisy.min(), noisy.max()))
+
+    c66 = _bounded_yaw(66.0, 60.0)
+    c100 = _bounded_yaw(100.0, 60.0)
+    check('past the limit, the command is an exact face inside the limit',
+          abs(_wrap90(c66 - 66.0)) < 1e-9
+          and abs(_wrap90(c100 - 100.0)) < 1e-9
+          and abs(c66) <= 60.0 + 1e-9 and abs(c100) <= 60.0 + 1e-9,
+          '66 -> %.1f, 100 -> %.1f' % (c66, c100))
+    check('a wide accumulated yaw still returns inside the limit',
+          abs(_bounded_yaw(720.0, 720.0)) <= 60.0 + 1e-9,
+          'command %.1f' % _bounded_yaw(720.0, 720.0))
 
     print()
     if failures:
