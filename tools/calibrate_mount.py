@@ -264,6 +264,24 @@ def _move_tool(cell, session, xy, z, grip=cfg.GRIP_OPEN, rate=None):
     return True
 
 
+def _move_pose(cell, p, R, grip=cfg.GRIP_OPEN, rate=None, settle=0.30):
+    # Move to an explicit flange pose, holding the supplied orientation, and
+    # hold it for a moment so the next look is not taken mid-motion.
+    arm = cell.arm()
+    p = np.asarray(p, float)
+    q = arm.solve_ik(p, np.asarray(cell.backend().joint_positions(), float),
+                     R_target=R, max_joint=2.0 * np.pi)
+    p_ik, _ = cell.kin().pose(q[:cfg.ARM_DOF])
+    if np.linalg.norm(p_ik - p) > 2e-3:
+        print('  IK could not reach that pose -- not moving')
+        return False
+    arm.move(q, grip, rate=rate or cfg.FEED)
+    for _ in range(max(1, int(settle / cell.backend().dt))):
+        cell.backend().command(q, grip)
+        cell.backend().step()
+    return True
+
+
 def _look(cell, session, note, snaps, tag):
     # One perception with the session mount. Returns the TargetView list, and
     # writes an annotated snapshot.
@@ -367,6 +385,101 @@ def step_translation(cell, session, snaps, log):
         # re-seed the mount for the next axis
         session.cam_pos = list(session.cam_pos)
     log['translation'] = out
+
+
+def step_translation_check(cell, session, snaps, log):
+    print()
+    print('9  TRANSLATION CHECK -- repeat the centring at three positions')
+    print('   No CAM_POS update. This only records the residual at each spot.')
+    z = session.pick_z() + 0.150
+    rows = []
+    for label in ('centre', 'left', 'far'):
+        input('   place the cube at the %s position, then Enter > ' % label)
+        views = _look(cell, session, 'translation check %s' % label,
+                      snaps, 'step9_%s' % label)
+        v = _best(views, near=cell.tool_pose()[:2])
+        if v is None:
+            print('   no cube seen at the %s position -- skipped' % label)
+            continue
+        c = np.array(v.centre[:2], float)
+        if not _move_tool(cell, session, c, z):
+            continue
+        ex = _ask_float('   residual x (mm, signed)', 0.0) * 1e-3
+        ey = _ask_float('   residual y (mm, signed)', 0.0) * 1e-3
+        r = float(np.hypot(ex, ey))
+        rows.append(dict(position=label, residual_x_m=ex, residual_y_m=ey,
+                         residual_m=r))
+        print('   %-7s residual %.1f mm' % (label, r * 1e3))
+    log['translation_check'] = rows
+    if rows:
+        worst = max(r['residual_m'] for r in rows)
+        print('   worst residual %.1f mm' % (worst * 1e3))
+        if worst > OFFSET_TOL:
+            print('   FAIL: residual exceeds %.0f mm away from the first spot'
+                  % (OFFSET_TOL * 1e3))
+        else:
+            print('   PASS: residual is consistent across positions')
+
+
+def step_wrist_jog(cell, session, snaps, log):
+    print()
+    print('10 WRIST-JOG MOUNT CHECK -- static cube, rotate the wrist +-5 deg')
+    print('   The cube centre should not move. A drift means CAM_QUAT is wrong.')
+    input('   place the cube in view, then Enter > ')
+    z = session.pick_z() + 0.150
+    views = _look(cell, session, 'wrist jog base', snaps, 'step10_base')
+    v = _best(views, near=cell.tool_pose()[:2])
+    if v is None:
+        print('   no cube seen -- skipped')
+        return
+    p = np.array([v.centre[0], v.centre[1], z], float)
+    R0 = _flange_T(cell)[:3, :3]
+    if not _move_pose(cell, p, R0):
+        return
+    views = _look(cell, session, 'wrist jog neutral', snaps, 'step10_neutral')
+    v = _best(views, near=p[:2])
+    if v is None:
+        print('   no cube after the neutral move -- skipped')
+        return
+    base = np.array(v.centre[:2], float)
+
+    from src.calibration_camera import rotvec_to_R
+    rows = []
+    tests = (('x+', [5.0, 0.0, 0.0]), ('x-', [-5.0, 0.0, 0.0]),
+             ('y+', [0.0, 5.0, 0.0]), ('y-', [0.0, -5.0, 0.0]))
+    try:
+        for label, vec in tests:
+            R = R0 @ rotvec_to_R(np.radians(np.asarray(vec, float)))
+            if not _move_pose(cell, p, R):
+                return
+            views = _look(cell, session, 'wrist jog %s' % label,
+                          snaps, 'step10_%s' % label.replace('+', 'p')
+                          .replace('-', 'm'))
+            v = _best(views, near=p[:2])
+            if v is None:
+                rows.append(dict(axis=label, drift_m=None))
+                print('   %s: no cube in view' % label)
+                continue
+            c = np.array(v.centre[:2], float)
+            drift = float(np.linalg.norm(c - base))
+            rows.append(dict(axis=label, drift_m=drift,
+                             centre_x_m=float(c[0]), centre_y_m=float(c[1])))
+            print('   %s: centre (%+.4f, %+.4f)  drift %.1f mm'
+                  % (label, c[0], c[1], drift * 1e3))
+    finally:
+        _move_pose(cell, p, R0)
+
+    valid = [r['drift_m'] for r in rows if r['drift_m'] is not None]
+    log['wrist_jog'] = rows
+    if not valid:
+        print('   FAIL: no usable looks')
+        return
+    worst = max(valid)
+    print('   worst drift %.1f mm' % (worst * 1e3))
+    if worst > 0.005:
+        print('   FAIL: centre moves with the wrist; CAM_QUAT is wrong')
+    else:
+        print('   PASS: centre holds within 5 mm')
 
 
 def step_angle(cell, session, snaps, log):
@@ -607,10 +720,13 @@ def step_empty_table(cell, session, snaps, log):
     print('   the mount seeing its own gripper.')
     input('   clear the table, then Enter > ')
     views = _look(cell, session, 'step 8 empty table', snaps, 'step8_empty')
+    passed = not views
     print('  detections: %d' % len(views))
-    log['empty_table'] = dict(detections=len(views))
-    if views:
-        print('  PHANTOMS -- a look with nothing there must find nothing.')
+    log['empty_table'] = dict(detections=len(views), passed=passed)
+    if passed:
+        print('  PASS: an empty table finds nothing')
+    else:
+        print('  FAIL: PHANTOMS -- a look with nothing there must find nothing.')
 
 
 # ------------------------------------------------------------------- save
@@ -685,6 +801,7 @@ def main(argv=None):
             print('  1 table height   2 camera height   3 translation')
             print('  4 angle          5 pick height     6 grip width')
             print('  7 readback       8 empty-table check')
+            print('  9 translation check  10 wrist-jog mount check')
             print('  s save to config  w write scratch JSON   r reset   q quit')
             choice = input('> ').strip().lower()
             if choice in ('q', 'quit'):
@@ -705,7 +822,8 @@ def main(argv=None):
             fn = {'1': step_table, '2': step_camera, '3': step_translation,
                   '4': step_angle, '5': step_pick_height,
                   '6': step_grip_width, '7': step_readback,
-                  '8': step_empty_table}.get(choice)
+                  '8': step_empty_table, '9': step_translation_check,
+                  '10': step_wrist_jog}.get(choice)
             if fn is None:
                 continue
             try:
