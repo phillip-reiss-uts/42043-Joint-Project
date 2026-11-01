@@ -311,13 +311,20 @@ def main(argv=None):
                   'view; the arm is held where it stopped')
         _relatch()
 
+    # The xy the cube was picked from. The pick carries it to home, so this is
+    # the only record of where it should be put back down.
+    last_pick_xy = [None]
+
     def pick_object():
-        if not world.refresh():
+        views = world.refresh()
+        if not views:
             return False
+        pick_xy = np.array(views[0].centre[:2], float)
         ok = pick_and_hold(None, None, arm, world, 0, cfg.UR_HOME_Q)
         # The pick moved the arm to home; do not resume tracking from the
         # pre-pick command vector.
         tracker.reset_command()
+        last_pick_xy[0] = pick_xy if ok else None
         return ok
 
     task = TaskStateMachine(
@@ -327,7 +334,8 @@ def main(argv=None):
         arm=arm, world=world)
 
     def put_object():
-        ok = _put_down(arm)
+        ok = _put_down(arm, last_pick_xy[0])
+        last_pick_xy[0] = None
         # The put-down left the arm low over the table; the tracker's last
         # command is from the hover before the pick.
         tracker.reset_command()

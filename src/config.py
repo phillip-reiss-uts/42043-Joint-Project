@@ -83,8 +83,8 @@ RAPID_MIN_STEPS = 200
 FEED_MIN_STEPS = 400
 
 # ---- contact guard for the descent ---------------------------------------
-# PICK_Z is the only z floor. A command below it is refused; equal to it is the
-# grasp. There is deliberately no separate tool-length clearance constant.
+# PICK_Z is the only z floor. A command below it is clamped; equal to it is
+# the grasp. There is deliberately no separate tool-length clearance constant.
 
 # wrist_3_link -> gripper base. +z points DOWN the approach at R_DOWN, so the
 # flange->gripper-top distance is POSITIVE. UNMEASURED; needed by the MODEL and
