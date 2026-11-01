@@ -277,7 +277,10 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     # DO NOT OPEN AT WHATEVER HEIGHT THE ARM HAPPENS TO BE AT. If the descent
     # was aborted, or IK/settle left the tool short, keep the cube in the jaws
     # and report failure instead of dropping it.
-    p_now, _ = arm.kin.pose(arm.backend.joint_positions())
+    if world is not None:
+        p_now, _ = world.gripper_pose()   # TCP, same frame as target_low
+    else:
+        p_now, _ = arm.kin.pose(arm.backend.joint_positions())
     miss = float(np.linalg.norm(np.asarray(p_now, float) - target_low))
     if miss > 0.010:
         print('[PLACE] release NOT reached: %.1f mm above/short of target'
