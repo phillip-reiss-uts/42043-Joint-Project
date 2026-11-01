@@ -312,20 +312,24 @@ class Arm:
         return ('grip' if ok else 'fail'), ok
 
     def close_gripper(self, steps, viewer=None, estop=None, stop=None,
-                      on_step=None):
+                      on_step=None, position=GRIP_CLOSED):
         # Shut the jaws on the object and hold.
+        #
+        # `position` is the 0..255 grip command, not a millimetre width. The
+        # default is fully closed; the calibration tool passes the command for
+        # a specific jaw width so the close matches the width under test.
         #
         # Returns None on the simulator, or (ok, width_mm, verdict) on hardware.
         if viewer is not None and on_step is None:
             on_step = viewer.sync
         if self._real_gripper():
-            settled, width, secs = self._one_shot_grip(GRIP_CLOSED, on_step,
+            settled, width, secs = self._one_shot_grip(position, on_step,
                                                        stop)
             verdict, ok = self._grip_verdict(width)
             print('[GRIP] %s: width %s mm after %.2f s'
                   % (verdict, '?' if width is None else '%.1f' % width, secs))
             return ok, width, verdict
-        self._ramp_grip(GRIP_OPEN, GRIP_CLOSED, steps, viewer, estop,
+        self._ramp_grip(GRIP_OPEN, position, steps, viewer, estop,
                         stop, on_step)
         return None
 

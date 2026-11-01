@@ -27,6 +27,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src import config as cfg
+from src.arm import Arm
 from src.robot_backend_ur import RG2, URBackend
 
 
@@ -173,6 +174,31 @@ def main():
     failures += not check('width is clamped to the stroke',
                           grip.state()['q'] <= -1e-12 or
                           grip.state()['q'] >= 0.0)
+
+    # ---------------- close at a requested width ----------------
+    print('\nCLOSE AT A REQUESTED WIDTH')
+    # Arm.close_gripper(position=...) exists so the calibration tool can close
+    # to the width under test instead of the configured close width.
+    recv = FakeReceive([0.0] * 6)
+    ctrl = FakeControl(recv)
+    rg = FakeRG(width=55.0)
+    be = URBackend(ctrl, recv,
+                   RG2('127.0.0.1', client=rg, call=lambda *a: None),
+                   dt=0.008)
+    arm = Arm(kinematics=object(), backend=be)
+    pos = 128.0
+    result = arm.close_gripper(1, position=pos)
+    frac = pos / float(cfg.GRIP_CLOSED)
+    expected = (cfg.RG2_OPEN_WIDTH_MM
+                + (cfg.RG2_CLOSE_WIDTH_MM - cfg.RG2_OPEN_WIDTH_MM) * frac)
+    failures += not check('close_gripper sends the requested position',
+                          len(rg.grips) == 1
+                          and abs(rg.grips[0][0] - expected) < 1e-6,
+                          'sent %s, expected %.3f'
+                          % ([g[0] for g in rg.grips], expected))
+    failures += not check('close_gripper returns the width verdict',
+                          isinstance(result, tuple) and result[0] is True,
+                          str(result))
 
     # ---------------- read failure is not control failure ----------------
     print('\nREAD FAILURE KEEPS CONTROL')

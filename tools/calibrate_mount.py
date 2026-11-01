@@ -526,16 +526,19 @@ def step_grip_width(cell, session, snaps, log):
         if width < cfg.RG2_MIN_STEP_MM:
             print('  below the %.1f mm minimum step' % cfg.RG2_MIN_STEP_MM)
             continue
-        if width > cfg.RG2_OPEN_WIDTH_MM:
-            print('  wider than the %.1f mm full stroke' % cfg.RG2_OPEN_WIDTH_MM)
+        if width >= cfg.RG2_OPEN_WIDTH_MM:
+            print('  must be narrower than the %.1f mm full stroke'
+                  % cfg.RG2_OPEN_WIDTH_MM)
             continue
         pos = _grip_pos(width)
         _move_tool(cell, session, cell.tool_pose()[:2], session.pick_z(),
                    grip=cfg.GRIP_OPEN, rate=cfg.FEED / 2.0)
         input('  place the cube between the jaws, then Enter > ')
 
-        # The same close the pick makes.
-        result = arm.close_gripper(cfg.STEPS_CLOSE)
+        # The same close the pick makes, but at the width under test rather
+        # than the configured default.
+        print('  closing to %.1f mm (command %.1f)' % (width, pos))
+        result = arm.close_gripper(cfg.STEPS_CLOSE, position=pos)
         if result is None:
             print('  close_gripper gave no verdict -- is this a real gripper?')
             return
