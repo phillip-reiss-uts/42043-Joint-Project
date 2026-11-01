@@ -67,6 +67,20 @@ it draws the frame perception already took, so it cannot consume a frame or dela
 a command. There is deliberately no live window: this runs over SSH, and a draw
 inside the servo loop would starve the 8 ms servoj stream.
 
+## State-space validation
+
+Hardware defaults to the state-space joint path. It is not valid until the
+observer model has been fitted and the controller compared with the raw path:
+
+    python tools/validate_state_space.py record --joint 1 --step 1.5
+    python tools/validate_state_space.py fit --record state_space_record_<stamp>.csv --write
+    python tools/validate_state_space.py ab --fit state_space_record_<stamp>_fit.json --joint 1 --step 1.5
+
+`record` logs the raw joint step and observer estimate. `fit` replays it
+offline for `UR_SERVO_KP/KV` and refuses a qdot residual above 0.05 rad/s.
+`ab` is required before using state-space for a pick; it refuses a failed fit
+and compares final error, overshoot, settling and peak joint speed.
+
 ## Speed calibration
 
 Hardware servoing speed is characterised before a fast run:
