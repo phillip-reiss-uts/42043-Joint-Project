@@ -357,6 +357,9 @@ def step_translation(cell, session, snaps, log):
         print()
         print('   -- %s --' % name)
         p = cell.tool_pose()
+        prev_err = None
+        last_applied = None
+        history = []
         for attempt in range(1, MAX_TRIES + 1):
             input('   place the cube in view, then Enter > ')
             views = _look(cell, session, 'step 3 %s try %d' % (name, attempt),
@@ -371,15 +374,41 @@ def step_translation(cell, session, snaps, log):
                 return
             err = _ask_float('   error in %s (mm the tool is off, signed)'
                              % name, 0.0) * 1e-3
+            history.append(err)
+
+            # If the residual grew after the last correction, the last update
+            # went the wrong way. Undo it and stop this axis instead of walking
+            # away for the remaining tries.
+            if prev_err is not None:
+                margin = max(0.002, 0.20 * abs(prev_err))
+                if abs(err) > abs(prev_err) + margin:
+                    if last_applied is not None:
+                        session.cam_pos[axis] -= last_applied
+                    print('   residual grew %.1f -> %.1f mm; undoing the last '
+                          'update and stopping %s'
+                          % (prev_err * 1e3, err * 1e3, name))
+                    print('   CAM_POS[%s] -> %.5f' % (name,
+                                                      session.cam_pos[axis]))
+                    out[name] = dict(residual_m=err, tries=attempt,
+                                     aborted=True,
+                                     residual_history_m=history)
+                    break
+
             session.cam_pos[axis] += err
+            last_applied = err
             print('   CAM_POS[%s] -> %.5f' % (name, session.cam_pos[axis]))
             if abs(err) <= OFFSET_TOL:
-                out[name] = dict(residual_m=err, tries=attempt)
+                out[name] = dict(residual_m=err, tries=attempt,
+                                 residual_history_m=history)
                 print('   %s converged at %+.1f mm' % (name, err * 1e3))
                 break
+            prev_err = err
             p = cell.tool_pose()
             _move_tool(cell, session, p[:2], z)
         else:
+            out[name] = dict(residual_m=history[-1] if history else None,
+                             tries=MAX_TRIES, aborted=True,
+                             residual_history_m=history)
             print('   %s did not converge in %d tries -- leaving as is'
                   % (name, MAX_TRIES))
         # re-seed the mount for the next axis
