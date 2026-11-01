@@ -314,11 +314,14 @@ def step_camera(cell, session, snaps, log):
         return
     p = cell.tool_pose()
     print('  tool parked at z %.4f -- gripper top is clear for the ruler' % p[2])
-    lens = _ask_float('  tabletop to lens, m', session.cam_pos[2] +
-                      session.table_height)
-    session.cam_pos[2] = lens - (p[2] - session.table_height)
-    print('  CAM_POS_z = %.5f (lens %.3f - tool %.3f)'
-          % (session.cam_pos[2], lens, p[2] - session.table_height))
+    tool_above = p[2] - session.table_height
+    lens = _ask_float('  tabletop to lens, m',
+                      CAM_HEIGHT_TOOL_Z - session.cam_pos[2])
+    # CAM_POS is flange -> camera with +z down the approach, so a lens BELOW
+    # tool0 is a POSITIVE offset: tool height minus lens height.
+    session.cam_pos[2] = tool_above - lens
+    print('  CAM_POS_z = %.5f (tool %.3f - lens %.3f)'
+          % (session.cam_pos[2], tool_above, lens))
     log['camera_height'] = dict(lens_m=lens, tool_z=p[2],
                                 cam_pos_z=session.cam_pos[2])
 

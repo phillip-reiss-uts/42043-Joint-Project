@@ -85,6 +85,11 @@ def check_config(cfg):
          tol=1e-6)
     want('TABLE_HALF', list(cfg.TABLE_HALF), EXPECT_TABLE_HALF, tol=1e-6)
     want('TABLE_HEIGHT', cfg.TABLE_HEIGHT, EXPECT_TABLE_HEIGHT, tol=1e-6)
+    # The hover is camera-first: HOVER_TOOL0_Z must reduce back to the camera
+    # height above the table, not to any pick-derived value.
+    want('HOVER camera',
+         round(cfg.HOVER_TOOL0_Z - cfg.CAM_POS[2] - cfg.TABLE_HEIGHT, 6),
+         round(cfg.CAM_HOVER_HEIGHT, 6), tol=1e-6)
     want('UR_HOME_Q[0]', round(cfg.UR_HOME_Q[0], 4), EXPECT_HOME0, tol=1e-4)
 
     if bad:

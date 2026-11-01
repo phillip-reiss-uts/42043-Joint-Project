@@ -360,17 +360,16 @@ class PBVSServo:
             return self.kf.speed
         return None
 
-    def desired_pose(self, z_offset):
-        # Gripper-base pose that grasps the estimated object from above. With
-        # the filter running this aims ahead of the estimate by lead_s, which
+    def desired_pose(self, z_tcp):
+        # Tool0 pose that grasps the estimated object from above. With the
+        # filter running this aims ahead of the estimate by lead_s, which
         # cancels the servo's own lag on a target that is still moving.
         p = self.p_est
         if self.kf is not None and self.kf.ready and self.lead_s != 0.0:
             p = self.kf.lead(self.lead_s)
-        # PICK_Z is a TCP height and the servo measures the TCP, so this is one
-        # frame end to end. The grasp height is absolute; the estimate does not
-        # set it.
-        z_want = float(PICK_Z + z_offset)
+        # z_tcp is an absolute tool0 height: the caller passes HOVER_TOOL0_Z
+        # for hover and PICK_Z for the grasp. The estimate does not set it.
+        z_want = float(z_tcp)
         # CONTACT GATE. The lowest part of the gripper is the pad bottom, well
         # below gripper/base, so a grasp commanded too low sends the pads through
         # the table. Clamp the commanded height and remember that we did: the
@@ -528,18 +527,19 @@ class PBVSServo:
 
         return np.clip(dq, -self.dq_max, self.dq_max)
 
-    def preposition(self, z_offset, viewer=None):
+    def preposition(self, z_tcp, viewer=None):
         # Coarse open-loop move to the desired pose, before servoing.
-        p_des, R_des = self.desired_pose(z_offset)
+        p_des, R_des = self.desired_pose(z_tcp)
         q = self.arm.solve_ik(p_des, self.arm.backend.joint_positions(), R_target=R_des)
         self.arm.move(q, GRIP_OPEN, rate=0.20, viewer=viewer)
 
     # LOOP
-    def servo(self, z_offset, max_iters=1500, viewer=None, estop=None,
+    def servo(self, z_tcp, max_iters=1500, viewer=None, estop=None,
               aborted=None, trace=None, v_max=None, check_occlusion=False,
               track=False, stationary_s=None, search=None,
               track_tol=None, track_tol_rot=None):
-        # Servo to the grasp pose at z_offset. Returns (converged, iters, err).
+        # Servo to the pose at absolute tool0 height z_tcp.
+        # Returns (converged, iters, err).
         backend = self.arm.backend
         self.viewer = viewer
         self._control('open')
@@ -667,7 +667,7 @@ class PBVSServo:
             if self.kf is not None and self.kf.ready:
                 self.kf.advance_to(float(backend.time()))
 
-            p_des, R_des = self.desired_pose(z_offset)
+            p_des, R_des = self.desired_pose(z_tcp)
             err_p, err_o = self.error(p_des, R_des)
             err_norm = float(np.linalg.norm(err_p))
             err_rot = float(np.linalg.norm(err_o))
@@ -707,7 +707,7 @@ class PBVSServo:
             if ov is not None:
                 ov.set_target(p_des, R_des)
             push(viewer, 'servo',
-                 'z_off %.2f  iter %d/%d' % (z_offset, k, max_iters),
+                 'z %.3f  iter %d/%d' % (z_tcp, k, max_iters),
                  'err %.4f m  tgt %s mm/s  still %.1f s'
                  % (err_norm,
                     '-' if self.target_speed is None
@@ -721,7 +721,7 @@ class PBVSServo:
                     'k': k,
                     'err_p': err_norm,
                     'err_o': err_rot,
-                    'z_offset': z_offset,
+                    'z_tcp': z_tcp,
                     'p_des': np.array(p_des, float),
                     'R_des': np.array(R_des, float),
                     'p_cur': np.array(p_cur_t, float),
@@ -947,7 +947,7 @@ class PBVSServo:
         # One height for the grasp and the descent it replaces: PICK_Z, applied
         # in desired_pose. The contact gate still clamps it to the pad limit, so
         # it cannot drive into the table.
-        p_des, R_des = self.desired_pose(0.0)
+        p_des, R_des = self.desired_pose(PICK_Z)
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_target(p_des, R_des)
@@ -1019,7 +1019,7 @@ class PBVSServo:
             return False, 0
         return True, 1
 
-    def approach(self, standoff=0.10, viewer=None, estop=None, aborted=None,
+    def approach(self, hover_z, viewer=None, estop=None, aborted=None,
                  trace=None, coarse=True, max_iters=1500, recover=True,
                  check_occlusion=True, track=None, search=None,
                  stationary_s=None, track_iters=None):
@@ -1040,11 +1040,11 @@ class PBVSServo:
             # view is still whole -- instead of servoing down into the jaws'
             # own shadow.
             if coarse:
-                self.preposition(standoff, viewer=viewer)
+                self.preposition(hover_z, viewer=viewer)
             n_done = 0
             for attempt in range(max(1, self.commit_tries)):
                 ok1, n1, e1 = self.servo(
-                    standoff, max_iters=(track_iters or self.track_iters),
+                    hover_z, max_iters=(track_iters or self.track_iters),
                     viewer=viewer, estop=estop, aborted=aborted, trace=trace,
                     v_max=self.v_max, track=True,
                     stationary_s=stationary_s, search=search)
@@ -1078,8 +1078,8 @@ class PBVSServo:
             return False, n_done, e1, n_done
 
         if coarse:
-            self.preposition(standoff, viewer=viewer)
-        ok1, n1, e1 = self.servo(standoff, max_iters=max_iters, viewer=viewer,
+            self.preposition(hover_z, viewer=viewer)
+        ok1, n1, e1 = self.servo(hover_z, max_iters=max_iters, viewer=viewer,
                                  estop=estop, aborted=aborted, trace=trace,
                                  v_max=self.v_max)
         if not ok1:
@@ -1091,7 +1091,7 @@ class PBVSServo:
         self.observe(near=self.p_est)
         self.ref_p = np.array(self.p_est, float)
         self.ref_yaw = float(self.yaw_est)
-        ok2, n2, e2 = self.servo(0.0, max_iters=max_iters, viewer=viewer,
+        ok2, n2, e2 = self.servo(PICK_Z, max_iters=max_iters, viewer=viewer,
                                  estop=estop, aborted=aborted, trace=trace,
                                  v_max=self.v_descent,
                                  check_occlusion=check_occlusion)

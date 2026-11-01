@@ -39,7 +39,7 @@ from src.kinematics_mujoco import MujocoKinematics
 from src.robot_backend_mujoco import MujocoBackend
 from src import target_motion as TM
 from src.config import (
-    POOL_SIZE, SERVO_STANDOFF, SERVO_MAX_ITERS, SERVO_V_TRANSIT,
+    POOL_SIZE, HOVER_TOOL0_Z, SERVO_MAX_ITERS, SERVO_V_TRANSIT,
     SERVO_V_DESCENT, SERVO_PERCEIVE_EVERY, SERVO_OCCLUDE_RATIO,
     SERVO_OCCLUDE_RECOVER, SERVO_OCCLUDE_FAILS, SERVO_RETREAT_STEP,
     SERVO_RETREAT_MAX, SERVO_RETREAT_V,
@@ -149,7 +149,7 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     sv.observe()
     t0 = time.perf_counter()
     ok_approach, iters, err, hover = sv.approach(
-        standoff=SERVO_STANDOFF, viewer=rec, coarse=False,
+        hover_z=HOVER_TOOL0_Z, viewer=rec, coarse=False,
         max_iters=SERVO_MAX_ITERS, check_occlusion=True, recover=True,
         search=reacquire)
     wall_approach = time.perf_counter() - t0

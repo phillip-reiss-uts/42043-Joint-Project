@@ -25,7 +25,7 @@ from src.config import (
     SERVO_V_TRANSIT, SERVO_V_DESCENT, SERVO_MAX_ITERS, SERVO_PERCEIVE_EVERY,
     SERVO_OCCLUSION_RECOVERY, SERVO_OCCLUDE_RATIO, SERVO_OCCLUDE_RECOVER,
     SERVO_OCCLUDE_FAILS, SERVO_RETREAT_STEP, SERVO_RETREAT_MAX,
-    SERVO_STANDOFF, SERVO_RETREAT_V,
+    HOVER_TOOL0_Z, SERVO_RETREAT_V,
     REVOLVE_DEG, REVOLVE_SPEED, SEARCH_OFFSETS, SEARCH_SPEED,
     GRASP_LIFT_RECHECK, STEPS_CLOSE, STEPS_RELEASE,
 )
@@ -139,7 +139,7 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
         return search_for_object(model, data, arm, perceive, viewer=viewer,
                                  estop=estop, stop=stopped, wide=True)
 
-    ok, _, _, _ = sv.approach(standoff=SERVO_STANDOFF, viewer=viewer,
+    ok, _, _, _ = sv.approach(hover_z=HOVER_TOOL0_Z, viewer=viewer,
                               estop=estop,
                               aborted=stopped, coarse=False,
                               max_iters=SERVO_MAX_ITERS,

@@ -180,6 +180,8 @@ def main(argv=None):
     print('  controller  : %s' % args.ip)
     print('  cycle       : %.1f Hz (servoj period %.3f s)'
           % (1.0 / cfg.UR_CYCLE_DT, cfg.UR_CYCLE_DT))
+    print('  hover       : tool0 %.3f m  camera %.3f m above table'
+          % (cfg.HOVER_TOOL0_Z, cfg.CAM_HOVER_HEIGHT))
     print('  the pendant stop is the only e-stop; speed starts at FEED')
     # Say the perception floor out loud: it is the setting most likely to make
     # the cube vanish from the log, and it is invisible otherwise.
@@ -275,7 +277,7 @@ def main(argv=None):
         # gated on them.
         from src.servo import PBVSServo
         sv = PBVSServo(None, None, arm, world)
-        sv.servo(cfg.SERVO_STANDOFF, max_iters=cfg.UR_TRACK_CHUNK,
+        sv.servo(cfg.HOVER_TOOL0_Z, max_iters=cfg.UR_TRACK_CHUNK,
                  track=True, search=_reacquire)
         if sv.stage_obs == 0:
             print('[TRACK] chunk ended with no fresh look -- the cube is out of '

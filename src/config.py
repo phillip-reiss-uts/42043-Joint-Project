@@ -218,8 +218,8 @@ DROP_RADIUS = 0.07                        # scatter around the drop centre
 MAX_PASSES = 12                           # cap on clear_table passes
 
 # ---- PBVS servo ----------------------------------------------------------
-# Commanded twist caps, m/s. Transit is the hover leg (also the standoff the
-# tracking servo holds), descent the final approach.
+# Commanded twist caps, m/s. Transit is the hover leg, descent the final
+# approach.
 SERVO_V_TRANSIT = 0.080
 SERVO_V_DESCENT = 0.015
 SERVO_MAX_ITERS = 8000                    # per servo stage
@@ -235,11 +235,11 @@ SERVO_RETREAT_STEP = 0.02                 # m per backup step
 SERVO_RETREAT_MAX = 15                    # cap on backup steps
 SERVO_RETREAT_V = 0.03                    # m/s for backup and open-loop commit
 
-# Hover = PICK_Z lifted by this standoff, so the camera sits CAM_HOVER_HEIGHT
-# above the table. Operator-set viewing choice. The tool-mount offset back to
-# gripper base is applied in servo.desired_pose.
-CAM_HOVER_HEIGHT = 0.380
-SERVO_STANDOFF = CAM_HOVER_HEIGHT - CAM_POS[2] - PICK_Z + TABLE_HEIGHT
+# Camera height above the tabletop at hover. This is the one viewing number;
+# the tool0 height is derived from it and the calibrated flange->camera
+# offset. The lens sits CAM_POS[2] below tool0, so tool0 is that much higher.
+CAM_HOVER_HEIGHT = 0.200
+HOVER_TOOL0_Z = TABLE_HEIGHT + CAM_HOVER_HEIGHT + CAM_POS[2]
 
 # Moving-target demo: bands cycled live with '.', index 0 is off. All below
 # SERVO_V_TRANSIT so the arm can close the gap.

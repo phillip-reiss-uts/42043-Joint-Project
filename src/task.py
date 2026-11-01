@@ -24,8 +24,8 @@ tests/test_layering.py enforces the no-mujoco rule for this module.
 # Task modes.
 #
 #   WAIT   -- idle at home, nothing to do
-#   TRACK  -- an object is on the table; follow it with the tool at standoff
-#             height, but do NOT descend. This is the resting state whenever
+#   TRACK  -- an object is on the table; follow it at the hover height, but
+#             do NOT descend. This is the resting state whenever
 #             there is something to look at.
 #   PICK   -- an explicit command was given; run the grasp and only the grasp.
 #

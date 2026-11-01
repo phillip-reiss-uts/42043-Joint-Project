@@ -317,10 +317,10 @@ def main(sensor_size=(320, 240), lightweight=False):
                                          stop=lambda: not viewer.is_running(),
                                          wide=True)
 
-            # z_offset = SERVO_STANDOFF means "hover, do not descend": the same
-            # servo the pick uses, stopped short of the grasp pose.
+            # HOVER_TOOL0_Z means "hover, do not descend": the same servo the
+            # pick uses, at camera height rather than the grasp pose.
             _p0 = np.array(data.xpos[arm.base_id], float)
-            tracker.servo(cfg.SERVO_STANDOFF,
+            tracker.servo(cfg.HOVER_TOOL0_Z,
                           max_iters=TRACK_CHUNK_ITERS,
                           viewer=viewer, estop=estop,
                           aborted=_time_slice(TRACK_SLICE_S),
@@ -330,7 +330,7 @@ def main(sensor_size=(320, 240), lightweight=False):
             if TRACK_DEBUG[0]:
                 _p1 = np.array(data.xpos[arm.base_id], float)
                 _R = np.array(data.xmat[arm.base_id], float).reshape(3, 3)
-                _pd, _ = tracker.desired_pose(cfg.SERVO_STANDOFF)
+                _pd, _ = tracker.desired_pose(cfg.HOVER_TOOL0_Z)
                 print('[TRACK] tool z %.4f -> %.4f (d %.4f)  axis=%s  '
                       'p_des=%s  err=%.4f' % (
                           _p0[2], _p1[2], _p1[2] - _p0[2],

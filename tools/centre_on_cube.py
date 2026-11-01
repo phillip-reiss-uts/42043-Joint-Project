@@ -74,9 +74,9 @@ def main():
         flange_pose=lambda: kin.pose(
             np.asarray(backend.joint_positions(), float)),
         T_flange_cam=mount())
-    # the same hover the servo uses: PICK_Z lifted by the standoff, i.e. the
-    # camera CAM_HOVER_HEIGHT above the table.
-    z_hover = cfg.PICK_Z + cfg.SERVO_STANDOFF
+    # the same hover the servo uses: tool0 derived from the camera height
+    # above the table, not from the pick height.
+    z_hover = cfg.HOVER_TOOL0_Z
 
     try:
         for i in range(args.looks):
