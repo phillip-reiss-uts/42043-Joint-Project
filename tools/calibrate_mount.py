@@ -38,6 +38,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src import config as cfg                  # noqa: E402
+from src.run_log import start_run_log          # noqa: E402
 from src.arm_dynamics import rot_from_quat     # noqa: E402
 
 CONFIG_PATH = os.path.join(ROOT, 'src', 'config.py')
@@ -816,6 +817,8 @@ def main(argv=None):
                                  description='Wrist mount and grasp calibration.')
     ap.add_argument('--ip', default=cfg.UR_IP)
     args = ap.parse_args(argv)
+    start_run_log(argv if argv is not None else sys.argv[1:], ROOT,
+                  tag='calibrate_mount')
 
     session = Session()
     snaps_dir = os.path.join(ROOT, 'calib_snaps_%s' % session.stamp)

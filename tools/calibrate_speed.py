@@ -37,6 +37,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src import config as cfg
+from src.run_log import start_run_log
 from src.arm import Arm
 from src.arm_dynamics import ArmDynamics
 from src.kinematics_ur import URKinematics
@@ -201,6 +202,7 @@ def main():
     ap.add_argument('--distance', type=float, default=CAL_MOVE_M)
     ap.add_argument('--write', action='store_true')
     args = ap.parse_args()
+    start_run_log(sys.argv[1:], ROOT, tag='calibrate_speed')
 
     if args.stage == 'low':
         print('STAGE 1: pendant at 10%. This proves the safety checks.')

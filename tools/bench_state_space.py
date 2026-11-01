@@ -35,6 +35,7 @@ if ROOT not in sys.path:
 import mujoco
 
 from src import config as cfg
+from src.run_log import start_run_log
 from src.arm import Arm
 from src.arm_dynamics import ArmDynamics
 from src.controller import Encoder, LQRController, lqr_weights
@@ -170,6 +171,7 @@ def main():
     ap.add_argument('--out', default=os.path.join(
         os.path.dirname(ROOT), 'notes', 'state_space_bench.json'))
     args = ap.parse_args()
+    start_run_log(sys.argv[1:], ROOT, tag='bench_state_space')
 
     model = load_robot_model()
     if model is None:

@@ -24,6 +24,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src import config as cfg
+from src.run_log import start_run_log
 from src.arm import Arm
 from src.arm_dynamics import ArmDynamics, rot_from_quat
 from src.kinematics_ur import URKinematics
@@ -51,6 +52,7 @@ def main():
                     help='looks to wait for the cube before giving up')
     ap.add_argument('--ip', default=cfg.UR_IP)
     args = ap.parse_args()
+    start_run_log(sys.argv[1:], ROOT, tag='centre_on_cube')
 
     dyn = ArmDynamics.from_file(os.path.join(ROOT, 'models', 'ur3e',
                                              'arm_dynamics.json'))

@@ -36,6 +36,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src import config as cfg
+from src.run_log import start_run_log
 from src.calibration_camera import (
     board_pose_from_two_touches, cam_cv_to_mjocam, cam_mjocam_to_cv,
     mean_transform, quat_from_rot, solve_aruco, wrist_mount,
@@ -616,6 +617,8 @@ def main(argv=None):
     ap.add_argument('--json', default=None,
                     help='also write the result to this file')
     args = ap.parse_args(argv)
+    start_run_log(argv if argv is not None else sys.argv[1:], ROOT,
+                  tag='calibrate_camera')
 
     print('=' * 72)
     print('CAMERA EXTRINSICS  (wrist camera)')

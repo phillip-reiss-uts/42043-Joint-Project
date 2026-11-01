@@ -39,6 +39,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src import config as cfg
+from src.run_log import start_run_log
 from src.arm import Arm
 from src.arm_dynamics import ArmDynamics
 from src.controller import Encoder, LQRController, lqr_weights
@@ -354,6 +355,7 @@ def main():
     ab.set_defaults(fn=cmd_ab)
 
     args = ap.parse_args()
+    start_run_log(sys.argv[1:], ROOT, tag='validate_state_space')
     return args.fn(args)
 
 
