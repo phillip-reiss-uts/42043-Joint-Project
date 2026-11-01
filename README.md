@@ -107,7 +107,7 @@ calibration routines have been removed, and the camera rides the gripper.
     python tests/test_calibration_camera.py  # extrinsic solvers, synthetic
     python tests/test_liveview.py        # snapshot projection/drawing, and OFF
     python tests/test_hardware.py --sim  # hardware assumptions
-    python tests/test_gripper_backend.py # RG2 XML-RPC/dashboard, fakes only
+    python tests/test_gripper_backend.py # RG2 XML-RPC, fakes only
     python tests/preflight_cell.py       # the gate: everything offline, before travel
     python run_tests.py --trials 6       # end-to-end picks, writes test_output/
 

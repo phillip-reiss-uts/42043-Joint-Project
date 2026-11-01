@@ -136,9 +136,8 @@ def check_motion(cfg):
 
     b = connect(cfg.UR_IP, activate_gripper=False)
     # The arm motion is what this tests, so the gripper is taken out of the loop
-    # entirely. That satisfies the backend contract without exercising whichever
-    # route the RG2 is on (onRobot XML-RPC primary, UR programs over the
-    # dashboard as the fallback).
+    # entirely. That satisfies the backend contract without exercising the
+    # RG2's onRobot XML-RPC route.
     b._gripper = None
     try:
         q0 = np.array(b.joint_positions(), float)

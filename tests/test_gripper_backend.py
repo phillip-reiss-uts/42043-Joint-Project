@@ -3,18 +3,17 @@
 WHY THIS EXISTS
 ---------------
 `RG2` in src/robot_backend_ur.py is the only part of the hardware path that
-cannot be exercised by the simulator. Its XML-RPC client and its dashboard
-transport are injected rather than constructed (the same way URBackend takes
-its RTDE clients), so the whole class can be run against fakes:
+cannot be exercised by the simulator. Its XML-RPC client is injected rather
+than constructed (the same way URBackend takes its RTDE clients), so the whole
+class can be run against fakes:
 
   * the grip-command -> jaw-width interpolation
   * min-step suppression during an Arm.close_gripper ramp
   * the width -> q direction, and that force is NaN rather than invented
-  * demotion to the dashboard when XML-RPC fails, and that it happens ONCE
   * that a failed width READ does not take out control
 
-What this cannot prove: that the URCap answers, or that the dashboard accepts
-the programs. That is the bench, run order step 2 in todo-inlab.txt.
+What this cannot prove: that the URCap answers. That is the bench, run order
+step 2 in todo-inlab.txt.
 
 Run: python tests/test_gripper_backend.py
 """
@@ -34,17 +33,13 @@ from src.robot_backend_ur import RG2, URBackend
 # FAKES
 class FakeRG:
     # Stands in for onRobot.gripper.RG.
-    def __init__(self, width=42.0, fail_grip=False, fail_width=False):
+    def __init__(self, width=42.0, fail_width=False):
         self.width = width
-        self.fail_grip = fail_grip
         self.fail_width = fail_width
         self.grips = []
         self.width_reads = 0
 
     def rg_grip(self, width, force):
-        self.grip_attempts = getattr(self, 'grip_attempts', 0) + 1
-        if self.fail_grip:
-            raise RuntimeError('urcap refused rg_grip')
         self.grips.append((float(width), float(force)))
 
     def get_rg_width(self):
@@ -52,21 +47,6 @@ class FakeRG:
         if self.fail_width:
             raise RuntimeError('urcap refused rg_get_width')
         return float(self.width)
-
-
-class FakeDashboard:
-    # Stands in for the module-level _dashboard() socket helper.
-    def __init__(self, fail=None):
-        self.calls = []
-        self.fail = fail or ''
-
-    def __call__(self, command, port=None, timeout=None):
-        self.calls.append(command)
-        verb = command.split()[0]
-        if verb in self.fail:
-            return 'Failed to execute: %s' % verb
-        return {'load': 'Loading program', 'play': 'Starting program',
-                'programState': 'STOPPED'}.get(verb, 'ok')
 
 
 class FakeReceive:
@@ -194,61 +174,6 @@ def main():
                           grip.state()['q'] <= -1e-12 or
                           grip.state()['q'] >= 0.0)
 
-    # ---------------- fallback ----------------
-    print('\nDASHBOARD FALLBACK')
-    # The fallback now needs a stroke time: without one the program is fired and
-    # returns at once, so the caller moves the arm mid-stroke. Refusing is the
-    # correct behaviour and is tested separately below.
-    rg = FakeRG(fail_grip=True)
-    dash = FakeDashboard()
-    grip = RG2('127.0.0.1', client=rg, dashboard=dash, stroke_time=0.5)
-    grip.move(hi)                       # rg_grip raises TWICE -> demote
-    failures += not check('one failed rg_grip is retried, not fatal',
-                          getattr(rg, 'grip_attempts', 0) >= 2,
-                          '%d rg_grip attempts' % getattr(rg, 'grip_attempts', 0))
-    failures += not check('falls back after the retry also fails',
-                          grip._route == 'dashboard', str(grip._route))
-    failures += not check('loads then plays the close program',
-                          len(dash.calls) >= 2
-                          and 'load %s' % cfg.RG2_CLOSE_PROGRAM in dash.calls
-                          and 'play' in dash.calls, str(dash.calls))
-
-    before = len(dash.calls)
-    for _ in range(5):
-        grip.move(hi)                   # already closed: must not refire
-    failures += not check('repeat commands do not refire the program',
-                          len(dash.calls) == before,
-                          '%d new calls' % (len(dash.calls) - before))
-
-    rg2 = FakeRG(fail_grip=True)
-    dash2 = FakeDashboard()
-    blind = RG2('127.0.0.1', client=rg2, dashboard=dash2, stroke_time=0)
-    raised = False
-    try:
-        blind.move(hi)
-    except RuntimeError:
-        raised = True
-    failures += not check('no stroke time -> the fallback REFUSES rather than '
-                          'firing blind', raised and not dash2.calls,
-                          'raised=%s calls=%d' % (raised, len(dash2.calls)))
-
-    grip.move(lo)
-    failures += not check('opening runs the open program',
-                          'load %s' % cfg.RG2_OPEN_PROGRAM in dash.calls)
-    failures += not check('no width on the fallback route',
-                          grip.state()['q'] != grip.state()['q'])
-
-    # a refused play is an explicit error, not a silent no-op
-    dash_fail = FakeDashboard(fail='play')
-    grip_fail = RG2('127.0.0.1', client=FakeRG(fail_grip=True),
-                    dashboard=dash_fail, stroke_time=0.5)
-    try:
-        grip_fail.move(hi)
-        refused = False
-    except RuntimeError as exc:
-        refused = 'Remote' in str(exc)
-    failures += not check("refused 'play' raises with the reason", refused)
-
     # ---------------- read failure is not control failure ----------------
     print('\nREAD FAILURE KEEPS CONTROL')
     rg = FakeRG(fail_width=True)
@@ -310,7 +235,7 @@ def main():
         print('=' * 74)
         return 1
     print('  All checks passed. The RG2 backend logic is sound.')
-    print('  This does NOT verify the URCap or the dashboard programs:')
+    print('  This does NOT verify the URCap:')
     print('  run order step 2 in todo-inlab.txt does that, at the cell.')
     print('=' * 74)
     return 0

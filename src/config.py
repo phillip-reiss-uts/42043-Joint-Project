@@ -311,19 +311,14 @@ GRASP_LIFT_RECHECK = 0.04                 # m; lift clear and re-read
 
 # ---- gripper: OnRobot RG2 (hardware) -------------------------------------
 # Hardware pickup is OPEN LOOP: command the jaws, wait, lift.
-# Seconds for one full open->close stroke. MEASURE it; None means unmeasured.
-GRIP_STROKE_TIME_S = None
 # Optional instrumentation, not a gate: where the jaws finished.
 OBJECT_SIDE_MM = OBJECT_HEIGHT * 1e3      # 60.0
 GRASP_WIDTH_MARGIN_MM = 10.0
 GRASP_WIDTH_MIN_MM = OBJECT_SIDE_MM - GRASP_WIDTH_MARGIN_MM
 
-# RG2 interface: URCap XML-RPC (proportional, reports width) first, dashboard
-# programs (discrete, no readback) as last resort.
-UR_DASHBOARD_PORT = 29999
+# RG2 interface: URCap XML-RPC (proportional, reports width). This is the only
+# control and readback route.
 RG2_XMLRPC_PORT = 41414
-RG2_OPEN_PROGRAM = '/programs/rg_open.urp'
-RG2_CLOSE_PROGRAM = '/programs/rg_close.urp'
 # Jaw widths, in MILLIMETRES: rg_grip() and the datasheet speak mm.
 # Grip is sent as GRIP_OPEN..GRIP_CLOSED (0..255), interpolated onto these.
 RG2_OPEN_WIDTH_MM = 110.0                 # datasheet full stroke
