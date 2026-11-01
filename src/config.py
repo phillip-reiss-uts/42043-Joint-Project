@@ -281,6 +281,11 @@ SERVO_YAW_SMOOTH = 0.35
 # Must not be 45 (+ 90k): both candidate branches then sit exactly on the
 # boundary and the command alternates between them as readings cross it.
 YAW_LIMIT_DEG = 60.0
+# Yaw tracking deadband, degrees. A new face is commanded only when it differs
+# from the last command by more than this, so +/-2 deg of caliper noise does
+# not move the wrist. It also delays the boundary branch switch until the cube
+# is clearly past the limit.
+YAW_TRACK_DEADBAND_DEG = 2.0
 
 # ---- tracking a moving target --------------------------------------------
 # Chase until the object has held still for the dwell, then commit open loop.

@@ -193,10 +193,11 @@ def main():
     flips = int(np.sum(np.abs(np.diff(np.sign(noisy))) > 0))
     check('yaw noise at +60 latches one branch (at most one switch)',
           flips <= 1, '%d sign changes' % flips)
-    check('every noise command is an exact face and inside the limit',
-          max(abs(_wrap90(c - r)) for c, r in zip(noisy, refs)) < 1e-9
+    check('every noise command is within 2 deg of an exact face and in limit',
+          max(abs(_wrap90(c - r)) for c, r in zip(noisy, refs)) <= 2.0 + 1e-9
           and np.max(np.abs(noisy)) <= 60.0 + 1e-9,
-          'range %.1f..%.1f' % (noisy.min(), noisy.max()))
+          'max face error %.2f deg'
+          % max(abs(_wrap90(c - r)) for c, r in zip(noisy, refs)))
 
     c66 = _bounded_yaw(66.0, 60.0)
     c100 = _bounded_yaw(100.0, 60.0)

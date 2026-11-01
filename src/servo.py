@@ -10,6 +10,7 @@ import numpy as np
 
 from src.config import (
     ARM_DOF, PICK_Z, R_DOWN, JOINT_RANGE, YAW_LIMIT_DEG,
+    YAW_TRACK_DEADBAND_DEG,
     GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
     SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD,
@@ -52,7 +53,8 @@ def _tool_yaw(R):
     return float(np.degrees(np.arctan2(Rz[1, 0], Rz[0, 0])))
 
 
-def _bounded_yaw(yaw_ref, yaw_last, limit=YAW_LIMIT_DEG):
+def _bounded_yaw(yaw_ref, yaw_last, limit=YAW_LIMIT_DEG,
+                 deadband=YAW_TRACK_DEADBAND_DEG):
     # The tool yaw to command for a face at yaw_ref, given the last commanded
     # yaw. A square face makes every yaw in {yaw_ref + 90k} an equally valid
     # grasp. Start from the member nearest the LAST COMMAND, then, if that is
@@ -65,6 +67,14 @@ def _bounded_yaw(yaw_ref, yaw_last, limit=YAW_LIMIT_DEG):
     # 90 deg flip-flop at the boundary while the arm is still travelling.
     k = int(round((yaw_last - yaw_ref) / 90.0))
     cmd = float(yaw_ref + 90.0 * k)
+
+    # DEADBAND. Do not re-command for caliper noise. Hold the last angle if the
+    # exact face moved by only a couple of degrees. A real cube rotation beyond
+    # the deadband still passes through to the subtract-90 correction below.
+    if (abs(yaw_last) <= limit + 1e-9
+            and abs(cmd - yaw_last) <= deadband):
+        return float(yaw_last)
+
     while cmd > limit:
         cmd -= 90.0
     while cmd < -limit:
@@ -389,16 +399,14 @@ class PBVSServo:
             self.gate_requested_z = z_want
             z_want = z_floor
         p_des = np.array([p[0], p[1], z_want])
-        # Yaw is HELD at the estimate from the fullest view, not re-driven from
-        # every look. The caliper yaw on a square top face moves by degrees with
-        # the viewpoint -- measured on the cell at 84-89 deg across one track
-        # while the cube did not move -- and driving the wrist to that moving
-        # label swings the gripper instead of holding it pointed down. The
-        # object's yaw belongs to the object, so the best look wins.
+        # Yaw follows the CONTINUOUS estimate, not the fullest-view snapshot.
+        # Holding best_yaw froze a cube that kept turning: yaw_est advanced but
+        # the command did not. The estimate is already folded mod 90 and
+        # smoothed by _fold_yaw/SERVO_YAW_SMOOTH, so it is the signal to track.
         # yaw_ref is the object's angle in the WORLD frame. Turning it into a
-        # command picks which of the equivalent grasps to use, bounded by
+        # command picks which equivalent grasp to use, bounded by
         # YAW_LIMIT_DEG so the wrist cannot wind.
-        yaw_ref = self.best_yaw if self.best_yaw is not None else self.yaw_est
+        yaw_ref = self.yaw_est if self.yaw_est is not None else self.best_yaw
         _p_cur, R_cur = self.current_pose()
         # Latch on the last COMMAND, not the measured tool yaw. The measured
         # yaw lags a 90 deg branch change, and using it lets boundary noise
