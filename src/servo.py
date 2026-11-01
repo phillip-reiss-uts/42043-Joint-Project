@@ -10,7 +10,7 @@ import numpy as np
 
 from src.config import (
     ARM_DOF, PICK_Z, R_DOWN, JOINT_RANGE, YAW_LIMIT_DEG,
-    YAW_TRACK_DEADBAND_DEG,
+    YAW_TRACK_DEADBAND_DEG, UR_SPEED_SCALE,
     GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
     SERVO_USE_KF, KF_SIGMA_MEAS, KF_SIGMA_ACC, KF_GATE, SERVO_LEAD_S,
     SERVO_KP, SERVO_KO, SERVO_KI, SERVO_KI_NEAR_M, SERVO_KI_NEAR_RAD,
@@ -92,6 +92,7 @@ class PBVSServo:
 
     def __init__(self, model, data, arm, world,
                  kp=SERVO_KP, ko=SERVO_KO, damp=1e-2, dq_max=0.02,
+                 speed_scale=UR_SPEED_SCALE,
                  perceive_every=15, tol_p=3.0e-3, tol_o=3.0e-2,
                  smooth=1.0, v_max=float('inf'), v_descent=None,
                  yaw_smooth=SERVO_YAW_SMOOTH,
@@ -138,6 +139,8 @@ class PBVSServo:
         self.damp_near_m = float(damp_near_m)
         self.damp_near_rad = float(damp_near_rad)
         self.dq_max = dq_max         # joint increment clip per iteration (rad)
+        # Hardware-calibrated global scale. 1.0 = uncalibrated command.
+        self.speed_scale = float(np.clip(speed_scale, 0.01, 1.0))
         self.perceive_every = perceive_every
         self.tol_p = tol_p
         self.tol_o = tol_o
@@ -505,7 +508,7 @@ class PBVSServo:
         # stated as the rate that moves the tool at v_max on a 0.15 m lever arm,
         # so a single v_max still means "how fast should this move" at both
         # scales, and neither limit acts unless exceeded.
-        limit_v = self.v_max if v_max is None else v_max
+        limit_v = (self.v_max if v_max is None else v_max) * self.speed_scale
         finite = np.isfinite(limit_v) and limit_v > 0.0
 
         n_t = float(np.linalg.norm(v[:3]))
@@ -548,7 +551,8 @@ class PBVSServo:
                 qvel = np.asarray(self.arm.backend.joint_velocities(), float)
                 dq = dq - (self.damp_gain * qvel * self.arm.backend.dt)
 
-        return np.clip(dq, -self.dq_max, self.dq_max)
+        dq_max = self.dq_max * self.speed_scale
+        return np.clip(dq, -dq_max, dq_max)
 
     def preposition(self, z_tcp, viewer=None):
         # Coarse open-loop move to the desired pose, before servoing.

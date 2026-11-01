@@ -187,6 +187,7 @@ def main(argv=None):
           % (1.0 / cfg.UR_CYCLE_DT, cfg.UR_CYCLE_DT))
     print('  hover       : tool0 %.3f m  camera %.3f m above table'
           % (cfg.HOVER_TOOL0_Z, cfg.CAM_HOVER_HEIGHT))
+    print('  speed scale : %.3f' % cfg.UR_SPEED_SCALE)
     print('  the pendant stop is the only e-stop; speed starts at FEED')
     # Say the perception floor out loud: it is the setting most likely to make
     # the cube vanish from the log, and it is invisible otherwise.

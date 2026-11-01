@@ -369,6 +369,10 @@ UR_TRACK_CHUNK = 250                      # servo iterations per track step
 # the simulated actuator's, not the real controller's.
 UR_SERVO_KP = 1000.0
 UR_SERVO_KV = 200.0
+# Global hardware servo speed scale, calibrated by tools/calibrate_speed.py.
+# 1.0 is the uncalibrated command; the tool lowers it until the arm follows
+# without overshoot or lunge. Applies to PBVSServo's twist cap and joint step.
+UR_SPEED_SCALE = 1.0
 
 # Home on the cell, hand-guided and read back with getActualQ().
 UR_HOME_Q = (1.5708, -1.6299, 0.9853, -0.9276, -1.5708, 0.0)
