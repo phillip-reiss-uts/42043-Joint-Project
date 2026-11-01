@@ -259,9 +259,9 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     release_z = PICK_Z
     target_high = np.array([tx, ty, release_z + APPROACH_Z], float)
     target_low = np.array([tx, ty, release_z], float)
-    q_high = arm.solve_ik(target_high,
-                          arm.backend.joint_positions(), R_target=R)
-    q_low = arm.solve_ik(target_low, q_high, R_target=R)
+    q_high = arm.solve_ik_tcp(target_high,
+                              arm.backend.joint_positions(), R_target=R)
+    q_low = arm.solve_ik_tcp(target_low, q_high, R_target=R)
     if q_high is None or q_low is None:
         return False
 
@@ -315,10 +315,10 @@ def pick_one(model, data, arm, world, i, drop_xy,
     # carry to the release point. No chute to clear, so this is a plain place
     # on the tabletop: lift, traverse high, then lower.
     drop_z = TABLE_HEIGHT + LIFT_Z
-    q_app = arm.solve_ik([drop_xy[0], drop_xy[1], drop_z + APPROACH_Z],
-                         q_lift, R_target=R)
-    q_drop = arm.solve_ik([drop_xy[0], drop_xy[1], drop_z],
-                          q_app, R_target=R)
+    q_app = arm.solve_ik_tcp([drop_xy[0], drop_xy[1], drop_z + APPROACH_Z],
+                             q_lift, R_target=R)
+    q_drop = arm.solve_ik_tcp([drop_xy[0], drop_xy[1], drop_z],
+                              q_app, R_target=R)
     arm.move(q_app, GRIP_CLOSED, rate=RAPID, viewer=viewer, estop=estop,
              stop=stopped)
     if stopped():

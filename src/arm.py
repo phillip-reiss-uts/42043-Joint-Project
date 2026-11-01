@@ -171,6 +171,16 @@ class Arm:
             self.observer.update(self.encoder.read(self.backend.joint_positions()))
 
     # IK
+    def solve_ik_tcp(self, target, q_init, R_target=R_DOWN, **kw):
+        # Callers pass TCP targets (PICK_Z, world.gripper_pose, camera targets).
+        # solve_ik itself is the kinematics-frame solver, so remove the
+        # provider's tool offset here, once.
+        target = np.asarray(target, float)
+        off = getattr(self.kin, 'tool_offset', None)
+        off = np.zeros(3) if off is None else np.asarray(off(), float)
+        return self.solve_ik(target - np.asarray(R_target, float) @ off,
+                             q_init, R_target=R_target, **kw)
+
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,
                  gain_p=0.5, gain_o=0.5, damp=1e-2, max_joint=3.0):
         # Damped-least-squares IK for gripper/base -- position AND orientation.

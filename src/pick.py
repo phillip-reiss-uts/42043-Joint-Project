@@ -159,9 +159,9 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
     # Lift from where the gripper actually ended up, with the servo's own yaw
     # estimate, so no stored target is carried past the closed-loop phase.
     R = rotation_with_yaw(sv.yaw_est, R_DOWN)
-    q_lift = arm.solve_ik(np.array(world.gripper_pose()[0], float)
-                          + np.array([0.0, 0.0, LIFT_Z]),
-                          arm.backend.joint_positions(), R_target=R)
+    q_lift = arm.solve_ik_tcp(np.array(world.gripper_pose()[0], float)
+                              + np.array([0.0, 0.0, LIFT_Z]),
+                              arm.backend.joint_positions(), R_target=R)
 
     # close_gripper returns (ok, width_mm, verdict) on hardware, None on the
     # simulator. ok False means the jaws ran past the commanded width with
@@ -195,9 +195,9 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
         # fingers are still travelling, and if the cube was merely resting
         # between the jaws a lift shakes it out -- so a positive second reading
         # is the one worth trusting.
-        q_recheck = arm.solve_ik(np.array(world.gripper_pose()[0], float)
-                                 + np.array([0.0, 0.0, GRASP_LIFT_RECHECK]),
-                                 arm.backend.joint_positions(), R_target=R)
+        q_recheck = arm.solve_ik_tcp(np.array(world.gripper_pose()[0], float)
+                                     + np.array([0.0, 0.0, GRASP_LIFT_RECHECK]),
+                                     arm.backend.joint_positions(), R_target=R)
         arm.move(q_recheck, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
                  stop=stopped)
         if stopped():

@@ -47,6 +47,7 @@ from src.config import (
 )
 from src.kinematics_ur import URKinematics
 from src.pick import pick_and_hold
+from src.run_log import start_run_log
 from src.servo import PBVSServo
 from src.task import Commands, TaskStateMachine, TRACK, WAIT
 from src.world_real import (RealObjectWorld, RealSenseSource)
@@ -190,6 +191,8 @@ def main(argv=None):
     ap.add_argument('--raw-servo', action='store_true',
                     help='alias for --servo-path raw (the default)')
     args = ap.parse_args(argv)
+    start_run_log(argv if argv is not None else sys.argv[1:],
+                  os.path.dirname(os.path.abspath(__file__)))
     if args.state_space:
         args.servo_path = 'state-space'
     if args.raw_servo:

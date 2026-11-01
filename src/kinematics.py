@@ -81,6 +81,12 @@ class Kinematics(ABC):
         # caller-side pair.
         return self.mass_matrix(q), self.gravity_torque(q)
 
+    def tool_offset(self):
+        # Position of the controlled TCP relative to the frame returned by
+        # pose()/jacobian(), expressed in the tool frame. Zero for providers
+        # that already report the TCP; nonzero for a body-frame provider.
+        return np.zeros(3)
+
     @property
     def dof(self):
         return 6

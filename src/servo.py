@@ -557,7 +557,7 @@ class PBVSServo:
     def preposition(self, z_tcp, viewer=None):
         # Coarse open-loop move to the desired pose, before servoing.
         p_des, R_des = self.desired_pose(z_tcp)
-        q = self.arm.solve_ik(p_des, self.arm.backend.joint_positions(), R_target=R_des)
+        q = self.arm.solve_ik_tcp(p_des, self.arm.backend.joint_positions(), R_target=R_des)
         self.arm.move(q, GRIP_OPEN, rate=0.20, viewer=viewer)
 
     # LOOP
@@ -867,7 +867,7 @@ class PBVSServo:
             # the descent finishes high -- which closed the jaws in mid-air.
             # The elbow is the one joint the MJCF models at +-pi; the rest are
             # +-2*pi, as on the UR3e.
-            q = self.arm.solve_ik(p, q, R_target=R_des, max_joint=JOINT_RANGE)
+            q = self.arm.solve_ik_tcp(p, q, R_target=R_des, max_joint=JOINT_RANGE)
             backend.command(q, GRIP_OPEN)
             self._step_world()
             if watch is not None and i % self.perceive_every == 0:
@@ -914,8 +914,8 @@ class PBVSServo:
             if aborted is not None and aborted():
                 return False, j - 1
             target = p_cur + np.array([0.0, 0.0, self.retreat_step * j])
-            q = self.arm.solve_ik(target, self.arm.backend.joint_positions(),
-                                  R_target=R_cur)
+            q = self.arm.solve_ik_tcp(target, self.arm.backend.joint_positions(),
+                                     R_target=R_cur)
             self._paced_move(q, self.retreat_step, v_cart, viewer=viewer,
                              estop=estop, aborted=aborted)
             if aborted is not None and aborted():
@@ -981,7 +981,7 @@ class PBVSServo:
         # unusable here -- closer in, the jaws and the housing bias the fitted
         # centre, so anything that keeps looking drives on a drifting target.
         self.target_moved = False
-        q_goal = self.arm.solve_ik(
+        q_goal = self.arm.solve_ik_tcp(
             p_des, np.asarray(self.arm.backend.joint_positions(), float),
             R_target=R_des, max_joint=JOINT_RANGE)
         self.arm.move(q_goal, GRIP_OPEN, rate=FEED, estop=estop)
