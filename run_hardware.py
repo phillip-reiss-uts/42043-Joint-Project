@@ -176,12 +176,17 @@ def main(argv=None):
                          'is cached and src/liveview is never imported unless '
                          'this is given')
     ap.add_argument('--servo-path', choices=('state-space', 'raw'),
-                    default='state-space',
-                    help='state-space: ArmObserver + LQR around the PBVS joint '
-                         'reference. raw: the original direct command path.')
+                    default='raw',
+                    help='raw: the original direct command path (default). '
+                         'state-space: ArmObserver + LQR around the PBVS joint '
+                         'reference.')
+    ap.add_argument('--state-space', action='store_true',
+                    help='alias for --servo-path state-space')
     ap.add_argument('--raw-servo', action='store_true',
-                    help='alias for --servo-path raw')
+                    help='alias for --servo-path raw (the default)')
     args = ap.parse_args(argv)
+    if args.state_space:
+        args.servo_path = 'state-space'
     if args.raw_servo:
         args.servo_path = 'raw'
 
@@ -227,6 +232,17 @@ def main(argv=None):
     arm = Arm(None, None, kinematics=kin, backend=backend)
 
     if args.servo_path == 'state-space':
+        print()
+        print('[HW] STATE-SPACE PATH -- risks:')
+        print('     - UR_SERVO_KP/KV are placeholders, not identified gains')
+        print('     - the observer/LQR loop is not hardware-validated')
+        print('     - it can fight the UR servo or oscillate at speed')
+        print('     - run tools/validate_state_space.py fit AND ab first')
+        answer = input("type 'state-space' to continue > ").strip().lower()
+        if answer != 'state-space':
+            print('[HW] refused; use the default raw path')
+            backend.close()
+            return 2
         from src.observer import ArmObserver
         from src.controller import (Encoder, JointController, LQRController,
                                     lqr_weights)

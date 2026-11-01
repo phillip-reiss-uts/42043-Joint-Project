@@ -198,8 +198,13 @@ def check_backend_plumbing():
     run_test("hardware backend plumbing", "tests/test_ur_backend.py")
 
 
+def check_gripper():
+    section("4. tests/test_gripper_backend.py  (fakes: no robot, no onRobot)")
+    run_test("RG2 XML-RPC backend", "tests/test_gripper_backend.py")
+
+
 def check_config():
-    section("4. tests/test_arm_control.py --config-only  (no robot contact)")
+    section("5. tests/test_arm_control.py --config-only  (no robot contact)")
     run_test("config is the measured cell", "tests/test_arm_control.py",
              ("--config-only",))
 
@@ -209,14 +214,14 @@ def check_calibration():
     # known. Runs here because tools/calibrate_camera.py now only has the wrist
     # routes -- a wrong solvePnP seed or a flipped cv/MuJoCo convention produces
     # a plausible-looking CAM_POS that no other offline check would catch.
-    section("7. tests/test_calibration_camera.py  (offline solvers)")
+    section("8. tests/test_calibration_camera.py  (offline solvers)")
     run_test("camera extrinsics solvers", "tests/test_calibration_camera.py")
 
 
 def check_yaw():
     # The only orientation check in the gate. Both failure modes are silent:
     # the pick simply rotates to the wrong angle.
-    section("9. tests/test_yaw_sweep.py  (yaw, from the real snapshots)")
+    section("10. tests/test_yaw_sweep.py  (yaw, from the real snapshots)")
     run_test("yaw tracks a known rotation", "tests/test_yaw_sweep.py")
 
 
@@ -227,7 +232,7 @@ def check_kinematics_payload():
     # and their inertia comes from the mesh SHAPE, so a geometry-only edit
     # invalidates the file. A stale payload passes every other check here and
     # then reports |dM| ~ 1e-3 instead of ~1e-16.
-    section("5. tests/test_ur_kinematics.py  (payload vs model, offline)")
+    section("6. tests/test_ur_kinematics.py  (payload vs model, offline)")
     run_test("payload data matches the model", "tests/test_ur_kinematics.py")
 
 
@@ -235,14 +240,14 @@ def check_kinematics_frame():
     # The same two kinematics, compared on the TCP POSE rather than through the
     # mass matrix, and compared both with and without UR_ROOT_YAW. The 180 deg
     # base error that survived for weeks would have been a plain sign flip here.
-    section("6. tests/test_kinematics_parity.py  (TCP pose + frame, offline)")
+    section("7. tests/test_kinematics_parity.py  (TCP pose + frame, offline)")
     run_test("chain and model agree in the cell frame",
              "tests/test_kinematics_parity.py")
 
 
 # --------------------------------------------------------------- 8. camera
 def check_realsense(mods):
-    section("8. pyrealsense2 loads and enumerates")
+    section("9. pyrealsense2 loads and enumerates")
     rs = mods.get("pyrealsense2")
     if rs is None:
         return record("pyrealsense2 importable", False)
@@ -263,7 +268,7 @@ def check_realsense(mods):
 
 # --------------------------------------------------------------- 8. opencv
 def check_opencv(mods):
-    section("9. opencv (calibration only -- not on the pick path)")
+    section("11. opencv (calibration only -- not on the pick path)")
     cv2 = mods.get("cv2")
     if cv2 is None:
         note("cv2 not importable; src/calibration_camera.py will not run")
@@ -300,6 +305,7 @@ def main(argv=None):
     mods = check_imports()
     check_ur_rtde_api(mods)
     check_backend_plumbing()
+    check_gripper()
     check_config()
     check_kinematics_payload()
     check_kinematics_frame()
@@ -322,7 +328,6 @@ def main(argv=None):
     print("  Still needs hardware, in this order:")
     print("    python tests/test_arm_control.py     # UR3e accepts servoJ")
     print("    python tests/test_camera_enum.py     # D435i streams here")
-    print("    python tests/test_camera_ruler.py    # CAM_MOUNT bias")
     return 0
 
 

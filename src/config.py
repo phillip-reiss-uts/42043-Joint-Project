@@ -134,6 +134,10 @@ USE_LQR = True                            # LQR gains instead of FB_KQ/FB_TD
 LQR_Q_POS = 1.0                           # state cost, position error (rad^2)
 LQR_Q_VEL = 1.0e-4                        # state cost, velocity error (rad/s)^2
 LQR_R = 5.0e-2                            # command cost (rad^2); sets gain level
+# Scale on the LQR correction. The pre-lab bench (tools/bench_state_space.py)
+# shows the full 1.0 gain overshoots at 80-120 ms of command delay; 0.25 stays
+# inside the envelope across 0-120 ms and +/-2x Kp/Kv mismatch.
+LQR_GAIN_SCALE = 0.25
 
 # ---- grasp / place -------------------------------------------------------
 # The pick/place height: TOOL FLANGE above the tabletop, METRES. THIS IS THE

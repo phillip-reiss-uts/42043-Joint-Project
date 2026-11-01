@@ -197,11 +197,21 @@ def run_sim(h):
                  'is missing, all FK and the servo target are wrong.') as r:
         r.set(tool >= 0, 'body id = %d' % tool)
 
-    with h.check('KINEMATICS', 'FK matches the simulator',
-                 'The analytic chain must agree with the plant, or the servo\n'
-                 'drives to a pose the robot does not actually reach.') as r:
+    with h.check('KINEMATICS', 'IK round-trips the FK pose',
+                 'The servo solves IK and then measures the achieved pose. A\n'
+                 'target that does not return to itself means every move is\n'
+                 'biased by the solver.') as r:
+        from src.arm import Arm
+        from src.robot_backend_mujoco import MujocoBackend
         p1, R1 = mj.pose(q_home)
-        r.set(np.allclose(R1, R1, atol=0), 'pose at home: %s' % np.round(p1, 4))
+        be = MujocoBackend(model, data, ARM_DOF)
+        arm = Arm(model, data, kinematics=mj, backend=be)
+        q_ik = arm.solve_ik(p1, q_home, R_target=R1, max_joint=2.0 * np.pi)
+        p2, R2 = mj.pose(q_ik)
+        dp = float(np.linalg.norm(np.asarray(p2) - np.asarray(p1)))
+        dR = float(np.linalg.norm(np.asarray(R2) - np.asarray(R1)))
+        r.set(dp < 1e-3 and dR < 1e-3,
+              'round-trip dp %.2e m, dR %.2e' % (dp, dR))
 
     with h.check('KINEMATICS', 'R_DOWN is a valid rotation (det=+1)',
                  'R_DOWN is used as the approach orientation. A non-rotation\n'

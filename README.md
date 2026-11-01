@@ -15,7 +15,7 @@ MuJoCo and on the real robot from the same robot code.
     python main.py                # simulation (default)
     python main.py --lightweight  # simulation, no camera panels (older machines)
     python main.py --hardware --ip 192.168.0.194
-    python main.py --hardware --ip 192.168.0.194 --raw-servo  # original direct-servo path
+    python main.py --hardware --ip 192.168.0.194 --state-space  # opt-in observer/LQR path
 
 Simulation keys: `6` Spawns a cube in a random position and orientation,
 `7` pick up / put down (toggle), `8` pause, `9` reset,
@@ -25,9 +25,9 @@ Hardware keys: `p` pick up / put down (toggle), `t` start/stop tracking,
 `space` pause / resume, `h` go to home, `s` status, `q` quit. Both front-ends
 print their keys at startup.
 
-Hardware defaults to the state-space joint path (`ArmObserver` + LQR around the
-PBVS joint reference). `--raw-servo` restores the original direct command path;
-use it if the observer has to be removed at the cell.
+Hardware defaults to the raw servo path. `--state-space` opts into the
+`ArmObserver` + LQR loop around the PBVS joint reference; it prints the risks
+and requires explicit confirmation. `--raw-servo` remains the default alias.
 
 The two sets differ because the scene keys have nothing to act on: you place the
 cube by hand instead of spawning it, and there is no scene reset. After an
@@ -67,10 +67,27 @@ it draws the frame perception already took, so it cannot consume a frame or dela
 a command. There is deliberately no live window: this runs over SSH, and a draw
 inside the servo loop would starve the 8 ms servoj stream.
 
+## State-space robustness bench
+
+Before the cell, the controller is exercised against a delayed plant:
+
+    python tools/bench_state_space.py
+
+The bench wraps MuJoCo in a command delay plus first-order lag that approximates
+the `servoJ` lookahead, then sweeps:
+
+    Kp/Kv mismatch  0.5x, 1x, 2x
+    delay           0, 40, 80, 120 ms
+    LQR gain scale  0.25, 0.50, 1.00
+
+The full 1.00 LQR gain overshoots at 80-120 ms. The default is therefore
+`LQR_GAIN_SCALE = 0.25`, which passes all 12 default-scale cases, including
+120 ms delay and 2x gain mismatch.
+
 ## State-space validation
 
-Hardware defaults to the state-space joint path. It is not valid until the
-observer model has been fitted and the controller compared with the raw path:
+The state-space path is opt-in and is not valid until the observer model has
+been fitted and the controller compared with the raw path:
 
     python tools/validate_state_space.py record --joint 1 --step 1.5
     python tools/validate_state_space.py fit --record state_space_record_<stamp>.csv --write

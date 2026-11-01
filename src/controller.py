@@ -4,7 +4,7 @@ import numpy as np
 
 from src.config import (
     ARM_DOF, FB_KQ, FB_TD, ENCODER_NOISE,
-    LQR_Q_POS, LQR_Q_VEL, LQR_R,
+    LQR_Q_POS, LQR_Q_VEL, LQR_R, LQR_GAIN_SCALE,
 )
 
 
@@ -31,22 +31,26 @@ class JointController:
 class LQRController:
     # Outer loop whose gains come out of the state-space model, not tuning.
 
-    def __init__(self, observer, Q=None, R=None):
+    def __init__(self, observer, Q=None, R=None,
+                 gain_scale=LQR_GAIN_SCALE):
         self.observer = observer
         self.Q = Q if Q is not None else lqr_weights()[0]
         self.R = R if R is not None else lqr_weights()[1]
+        # Diagnostic/protection scale on the LQR correction. 1.0 is the
+        # unmodified gain; lower values trade tracking for phase margin.
+        self.gain_scale = float(gain_scale)
 
     def command(self, q_ref, qdot_ref, xhat):
         # u = q_ref + K (x_ref - x_hat), with K from the last re-linearisation.
         q_ref = np.asarray(q_ref, float)
         e = np.concatenate([q_ref - xhat[:ARM_DOF],
                             np.asarray(qdot_ref, float) - xhat[ARM_DOF:]])
-        return q_ref + self.observer.K_lqr @ e
+        return q_ref + self.gain_scale * (self.observer.K_lqr @ e)
 
     def describe(self):
-        return ('u = q_ref + K_lqr (x_ref - x_hat),  K from LQR '
-                '(Q_pos=%.3g, Q_vel=%.3g, R=%.3g)' % (LQR_Q_POS, LQR_Q_VEL,
-                                                      LQR_R))
+        return ('u = q_ref + %.2f K_lqr (x_ref - x_hat),  K from LQR '
+                '(Q_pos=%.3g, Q_vel=%.3g, R=%.3g)'
+                % (self.gain_scale, LQR_Q_POS, LQR_Q_VEL, LQR_R))
 
     def gain_summary(self):
         K = self.observer.K_lqr
