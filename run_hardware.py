@@ -129,7 +129,7 @@ def _camera_mount():
 def _put_down(arm, xy=None):
     # Lower the held cube to the table at the xy it was picked from and release.
     #
-    # The descent matches the GRASP: PICK_Z, the one pick/place height, applied
+    # The descent matches the GRASP: PICK_Z, applied
     # in the FLANGE frame like every other height in config.
     #
     # See put_cube_down in pick_place for the simulation twin (that one also

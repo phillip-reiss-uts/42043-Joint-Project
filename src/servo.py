@@ -1047,7 +1047,12 @@ class PBVSServo:
         self.gated = False
         self.gate_requested_z = None
         if track is None:
-            track = bool(self.track_moving)
+            # A stationary target is picked with the direct hover/descent
+            # path. Tracking is for a target that is actually moving; waiting
+            # for stillness on a noisy stationary estimate can loop forever.
+            speed = self._target_speed()
+            track = bool(self.track_moving and speed is not None
+                         and speed > SERVO_STILL_SPEED)
         if stationary_s is None:
             stationary_s = self.still_time_target
 

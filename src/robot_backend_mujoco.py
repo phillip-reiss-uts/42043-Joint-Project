@@ -26,7 +26,7 @@ import numpy as np
 
 from src.robot_backend import RobotBackend
 from src.config import (GRIP_FINGER_OPEN_ANGLE, GRIP_FINGER_SHUT_ANGLE,
-                        GRIP_LEVER_MM)
+                        GRIP_LEVER_MM, UR_CYCLE_DT)
 
 
 # One scratch MjData per model, so the gravity evaluation does not mutate the
@@ -75,13 +75,18 @@ class MujocoBackend(RobotBackend):
     # exactly. Every method below replaces a direct call that used to live in
     # arm.py / servo.py.
 
-    def __init__(self, model, data, n=6):
+    def __init__(self, model, data, n=6, control_dt=UR_CYCLE_DT):
         import mujoco
         self._mj = mujoco
         self.model = model
         self.data = data
         self._n = int(n)
-        self._dt = float(model.opt.timestep)
+        # One control cycle is the hardware servoj period, not the physics
+        # timestep. The plant still runs at model.opt.timestep inside it.
+        self._physics_dt = float(model.opt.timestep)
+        self._substeps = max(1, int(round(float(control_dt)
+                                          / self._physics_dt)))
+        self._dt = self._substeps * self._physics_dt
         # The gripper is the last actuator in the composed model -- the same
         # assumption `Arm.grip_act` made, kept here instead so the robot layer
         # does not encode it.
@@ -137,7 +142,10 @@ class MujocoBackend(RobotBackend):
             self.detach_object()
 
     def step(self):
-        self._mj.mj_step(self.model, self.data)
+        # One hardware control cycle: several physics steps, one 125 Hz tick.
+        for _ in range(self._substeps):
+            self._carry_object()
+            self._mj.mj_step(self.model, self.data)
         self._carry_object()
 
     # ---- grasp coupling (simulation only) ----

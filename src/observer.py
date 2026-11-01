@@ -10,6 +10,7 @@ from scipy.linalg import expm, solve_discrete_are
 
 from src.config import (
     ARM_DOF, ENCODER_NOISE, TAU_NOISE, OBSERVER_RELIN, OBSERVER_SUBSTEPS,
+    OBSERVER_MAX_SUBSTEP,
 )
 from src.state_space import linearise, position_output, lqr_gain
 
@@ -61,12 +62,17 @@ class ArmObserver:
         self.R = (sigma_q ** 2) * np.eye(self.n)
         self.sigma_tau = sigma_tau
         self.relin_steps = relin_steps
-        self.substeps = substeps
+        self.substeps = int(substeps)
         if dt is None:
             if model is None:
                 raise ValueError('ArmObserver needs dt= when there is no model')
             dt = model.opt.timestep
         self.dt = float(dt)
+        # Keep the Euler integration stable when the control period is 8 ms:
+        # the old fixed four substeps left a 2 ms step, which diverged for the
+        # exact Kp/Kv model even with no command delay.
+        self.substeps = max(self.substeps,
+                            int(np.ceil(self.dt / OBSERVER_MAX_SUBSTEP)))
         self.lqr_weights = lqr_weights
 
         # Plant model from the injected provider (src/kinematics.py), so the

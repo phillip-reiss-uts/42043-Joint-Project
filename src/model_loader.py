@@ -10,7 +10,7 @@ _MODELS_DIR = os.path.join(
 
 from src.config import (
     CAM_QUAT, CAM_POS, CAM_MOUNT_POS_GRIPPER, CAM_BRACKET_MASS_KG,
-    MESH_QUAT, MESH_POS,
+    SIM_CAM_FOVY, MESH_QUAT, MESH_POS,
     TABLE_HEIGHT, TABLE_THICK, TABLE_CENTRE, TABLE_HALF,
     OBJECT_SIZE, OBJECT_MASS_KG, OBJECT_FRICTION, GRIP_PAD_FRICTION,
     GRIP_FORCE_RANGE,
@@ -132,7 +132,7 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
         name="depth_cam",
         pos=CAM_MOUNT_POS_GRIPPER,
         quat=CAM_QUAT,
-        fovy=60.0,
+        fovy=SIM_CAM_FOVY,
     )
     print(f"[INFO] Added 'depth_cam' to {gripper_base.name}")
 

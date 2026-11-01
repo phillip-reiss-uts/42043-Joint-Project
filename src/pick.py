@@ -119,7 +119,10 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
     # no open-loop preposition, so vision corrects the entire approach rather
     # than only the final descent. Everything after the grasp stays open loop,
     # which the overlay shows as the trail turning red.
-    sv = PBVSServo(model, data, arm, world, smooth=1.0,
+    # Static picks use the raw centre. The Kalman lead is useful while
+    # chasing a moving cube, but on a stationary pick its velocity estimate
+    # adds a lag/lead oscillation that can prevent the grasp from converging.
+    sv = PBVSServo(model, data, arm, world, smooth=1.0, use_kf=False,
                    perceive_every=SERVO_PERCEIVE_EVERY,
                    v_max=SERVO_V_TRANSIT, v_descent=SERVO_V_DESCENT,
                    occlude_ratio=SERVO_OCCLUDE_RATIO,

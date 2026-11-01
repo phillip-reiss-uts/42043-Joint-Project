@@ -254,8 +254,8 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     # random yaw) would spin the cube on the way down.
     _, R = arm.kin.pose(arm.backend.joint_positions())
 
-    # PICK_Z is the one pick/place height, the same one the pick and the
-    # hardware put-down use, so releasing sets the cube down ON the table.
+    # PICK_Z is the one grasp/place height, in the same TCP frame that
+    # world.gripper_pose() and the servo use.
     release_z = PICK_Z
     q_high = arm.solve_ik([tx, ty, release_z + APPROACH_Z],
                           arm.backend.joint_positions(), R_target=R)

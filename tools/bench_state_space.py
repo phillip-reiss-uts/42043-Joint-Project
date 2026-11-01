@@ -98,7 +98,7 @@ def run_case(model, data, dyn, delay_s, gain_scale, lqr_scale, seed):
     q0 = np.asarray(data.qpos[:cfg.ARM_DOF], float).copy()
 
     inner = MujocoBackend(model, data, cfg.ARM_DOF)
-    delayed = DelayedBackend(inner, delay_s, TAU_S, model.opt.timestep)
+    delayed = DelayedBackend(inner, delay_s, TAU_S, cfg.UR_CYCLE_DT)
     plant = MujocoKinematics(model, inner.tool_body_id, cfg.ARM_DOF)
     arm = Arm(model, data, kinematics=plant, backend=delayed)
 
@@ -108,7 +108,7 @@ def run_case(model, data, dyn, delay_s, gain_scale, lqr_scale, seed):
         dyn, (np.full(cfg.ARM_DOF, kp), np.full(cfg.ARM_DOF, kv)),
         tool_pos=(0.0, 0.0, 0.0), tool_quat=(1.0, 0.0, 0.0, 0.0),
         root_yaw=cfg.UR_ROOT_YAW)
-    obs = ArmObserver(model, data, q0, kin=obs_kin,
+    obs = ArmObserver(model, data, q0, dt=cfg.UR_CYCLE_DT, kin=obs_kin,
                       lqr_weights=lqr_weights())
     arm.attach_observer(obs, LQRController(obs, gain_scale=lqr_scale),
                         Encoder(noisy=True, seed=seed))
@@ -116,21 +116,31 @@ def run_case(model, data, dyn, delay_s, gain_scale, lqr_scale, seed):
     q_tgt = q0.copy()
     q_tgt[1] += np.radians(STEP_DEG)
     trace = []
-    n = int(2.5 / model.opt.timestep)
+    error = None
+    n = int(2.5 / cfg.UR_CYCLE_DT)
     try:
         for _ in range(n):
             arm.command_step(q_tgt, cfg.GRIP_OPEN)
             trace.append((np.asarray(data.qpos[:cfg.ARM_DOF], float).copy(),
                           np.asarray(data.qvel[:cfg.ARM_DOF], float).copy(),
                           np.asarray(obs.xhat, float).copy()))
+    except Exception as exc:
+        error = '%s: %s' % (type(exc).__name__, exc)
     finally:
         arm.detach_observer()
+
+    if not trace:
+        return dict(delay_s=float(delay_s), gain_scale=float(gain_scale),
+                    lqr_scale=float(lqr_scale), final_deg=float('nan'),
+                    overshoot_deg=float('nan'), settle_s=float('nan'),
+                    qdot_rms=float('nan'), peak_qd=float('nan'),
+                    stable=False, error=error)
 
     q = np.array([t[0] for t in trace])
     qd = np.array([t[1] for t in trace])
     xh = np.array([t[2] for t in trace])
     err = q[:, 1] - q_tgt[1]
-    dt = model.opt.timestep
+    dt = cfg.UR_CYCLE_DT
     sign = 1.0 if q_tgt[1] >= q0[1] else -1.0
     over = float(np.max(np.maximum(0.0, err * sign)))
     bad = np.nonzero(np.abs(err) > np.radians(0.10))[0]
@@ -139,7 +149,8 @@ def run_case(model, data, dyn, delay_s, gain_scale, lqr_scale, seed):
     rms = float(np.sqrt(np.mean(qd_err * qd_err)))
     peak = float(np.max(np.abs(qd)))
     final = float(abs(err[-1]))
-    stable = bool(np.all(np.isfinite(q))
+    stable = bool(error is None
+                   and np.all(np.isfinite(q))
                    and np.degrees(final) <= FINAL_DEG
                    and np.degrees(over) <= OVER_DEG
                    and settle <= 1.5
@@ -150,7 +161,7 @@ def run_case(model, data, dyn, delay_s, gain_scale, lqr_scale, seed):
                 final_deg=float(np.degrees(final)),
                 overshoot_deg=float(np.degrees(over)),
                 settle_s=float(settle), qdot_rms=float(rms),
-                peak_qd=float(peak), stable=stable)
+                peak_qd=float(peak), stable=stable, error=error)
 
 
 def main():

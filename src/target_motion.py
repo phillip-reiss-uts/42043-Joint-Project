@@ -55,7 +55,7 @@ class TargetMover:
     # Glides one registry object around the table during the demonstration.
 
     def __init__(self, model, data, reg, index, rng=None, speed=None,
-                 turn_s=None):
+                 turn_s=None, dt=None):
         self.reg = reg
         self.index = int(index)
         self.rng = np.random.default_rng() if rng is None else rng
@@ -72,7 +72,8 @@ class TargetMover:
         self.turned = 0                 # direction changes, for reporting
         self.moved = 0.0                # path length, for reporting
         self._prev_xy = None
-        self.dt = float(model.opt.timestep)
+        # Control period, not the physics substep.
+        self.dt = float(model.opt.timestep if dt is None else dt)
 
     # state
     def describe(self):

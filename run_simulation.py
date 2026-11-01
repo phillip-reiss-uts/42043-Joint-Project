@@ -225,7 +225,7 @@ def main(sensor_size=(320, 240), lightweight=False):
                     JointController, LQRController, Encoder, lqr_weights,
                 )
                 observer = ArmObserver(
-                    model, data, data.qpos[:ARM_DOF],
+                    model, data, data.qpos[:ARM_DOF], dt=backend.dt,
                     lqr_weights=(lqr_weights() if USE_LQR else None))
                 ctl = (LQRController(observer) if USE_LQR
                        else JointController())
@@ -244,15 +244,19 @@ def main(sensor_size=(320, 240), lightweight=False):
             arm.detach_observer()
 
         def put_down():
-            # Release the held cube onto the table beneath the gripper. The xy
-            # is the TOOL's, not the object's: the cube is in the jaws, so the
-            # gripper defines where it will land. (The object's true pose is a
-            # simulator-only quantity; the hardware front-end cannot ask for it.)
-            p_tool, _ = arm.kin.pose(data.qpos[:ARM_DOF])
-            xy = (float(p_tool[0]), float(p_tool[1]))
-            return put_cube_down(model, data, arm, reg, rng, viewer=viewer,
-                                 estop=estop, world=world, xy=xy,
-                                 stop=stopped)
+            # Return the cube to the xy it was picked from. The arm waits in
+            # HOLD at the home pose, so using the current tool xy here would
+            # place the cube at home instead.
+            if last_pick_xy[0] is not None:
+                xy = last_pick_xy[0]
+            else:
+                p_tool, _ = arm.kin.pose(data.qpos[:ARM_DOF])
+                xy = (float(p_tool[0]), float(p_tool[1]))
+            ok = put_cube_down(model, data, arm, reg, rng, viewer=viewer,
+                               estop=estop, world=world, xy=xy,
+                               stop=stopped)
+            last_pick_xy[0] = None
+            return ok
 
         # ---- TRACK: follow the object, never descend ---------------------
         #
@@ -338,11 +342,17 @@ def main(sensor_size=(320, 240), lightweight=False):
                           float(np.linalg.norm(_p1 - _pd))))
 
         # ---- PICK: one explicit grasp attempt ----------------------------
+        # The put-down must return the cube to where it was picked. The arm is
+        # carried to the home pose while holding, so the tool xy at PUTDOWN is
+        # the home xy, not the pick xy.
+        last_pick_xy = [None]
+
         def pick_object():
             active = world.active()
             if not active:
                 return False
             i = active[0]
+            last_pick_xy[0] = tuple(reg.pose(data, i)[:2])
             import time as _time
             # An explicit pickup must not turn into an indefinite chase. If the
             # object will not hold still, the servo would otherwise spend
@@ -433,7 +443,8 @@ def main(sensor_size=(320, 240), lightweight=False):
             act = world.active()
             if act and not task.holding:
                 if demo_idx[0] != act[0]:
-                    world.set_mover(TargetMover(model, data, reg, act[0]))
+                    world.set_mover(TargetMover(model, data, reg, act[0],
+                                    dt=backend.dt))
                     demo_idx[0] = act[0]
             else:
                 world.set_mover(None)

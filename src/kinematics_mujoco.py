@@ -19,6 +19,7 @@ the portable interface is shared, this one is simulation-only.
 
 import numpy as np
 
+from src.config import TOOL_MOUNT_POS
 from src.kinematics import Kinematics
 
 
@@ -50,26 +51,45 @@ class MujocoKinematics(Kinematics):
         mj.mj_comPos(self.model, d)
         return d
 
-    def pose(self, q):
-        d = self._fk(np.asarray(q, float))
+    def _tcp(self, d):
+        # The MJCF tool body is gripper/base, TOOL_MOUNT_POS below tool0.
+        # Every caller of this interface (servo, PICK_Z, world.gripper_pose)
+        # speaks TCP, so expose tool0, not the body origin.
         p = np.array(d.xpos[self.tool], float)
         R = np.array(d.xmat[self.tool], float).reshape(3, 3)
+        r = R @ np.asarray(TOOL_MOUNT_POS, float)
+        return p + r, R, r
+
+    def pose(self, q):
+        p, R, _ = self._tcp(self._fk(np.asarray(q, float)))
         return p, R
+
+    def _jac_body(self, d):
+        self._mj.mj_jacBody(self.model, d, self._jacp, self._jacr, self.tool)
+        return (self._jacp[:, :self._n].copy(),
+                self._jacr[:, :self._n].copy())
 
     def jacobian(self, q):
         d = self._fk(np.asarray(q, float))
-        self._mj.mj_jacBody(self.model, d, self._jacp, self._jacr, self.tool)
-        return np.vstack([self._jacp[:, :self._n], self._jacr[:, :self._n]])
+        Jp, Jw = self._jac_body(d)
+        _, _, r = self._tcp(d)
+        # velocity of a point r from the body origin: Jp + w x r
+        #                                     = Jp - skew(r) @ Jw
+        S = np.array([[0.0, -r[2], r[1]],
+                      [r[2], 0.0, -r[0]],
+                      [-r[1], r[0], 0.0]])
+        return np.vstack([Jp - S @ Jw, Jw])
 
     def pose_and_jacobian(self, q):
         # One FK pass instead of two: pose() and jacobian() both need the same
         # kinematics, and the IK loop calls both every iteration.
         d = self._fk(np.asarray(q, float))
-        p = np.array(d.xpos[self.tool], float)
-        R = np.array(d.xmat[self.tool], float).reshape(3, 3)
-        self._mj.mj_jacBody(self.model, d, self._jacp, self._jacr, self.tool)
-        J = np.vstack([self._jacp[:, :self._n], self._jacr[:, :self._n]])
-        return p, R, J
+        p, R, r = self._tcp(d)
+        Jp, Jw = self._jac_body(d)
+        S = np.array([[0.0, -r[2], r[1]],
+                      [r[2], 0.0, -r[0]],
+                      [-r[1], r[0], 0.0]])
+        return p, R, np.vstack([Jp - S @ Jw, Jw])
 
     # DYNAMICS
     def _forward_dynamics(self, q):

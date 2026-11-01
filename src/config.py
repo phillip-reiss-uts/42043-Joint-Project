@@ -48,6 +48,9 @@ PARK_POS = [5.0, 5.0, -0.6]
 # is 114 mm below the flange, so CAM_POS_z = 0.114 m.
 CAM_POS = (0.046, -0.0080, 0.114)
 CAM_QUAT = (0.008026, -0.695654, -0.718261, -0.010057)
+# Simulated camera vertical FOV, chosen to match the D435i depth stream's
+# ~64 deg vertical field at 320x240. Hardware reads its own intrinsics.
+SIM_CAM_FOVY = 64.2
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
 MESH_POS = CAM_POS
 
@@ -99,7 +102,10 @@ SYNC_DT = 0.016
 SYNC_STEPS = 8                            # steps between syncs
 
 # ---- perception ----------------------------------------------------------
-SELF_FILTER = 0.20
+# Near clip for the depth cloud, metres from the lens. It must stay below the
+# lens-to-cube-top distance: at PICK_Z that is ~0.106 m, and the old 0.20
+# removed the top face exactly when the camera moved over the cube.
+SELF_FILTER = 0.05
 SURFACE_BAND = 0.005
 DEPTH_MAX = 5.0
 # Lowest height above the tabletop that counts as object. Raised above the
@@ -117,7 +123,8 @@ PERCEPTION_LOG_S = 0.5
 ENCODER_NOISE = 1.0e-4                    # rad, measurement noise (R)
 TAU_NOISE = 0.30                          # N.m, process noise
 OBSERVER_RELIN = 100                      # steps between re-linearisations
-OBSERVER_SUBSTEPS = 4                     # integration sub-steps/timestep
+OBSERVER_SUBSTEPS = 4                     # minimum integration sub-steps
+OBSERVER_MAX_SUBSTEP = 5.0e-4             # s; cap the observer's Euler step
 
 # Simulated calibration board geometry (built by model_loader).
 CALIB_MARKERS = 7                         # markers per row and column (7x7)
@@ -140,10 +147,10 @@ LQR_R = 5.0e-2                            # command cost (rad^2); sets gain leve
 LQR_GAIN_SCALE = 0.25
 
 # ---- grasp / place -------------------------------------------------------
-# The pick/place height: TOOL FLANGE above the tabletop, METRES. THIS IS THE
-# ONE NUMBER TO EDIT. Every grasp, descent and put-down in both paths reads it.
-# 250 mm keeps the pads clear of the table for the measured ~242 mm tool length.
-PICK_Z_ABOVE_TABLE = 0.250
+# The pick/place height: TOOL FLANGE above the tabletop, METRES.
+# 236 mm puts the simulated pad bottom on the cube top; the old 250 mm left the
+# pads ~14 mm high. The same value drives the place, so the two cannot disagree.
+PICK_Z_ABOVE_TABLE = 0.236
 # World-space tool z for the grasp (flange frame, metres).
 PICK_Z = TABLE_HEIGHT + PICK_Z_ABOVE_TABLE
 

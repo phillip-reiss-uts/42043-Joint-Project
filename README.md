@@ -21,6 +21,14 @@ Simulation keys: `6` Spawns a cube in a random position and orientation,
 `7` pick up / put down (toggle), `8` pause, `9` reset,
 `.` Cycles object speed, from 0 to 45 mm /s. On macOS use `mjpython main.py`.
 
+The simulation control loop now uses the hardware's 8 ms period: four 2 ms
+physics substeps per control cycle. Arm moves, the observer and the moving
+target all advance at 125 Hz, not at the 500 Hz physics rate.
+
+A static pick uses the raw detection centre; the Kalman lead is reserved for
+tracking a moving cube. This avoids the stationary-target lag that otherwise
+prevents the grasp from converging.
+
 Hardware keys: `p` pick up / put down (toggle), `t` start/stop tracking,
 `space` pause / resume, `h` go to home, `s` status, `q` quit. Both front-ends
 print their keys at startup.
@@ -113,7 +121,12 @@ tries a faster candidate. It writes `UR_SPEED_SCALE` only with `--write`.
 
 `CAM_POS`/`CAM_QUAT` in `src/config.py` are the current measured mount. Every
 detected centre inherits any error directly, so recalibrate on a new cell or
-after moving the bracket.
+after moving the bracket. The simulated wrist camera uses `SIM_CAM_FOVY` to
+match the D435i depth field of view; hardware reads its own intrinsics.
+
+`SELF_FILTER` is the near clip from the lens. Keep it below the lens-to-cube-top
+distance at `PICK_Z` (~0.106 m); 0.20 m removes the top face as the camera
+moves over the cube.
 
 `tools/calibrate_mount.py` consolidates the measurements: table height, camera
 height, translation, angle, pick height and grip width, plus the multi-position

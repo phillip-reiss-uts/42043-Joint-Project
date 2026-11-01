@@ -109,7 +109,8 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     p0 = np.array(reg.pose(data, idx), float)
 
     world = SimObjectWorld(model, data, camera, cam_id, reg)
-    mover = TM.TargetMover(model, data, reg, idx, rng=rng)
+    mover = TM.TargetMover(model, data, reg, idx, rng=rng,
+                           dt=backend.dt)
     world.set_mover(mover)
     sv = PBVSServo(model, data, arm, world, smooth=1.0, use_kf=use_kf,
                    perceive_every=SERVO_PERCEIVE_EVERY,
@@ -422,7 +423,7 @@ def main():
     ap.add_argument('--seed0', type=int, default=0)
     ap.add_argument('--band', default='off',
                     help="off|slow|medium|fast, or an index")
-    ap.add_argument('--kf', default='on', help='on|off|both')
+    ap.add_argument('--kf', default='off', help='on|off|both')
     ap.add_argument('--move-s', type=float, default=8.0,
                     help='seconds to let the object walk before stopping it;'
                          ' 0 leaves it moving forever (trial cannot complete)')
