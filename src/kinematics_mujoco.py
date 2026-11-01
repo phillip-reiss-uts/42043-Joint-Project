@@ -51,45 +51,32 @@ class MujocoKinematics(Kinematics):
         mj.mj_comPos(self.model, d)
         return d
 
-    def _tcp(self, d):
-        # The MJCF tool body is gripper/base, TOOL_MOUNT_POS below tool0.
-        # Every caller of this interface (servo, PICK_Z, world.gripper_pose)
-        # speaks TCP, so expose tool0, not the body origin.
+    def pose(self, q):
+        d = self._fk(np.asarray(q, float))
         p = np.array(d.xpos[self.tool], float)
         R = np.array(d.xmat[self.tool], float).reshape(3, 3)
-        r = R @ np.asarray(TOOL_MOUNT_POS, float)
-        return p + r, R, r
-
-    def pose(self, q):
-        p, R, _ = self._tcp(self._fk(np.asarray(q, float)))
         return p, R
-
-    def _jac_body(self, d):
-        self._mj.mj_jacBody(self.model, d, self._jacp, self._jacr, self.tool)
-        return (self._jacp[:, :self._n].copy(),
-                self._jacr[:, :self._n].copy())
 
     def jacobian(self, q):
         d = self._fk(np.asarray(q, float))
-        Jp, Jw = self._jac_body(d)
-        _, _, r = self._tcp(d)
-        # velocity of a point r from the body origin: Jp + w x r
-        #                                     = Jp - skew(r) @ Jw
-        S = np.array([[0.0, -r[2], r[1]],
-                      [r[2], 0.0, -r[0]],
-                      [-r[1], r[0], 0.0]])
-        return np.vstack([Jp - S @ Jw, Jw])
+        self._mj.mj_jacBody(self.model, d, self._jacp, self._jacr, self.tool)
+        return np.vstack([self._jacp[:, :self._n], self._jacr[:, :self._n]])
 
     def pose_and_jacobian(self, q):
         # One FK pass instead of two: pose() and jacobian() both need the same
         # kinematics, and the IK loop calls both every iteration.
         d = self._fk(np.asarray(q, float))
-        p, R, r = self._tcp(d)
-        Jp, Jw = self._jac_body(d)
-        S = np.array([[0.0, -r[2], r[1]],
-                      [r[2], 0.0, -r[0]],
-                      [-r[1], r[0], 0.0]])
-        return p, R, np.vstack([Jp - S @ Jw, Jw])
+        p = np.array(d.xpos[self.tool], float)
+        R = np.array(d.xmat[self.tool], float).reshape(3, 3)
+        self._mj.mj_jacBody(self.model, d, self._jacp, self._jacr, self.tool)
+        J = np.vstack([self._jacp[:, :self._n], self._jacr[:, :self._n]])
+        return p, R, J
+
+    def tool_offset(self):
+        # FK is the gripper/base body; the TCP is TOOL_MOUNT_POS away. The
+        # controller layer works in TCP, so Arm.solve_ik removes this offset
+        # from a TCP target before calling pose/jacobian.
+        return np.asarray(TOOL_MOUNT_POS, float)
 
     # DYNAMICS
     def _forward_dynamics(self, q):

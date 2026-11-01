@@ -140,10 +140,10 @@ def _put_down(arm, xy=None):
     else:
         tx, ty = float(xy[0]), float(xy[1])
     release_z = PICK_Z
-    q_high = arm.solve_ik([tx, ty, release_z + APPROACH_Z],
-                          arm.backend.joint_positions(), R_target=R)
+    q_high = arm.solve_ik_tcp([tx, ty, release_z + APPROACH_Z],
+                              arm.backend.joint_positions(), R_target=R)
     arm.move(q_high, GRIP_CLOSED, rate=RAPID)
-    q_low = arm.solve_ik([tx, ty, release_z], q_high, R_target=R)
+    q_low = arm.solve_ik_tcp([tx, ty, release_z], q_high, R_target=R)
     arm.move(q_low, GRIP_CLOSED, rate=FEED)
 
     def settle(q, seconds=0.30):
@@ -157,8 +157,13 @@ def _put_down(arm, xy=None):
     # closes on the estimate the same way and is the reference: whatever
     # residual THIS cell leaves, the put-down is now at the grasp's height.
     p_now, _ = arm.kin.pose(arm.backend.joint_positions())
-    print('[HW] put-down opened at %+.1f mm from the grasp height'
-          % ((float(p_now[2]) - release_z) * 1e3))
+    miss = float(np.linalg.norm(
+        np.asarray(p_now, float) - np.array([tx, ty, release_z], float)))
+    print('[HW] put-down at %+.1f mm from the grasp height, %.1f mm from target'
+          % ((float(p_now[2]) - release_z) * 1e3, miss * 1e3))
+    if miss > 0.010:
+        print('[HW] release NOT reached -- keeping the cube in the jaws')
+        return False
 
     arm.open_gripper(STEPS_RELEASE)
     return True
