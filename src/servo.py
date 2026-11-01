@@ -218,9 +218,9 @@ class PBVSServo:
         self.viewer = None
 
     def z_floor(self):
-        # Lowest TCP height the descent may command: the pick height. PICK_Z is
-        # where the jaws sit on the object, so anything lower drives them into
-        # the table.
+        # The z gate is the pick height itself: PICK_Z is the flange height
+        # that places the pads on the object. No separate tool-length
+        # clearance is applied.
         return PICK_Z
 
     def gate_report(self):
@@ -370,9 +370,8 @@ class PBVSServo:
         # z_tcp is an absolute tool0 height: the caller passes HOVER_TOOL0_Z
         # for hover and PICK_Z for the grasp. The estimate does not set it.
         z_want = float(z_tcp)
-        # CONTACT GATE. The lowest part of the gripper is the pad bottom, well
-        # below gripper/base, so a grasp commanded too low sends the pads through
-        # the table. Clamp the commanded height and remember that we did: the
+        # CONTACT GATE. PICK_Z is the only z floor: a command below it is
+        # clamped, equal to it is the grasp. Remember that we clamped so the
         # callers report it and retreat rather than driving on.
         z_floor = self.z_floor()
         if z_want < z_floor:

@@ -47,6 +47,7 @@ from src.config import (
 )
 from src.kinematics_ur import URKinematics
 from src.pick import pick_and_hold
+from src.servo import PBVSServo
 from src.task import Commands, TaskStateMachine, TRACK, WAIT
 from src.world_real import (RealObjectWorld, RealSenseSource)
 
@@ -125,8 +126,8 @@ def _camera_mount():
     return T
 
 
-def _put_down(arm):
-    # Lower the held cube to the table directly beneath the gripper and release.
+def _put_down(arm, xy=None):
+    # Lower the held cube to the table at the xy it was picked from and release.
     #
     # The descent matches the GRASP: PICK_Z, the one pick/place height, applied
     # in the FLANGE frame like every other height in config.
@@ -134,11 +135,15 @@ def _put_down(arm):
     # See put_cube_down in pick_place for the simulation twin (that one also
     # clamps into the spawn region, which has no meaning here).
     p, R = arm.kin.pose(arm.backend.joint_positions())
+    if xy is None:
+        tx, ty = p[0], p[1]
+    else:
+        tx, ty = float(xy[0]), float(xy[1])
     release_z = PICK_Z
-    q_high = arm.solve_ik([p[0], p[1], release_z + APPROACH_Z],
+    q_high = arm.solve_ik([tx, ty, release_z + APPROACH_Z],
                           arm.backend.joint_positions(), R_target=R)
     arm.move(q_high, GRIP_CLOSED, rate=RAPID)
-    q_low = arm.solve_ik([p[0], p[1], release_z], q_high, R_target=R)
+    q_low = arm.solve_ik([tx, ty, release_z], q_high, R_target=R)
     arm.move(q_low, GRIP_CLOSED, rate=FEED)
 
     def settle(q, seconds=0.30):
@@ -249,6 +254,9 @@ def main(argv=None):
 
     def go_home():
         arm.move(cfg.UR_HOME_Q, GRIP_OPEN, rate=RAPID)
+        # The tracker is created below; this closure only runs after that.
+        # Its last command belongs to the pose we just left.
+        tracker.reset_command()
 
     def place_object():
         # Nothing is spawned on hardware: the operator puts the cube down.
@@ -265,21 +273,40 @@ def main(argv=None):
         nonlocal held_q
         held_q = np.array(backend.joint_positions(), float)
 
+    # ONE tracker for the whole session, not one per chunk. A new servo resets
+    # _q_cmd, the KF, yaw_est and best_span every UR_TRACK_CHUNK, which makes the
+    # arm re-seed its command from wherever it happens to be and loses the
+    # velocity/yaw estimates the tracking loop depends on.
+    #
+    # The caps and cadence are explicit here because PBVSServo's defaults are
+    # the simulator's: v_max=inf and perceive_every=15. The sim tracker passes
+    # these values, so the hardware path must too or the two do different laws.
+    tracker = PBVSServo(
+        None, None, arm, world,
+        perceive_every=cfg.SERVO_PERCEIVE_EVERY,
+        v_max=cfg.SERVO_V_TRANSIT,
+        v_descent=cfg.SERVO_V_DESCENT,
+        occlude_ratio=cfg.SERVO_OCCLUDE_RATIO,
+        occlude_recover=cfg.SERVO_OCCLUDE_RECOVER,
+        occlude_fails=cfg.SERVO_OCCLUDE_FAILS,
+        retreat_step=cfg.SERVO_RETREAT_STEP,
+        retreat_max=cfg.SERVO_RETREAT_MAX,
+        retreat_v=cfg.SERVO_RETREAT_V)
+
     def _reacquire():
-        # One look for a lost target. A look rather than a sweep: the camera is
-        # on the arm.
-        return bool(world.refresh())
+        # One look for a lost target. observe() folds it into p_est/KF/yaw;
+        # world.refresh() alone only updates the UI cache and leaves the servo
+        # chasing its previous estimate.
+        return bool(tracker.observe())
 
     def track_step():
         # One closed-loop look-and-follow chunk, called from TRACK.
         #
         # track and search are both required: the servo's lost-target branch is
         # gated on them.
-        from src.servo import PBVSServo
-        sv = PBVSServo(None, None, arm, world)
-        sv.servo(cfg.HOVER_TOOL0_Z, max_iters=cfg.UR_TRACK_CHUNK,
-                 track=True, search=_reacquire)
-        if sv.stage_obs == 0:
+        tracker.servo(cfg.HOVER_TOOL0_Z, max_iters=cfg.UR_TRACK_CHUNK,
+                      track=True, search=_reacquire)
+        if tracker.stage_obs == 0:
             print('[TRACK] chunk ended with no fresh look -- the cube is out of '
                   'view; the arm is held where it stopped')
         _relatch()
@@ -287,14 +314,26 @@ def main(argv=None):
     def pick_object():
         if not world.refresh():
             return False
-        return pick_and_hold(None, None, arm, world, 0, cfg.UR_HOME_Q)
+        ok = pick_and_hold(None, None, arm, world, 0, cfg.UR_HOME_Q)
+        # The pick moved the arm to home; do not resume tracking from the
+        # pre-pick command vector.
+        tracker.reset_command()
+        return ok
 
     task = TaskStateMachine(
         commands=cmd, say=say, at_home=at_home, go_home=go_home,
         place_object=place_object, track_step=track_step,
         pick_object=pick_object, running=lambda: True,
         arm=arm, world=world)
-    task.on_put_object = lambda: _put_down(arm)
+
+    def put_object():
+        ok = _put_down(arm)
+        # The put-down left the arm low over the table; the tracker's last
+        # command is from the hover before the pick.
+        tracker.reset_command()
+        return ok
+
+    task.on_put_object = put_object
 
     # START IN WAIT, AND STAY THERE. The arm holds the home pose until an
     # explicit command, but the camera still looks once a second (see the loop
@@ -325,6 +364,7 @@ def main(argv=None):
             break
         if key in ('h', 'H'):
             arm.move(cfg.UR_HOME_Q, GRIP_OPEN, rate=RAPID)
+            tracker.reset_command()
             held_q = np.array(backend.joint_positions(), float)
             grip = GRIP_OPEN
         elif key in ('p', 'P'):
@@ -395,6 +435,7 @@ def main(argv=None):
                     task.enter_track('object in view, tracking released')
                 else:
                     print('[HW] no cube in view -- place one to track')
+            tracker.reset_command()
 
         # Advance the policy. This is where a pick runs; it blocks until the
         # grasp (or the put-down) finishes, streaming servoj targets itself.

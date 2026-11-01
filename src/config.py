@@ -83,10 +83,9 @@ RAPID_MIN_STEPS = 200
 FEED_MIN_STEPS = 400
 
 # ---- contact guard for the descent ---------------------------------------
-# The descent may never command gripper/base nearer the tabletop than this, so
-# a grasp height that is too low stops the arm instead of driving through the
-# table. A floor, not a model of the tool: the tool's own length is not used.
-TABLE_CONTACT_CLEARANCE = 0.002
+# PICK_Z is the only z floor. A command below it is refused; equal to it is the
+# grasp. There is deliberately no separate tool-length clearance constant.
+
 # wrist_3_link -> gripper base. +z points DOWN the approach at R_DOWN, so the
 # flange->gripper-top distance is POSITIVE. UNMEASURED; needed by the MODEL and
 # by the gripper-base conversion, not by calibration.
@@ -139,7 +138,8 @@ LQR_R = 5.0e-2                            # command cost (rad^2); sets gain leve
 # ---- grasp / place -------------------------------------------------------
 # The pick/place height: TOOL FLANGE above the tabletop, METRES. THIS IS THE
 # ONE NUMBER TO EDIT. Every grasp, descent and put-down in both paths reads it.
-PICK_Z_ABOVE_TABLE = 0.220
+# 250 mm keeps the pads clear of the table for the measured ~242 mm tool length.
+PICK_Z_ABOVE_TABLE = 0.250
 # World-space tool z for the grasp (flange frame, metres).
 PICK_Z = TABLE_HEIGHT + PICK_Z_ABOVE_TABLE
 
