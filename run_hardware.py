@@ -150,8 +150,7 @@ def _put_down(arm, xy=None):
         # move() returns when the last target is SENT; the arm is still moving.
         # Opening there releases the cube in mid-air, which is the "drop".
         for _ in range(max(1, int(seconds / arm.backend.dt))):
-            arm.backend.command(q, GRIP_CLOSED)
-            arm.backend.step()
+            arm.command_step(q, GRIP_CLOSED)
 
     settle(q_low)
     # Report the measured release height rather than correcting it. The grasp
@@ -176,7 +175,15 @@ def main(argv=None):
                          'last camera look into DIR. OFF by default -- no frame '
                          'is cached and src/liveview is never imported unless '
                          'this is given')
+    ap.add_argument('--servo-path', choices=('state-space', 'raw'),
+                    default='state-space',
+                    help='state-space: ArmObserver + LQR around the PBVS joint '
+                         'reference. raw: the original direct command path.')
+    ap.add_argument('--raw-servo', action='store_true',
+                    help='alias for --servo-path raw')
     args = ap.parse_args(argv)
+    if args.raw_servo:
+        args.servo_path = 'raw'
 
     print()
     print('=' * 74)
@@ -188,6 +195,7 @@ def main(argv=None):
     print('  hover       : tool0 %.3f m  camera %.3f m above table'
           % (cfg.HOVER_TOOL0_Z, cfg.CAM_HOVER_HEIGHT))
     print('  speed scale : %.3f' % cfg.UR_SPEED_SCALE)
+    print('  servo path  : %s' % args.servo_path)
     print('  the pendant stop is the only e-stop; speed starts at FEED')
     # Say the perception floor out loud: it is the setting most likely to make
     # the cube vanish from the log, and it is invisible otherwise.
@@ -217,6 +225,22 @@ def main(argv=None):
                        tool_quat=(1.0, 0.0, 0.0, 0.0),
                        root_yaw=cfg.UR_ROOT_YAW)
     arm = Arm(None, None, kinematics=kin, backend=backend)
+
+    if args.servo_path == 'state-space':
+        from src.observer import ArmObserver
+        from src.controller import (Encoder, JointController, LQRController,
+                                    lqr_weights)
+        q_now = np.asarray(backend.joint_positions(), float)
+        observer = ArmObserver(
+            None, None, q_now, dt=cfg.UR_CYCLE_DT, kin=kin,
+            lqr_weights=(lqr_weights() if cfg.USE_LQR else None))
+        ctl = LQRController(observer) if cfg.USE_LQR else JointController()
+        arm.attach_observer(observer, controller=ctl,
+                            encoder=Encoder(noisy=False))
+        print('[HW] state-space: observer attached; UR_SERVO_KP/KV are '
+              'placeholders -- validate at low speed')
+    else:
+        print('[HW] raw servo path: no observer/LQR')
 
     try:
         depth = RealSenseSource()
@@ -365,8 +389,8 @@ def main(argv=None):
     while True:
         # Keep the servoj stream alive: a real controller expects a command
         # every cycle, unlike the simulator where stepping is an internal call.
-        backend.command(held_q, grip)
-        backend.step()
+        # command_step applies the state-space correction when attached.
+        arm.command_step(held_q, grip)
 
         key = _poll_key()
         if key in ('q', 'Q', '\x1b'):

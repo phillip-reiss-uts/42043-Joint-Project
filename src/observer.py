@@ -52,7 +52,8 @@ class ArmObserver:
 
     def __init__(self, model, data, q0, sigma_q=ENCODER_NOISE,
                  sigma_tau=TAU_NOISE, relin_steps=OBSERVER_RELIN,
-                 substeps=OBSERVER_SUBSTEPS, lqr_weights=None, kin=None):
+                 substeps=OBSERVER_SUBSTEPS, lqr_weights=None, kin=None,
+                 dt=None):
         self.model = model
         self.data = data
         self.n = ARM_DOF
@@ -61,7 +62,11 @@ class ArmObserver:
         self.sigma_tau = sigma_tau
         self.relin_steps = relin_steps
         self.substeps = substeps
-        self.dt = model.opt.timestep
+        if dt is None:
+            if model is None:
+                raise ValueError('ArmObserver needs dt= when there is no model')
+            dt = model.opt.timestep
+        self.dt = float(dt)
         self.lqr_weights = lqr_weights
 
         # Plant model from the injected provider (src/kinematics.py), so the

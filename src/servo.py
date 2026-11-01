@@ -781,22 +781,14 @@ class PBVSServo:
             dq = self.joint_step(err_p, err_o, v_max=v_max)
             q_cmd = q_cmd + dq
             self._q_cmd = np.array(q_cmd, float)   # persists across calls
-            # Command + tick through the arm's backend, the same path Arm.move
-            # uses. The servo no longer needs to know what a control cycle is.
-            self.arm.backend.command(q_cmd, GRIP_OPEN)
-            # Advance the world by exactly one physics step, alongside the tick.
-            # This must happen per physics step, NOT per render sync: the
-            # servo steps physics every iteration but only syncs every
-            # SYNC_STEPS, so driving the object from the sync would move it at
-            # 1/SYNC_STEPS of its real speed. The world owns the motion; the
-            # robot loop only gives it the tick.
-            self._step_world()
-
-            self.arm.backend.step()
+            # Command + tick through the arm. On the state-space path
+            # command_step applies the observer/LQR correction; with no
+            # observer attached it is the original raw command.
+            self.arm.command_step(q_cmd, GRIP_OPEN,
+                                  pre_step=self._step_world)
 
             while estop is not None and estop():
-                self.arm.backend.command(q_cmd, GRIP_OPEN)
-                self.arm.backend.step()
+                self.arm.command_step(q_cmd, GRIP_OPEN)
                 if viewer is not None:
                     viewer.sync()
 
@@ -998,8 +990,7 @@ class PBVSServo:
         # reads that lag as a short descent (13 mm on the cell), so hold the
         # final target for a moment before asking where the tool is.
         for _ in range(max(1, int(0.30 / self.arm.backend.dt))):
-            self.arm.backend.command(q_goal, GRIP_OPEN)
-            self.arm.backend.step()
+            self.arm.command_step(q_goal, GRIP_OPEN)
         self.descent_short = 0.0
         p_end, _ = self.world.gripper_pose()
         self.descent_short = float(np.linalg.norm(

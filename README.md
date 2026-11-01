@@ -15,13 +15,19 @@ MuJoCo and on the real robot from the same robot code.
     python main.py                # simulation (default)
     python main.py --lightweight  # simulation, no camera panels (older machines)
     python main.py --hardware --ip 192.168.0.194
+    python main.py --hardware --ip 192.168.0.194 --raw-servo  # original direct-servo path
 
 Simulation keys: `6` Spawns a cube in a random position and orientation,
 `7` pick up / put down (toggle), `8` pause, `9` reset,
 `.` Cycles object speed, from 0 to 45 mm /s. On macOS use `mjpython main.py`.
 
-Hardware keys: `p` pick up / put down (toggle), `space` pause / resume, `h` go to
-home, `s` status, `q` quit. Both front-ends print their keys at startup.
+Hardware keys: `p` pick up / put down (toggle), `t` start/stop tracking,
+`space` pause / resume, `h` go to home, `s` status, `q` quit. Both front-ends
+print their keys at startup.
+
+Hardware defaults to the state-space joint path (`ArmObserver` + LQR around the
+PBVS joint reference). `--raw-servo` restores the original direct command path;
+use it if the observer has to be removed at the cell.
 
 The two sets differ because the scene keys have nothing to act on: you place the
 cube by hand instead of spawning it, and there is no scene reset. After an
@@ -61,13 +67,27 @@ it draws the frame perception already took, so it cannot consume a frame or dela
 a command. There is deliberately no live window: this runs over SSH, and a draw
 inside the servo loop would starve the 8 ms servoj stream.
 
+## Speed calibration
+
+Hardware servoing speed is characterised before a fast run:
+
+    python tools/calibrate_speed.py --stage low     # pendant 10%, safety checks
+    python tools/calibrate_speed.py --stage full    # pendant 100%, find the scale
+
+The tool has an independent hard command limit, joint-speed limit, path box,
+following-error limit and timeout. It stops at the first failure and never
+tries a faster candidate. It writes `UR_SPEED_SCALE` only with `--write`.
+
 ## Camera calibration
 
-`CAM_POS`/`CAM_QUAT` in `src/config.py` are the simulator's bracket, not a
-measurement. Every detected centre inherits that error directly, so calibrate
-before a hardware run.
+`CAM_POS`/`CAM_QUAT` in `src/config.py` are the current measured mount. Every
+detected centre inherits any error directly, so recalibrate on a new cell or
+after moving the bracket.
 
-The route that works on this cell is a direct offset loop against the tool:
+`tools/calibrate_mount.py` consolidates the measurements: table height, camera
+height, translation, angle, pick height and grip width, plus the multi-position
+translation and wrist-jog checks. The manual offset loop is the fallback the
+tool is built around:
 
 1. Jog the tool until it is centred on the cube. That TCP xy is the truth in
    the base frame.

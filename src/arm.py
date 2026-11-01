@@ -145,6 +145,31 @@ class Arm:
         if self.observer is not None:
             self.observer.update(self.encoder.read(self.backend.joint_positions()))
 
+    def command_step(self, q_ref, grip, qd_ref=None, pre_step=None):
+        # Close the observer/controller loop around an externally generated
+        # joint reference. Used by the PBVS servo on the state-space path.
+        # With no observer attached this is exactly the old raw command path.
+        q_ref = np.asarray(q_ref, float).copy()
+        if self.observer is not None:
+            if qd_ref is None:
+                qd_ref = np.zeros(ARM_DOF)
+            ctrl_arm = self.controller.command(q_ref[:ARM_DOF],
+                                               np.asarray(qd_ref, float)[:ARM_DOF],
+                                               self.observer.xhat)
+            self.observer.predict(ctrl_arm)
+            q_cmd = q_ref.copy()
+            q_cmd[:ARM_DOF] = ctrl_arm
+        else:
+            q_cmd = q_ref
+
+        self._last_cmd = np.array(q_cmd, float)
+        self.backend.command(q_cmd, grip)
+        if pre_step is not None:
+            pre_step()
+        self.backend.step()
+        if self.observer is not None:
+            self.observer.update(self.encoder.read(self.backend.joint_positions()))
+
     # IK
     def solve_ik(self, target, q_init, R_target=R_DOWN, iters=600,
                  gain_p=0.5, gain_o=0.5, damp=1e-2, max_joint=3.0):
