@@ -179,12 +179,24 @@ def check_ur_rtde_api(mods):
 
 
 # ------------------------------------------------------- 3+4. project tests
+def _write_log(text):
+    # Full child output goes to the active preflight log only. The terminal
+    # still shows the short tail below.
+    try:
+        from src.run_log import write_log
+        write_log(text)
+    except Exception:
+        pass
+
+
 def run_test(label, script, extra_args=()):
     path = os.path.join(os.getcwd(), script)
     if not os.path.exists(path):
         return record(label, False, "missing file: %s" % script)
     proc = subprocess.run([sys.executable, script, *extra_args],
                           capture_output=True, text=True)
+    _write_log('\n--- %s stdout ---\n%s\n--- %s stderr ---\n%s\n'
+               % (script, proc.stdout or '', script, proc.stderr or ''))
     ok = proc.returncode == 0
     record(label, ok, "exit %d" % proc.returncode)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip().splitlines()
@@ -295,6 +307,10 @@ def main(argv=None):
     os.chdir(repo)
     if repo not in sys.path:
         sys.path.insert(0, repo)
+
+    from src.run_log import start_run_log
+    start_run_log(argv if argv is not None else sys.argv[1:], repo,
+                  tag='preflight')
 
     print()
     print("PREFLIGHT -- cell stack, no hardware")

@@ -11,6 +11,10 @@ import os
 import sys
 
 
+_LOG_FH = None
+_LOG_PATH = None
+
+
 class _Tee:
     def __init__(self, terminal, log):
         self._terminal = terminal
@@ -35,6 +39,25 @@ class _Tee:
         return getattr(self._terminal, 'encoding', 'utf-8')
 
 
+def write_log(text):
+    """Write text to the active run log only, not the terminal.
+
+    Used by preflight to preserve the full child-test output while the
+    terminal still shows only the short tail.
+    """
+    if _LOG_FH is None:
+        return
+    try:
+        _LOG_FH.write(text)
+        _LOG_FH.flush()
+    except Exception:
+        pass
+
+
+def log_path():
+    return _LOG_PATH
+
+
 def start_run_log(args, root, tag='run'):
     """Start logging to run_logs/<tag>_YYYY-MM-DD_HHMMSS.txt.
 
@@ -51,6 +74,10 @@ def start_run_log(args, root, tag='run'):
     except Exception as exc:
         print('[LOG] could not open run log: %s' % exc)
         return None
+
+    global _LOG_FH, _LOG_PATH
+    _LOG_FH = fh
+    _LOG_PATH = path
 
     fh.write('=' * 78 + '\n')
     fh.write('RUN LOG  %s\n' % datetime.datetime.now().isoformat(timespec='seconds'))
@@ -76,6 +103,7 @@ def start_run_log(args, root, tag='run'):
             sys.stderr = old_err
         except Exception:
             pass
+        global _LOG_FH, _LOG_PATH
         try:
             fh.write('\n[LOG] closed %s\n'
                      % datetime.datetime.now().isoformat(timespec='seconds'))
@@ -83,6 +111,8 @@ def start_run_log(args, root, tag='run'):
             fh.close()
         except Exception:
             pass
+        _LOG_FH = None
+        _LOG_PATH = None
 
     atexit.register(close)
     print('[LOG] writing terminal output to %s' % path)

@@ -17,6 +17,7 @@ import csv
 import io
 import contextlib
 import os
+import sys
 import time
 
 import numpy as np
@@ -27,6 +28,7 @@ import matplotlib.pyplot as plt
 import mujoco
 
 from src.model_loader import load_robot_model
+from src.run_log import start_run_log
 from src.camera import RGBDCamera
 from src.camera import find_camera
 from src.arm import Arm
@@ -433,6 +435,8 @@ def main():
                          'is exercised. e.g. --sabotage 60')
     ap.add_argument('--outdir', default='test_output')
     args = ap.parse_args()
+    start_run_log(sys.argv[1:], os.path.dirname(os.path.abspath(__file__)),
+                  tag='run_tests')
 
     names = TM.band_names()
     band = int(args.band) if args.band.isdigit() else names.index(args.band)
