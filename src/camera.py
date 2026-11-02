@@ -18,23 +18,6 @@ import numpy as np
 
 def world_points_from_depth(z, K, R_wc, p_cam_w, near_min, near_max, z_min,
                             xy_bounds=None):
-    # THE ONE implementation of "which depth pixels are valid, and where they are
-    # in the base frame".
-    #
-    # Both front ends call this: RGBDCamera.surface_points (a MuJoCo camera in
-    # simulation) and DepthWorld.deproject (a RealSense or fake source on
-    # hardware). They used to carry separate copies of the same maths, which is
-    # exactly how a validity rule added to one path silently failed to reach the
-    # other -- the robot base was filtered out of the hardware detections and
-    # still clustered in the simulation.
-    #
-    # z is depth in METRES. R_wc / p_cam_w are the camera pose in the base frame.
-    # xy_bounds, when given, is (centre_x, centre_y, half_x, half_y): the only
-    # region where a graspable object can be -- the measured tabletop. Anything
-    # outside it is the base, the column, the arm, the bench edge or the floor.
-    #
-    # Masking runs on (H,W) arrays and only survivors are lifted to 3D: the full
-    # cloud is ~300k points to keep ~1.6% of them.
     H, W = z.shape
     fx, fy = K[0, 0], K[1, 1]
     cx, cy = K[0, 2], K[1, 2]

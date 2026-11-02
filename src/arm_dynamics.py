@@ -317,18 +317,6 @@ class ArmDynamics:
 
     # MASS MATRIX
     def mass_matrix(self, q):
-        # Composite rigid body, direct form:
-        #
-        #   M[i,j] = sum over links k >= max(i,j) of
-        #            z_i . ( I_k z_j + r_ki x (m_k (z_j x r_kj)) )
-        #
-        # where r_kj = com_k - p_j. Only links distal to BOTH joints
-        # contribute: a link upstream of either joint is unmoved by that joint.
-        #
-        # An earlier version projected a wrench accumulated at joint j onto
-        # joint i by shifting its moment arm. That shift double-counts the
-        # lever arm and gets the sign of M[0,1] wrong, while leaving every
-        # diagonal correct -- which is exactly what made it hard to spot.
         f = self.frames(q)
         n = self.n
         M = np.zeros((n, n))

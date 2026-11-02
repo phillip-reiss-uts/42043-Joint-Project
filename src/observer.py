@@ -68,9 +68,6 @@ class ArmObserver:
                 raise ValueError('ArmObserver needs dt= when there is no model')
             dt = model.opt.timestep
         self.dt = float(dt)
-        # Keep the Euler integration stable when the control period is 8 ms:
-        # the old fixed four substeps left a 2 ms step, which diverged for the
-        # exact Kp/Kv model even with no command delay.
         self.substeps = max(self.substeps,
                             int(np.ceil(self.dt / OBSERVER_MAX_SUBSTEP)))
         self.lqr_weights = lqr_weights

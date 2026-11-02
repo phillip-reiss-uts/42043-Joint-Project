@@ -680,21 +680,6 @@ def step_angle(cell, session, snaps, log):
         print('   need at least 3 poses, got %d -- nothing fitted' % len(pts))
         return
 
-    # The cube's position in the BASE frame is one point. From the mount
-    # (c, R): X = p_tool + R_tool (c + R p_cam), with c from step 3. Fit R, the
-    # camera-to-flange rotation, by making every pose agree on X.
-    #
-    # The camera origin must be in here. An earlier version folded the point
-    # straight into the tool frame and dropped p_cam_w, which leaves the tool's
-    # own translation (the 5 mm nudges) in the residual; it then "explained"
-    # 20 mm and a 60 deg wrist sweep with a 152 deg rotation.
-    # The mount's ROLL about the camera's optical axis is NOT observable from
-    # this data. Rotating the camera about the ray from the lens to the cube
-    # leaves p_cam where it was, so it leaves every X unchanged; a three-axis
-    # fit is free to run 170 deg around that ray and call it a better fit.
-    # Fit only the two tilts, as a correction on the current quat, and hold the
-    # roll. The parameter is a rotation in the CAMERA frame about its own x and
-    # y (z is the optical axis).
     c_fit = np.asarray(session.cam_pos, float)
     R_cur = rot_from_quat(tuple(session.cam_quat))
 

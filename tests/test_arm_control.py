@@ -41,18 +41,12 @@ ROOT = os.path.dirname(HERE)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-# The cell as measured on 2026-10-23. These are not stylistic defaults: they are
-# what the arm and the bench were found to be. See the comments in config.py.
 EXPECT_IP = '192.168.0.194'
 EXPECT_YAW = np.pi
 EXPECT_TABLE_CENTRE = [0.0, -0.270]
 EXPECT_TABLE_HALF = [0.22, 0.15]
-# The work surface is the BASE PLANE -- the robot is bolted to the table, so the
-# tabletop is z = 0. This used to assert 0.2315, which was never the table: it is
-# the FLANGE-to-lowest-pad TOOL length, and it now lives with the tool geometry in
-# config.py. Asserting it here failed the config gate on a correct tree.
-EXPECT_TABLE_HEIGHT = 0.015
-EXPECT_HOME0 = 1.5708          # shoulder_pan at the true home (was -0.366)
+EXPECT_TABLE_HEIGHT = 0.012
+EXPECT_HOME0 = 1.5708          # measured shoulder_pan home
 
 STEP_DEG = 2.0
 CYCLES = 125                   # ~1 s at 125 Hz

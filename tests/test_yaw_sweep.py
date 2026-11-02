@@ -155,7 +155,6 @@ def main():
     check('the estimate actually makes progress round the turn',
           ests[-1] - ests[0] > 300.0, 'moved %.1f deg' % (ests[-1] - ests[0]))
 
-    # ---- 3. the case the old clamp could not represent -------------------
     print('\n3. REGRESSION: A CUBE PARKED ON THE 45-DEG SEAM')
     sv = PBVSServo.__new__(PBVSServo)
     sv.yaw_est = None
@@ -178,8 +177,6 @@ def main():
           float(np.max(np.abs(cmds))) <= 60.0 + 1e-9,
           'max %.1f' % np.max(np.abs(cmds)))
 
-    # A cube sitting at the boundary with measurement noise must latch to ONE
-    # exact branch, not alternate between +60 and the opposite face.
     rng2 = np.random.default_rng(21)
     last = 60.0
     noisy = []

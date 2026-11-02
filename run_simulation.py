@@ -421,9 +421,6 @@ def main(sensor_size=(320, 240), lightweight=False):
         task._track_step = track_step
         task._pick_object = pick_object
         task.on_reset = on_reset
-        # Recovery search after a failed grip: re-home, then look for the
-        # object again. This is the old search, now reachable only from inside
-        # a pick rather than as an operator mode.
         task.on_recover_search = run_search
         # Second press of the pickup key: put the held cube back on the table.
         task.on_put_object = put_down

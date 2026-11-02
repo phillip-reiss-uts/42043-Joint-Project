@@ -181,7 +181,7 @@ def main():
     # to the width under test instead of the configured close width.
     recv = FakeReceive([0.0] * 6)
     ctrl = FakeControl(recv)
-    rg = FakeRG(width=55.0)
+    rg = FakeRG(width=58.0)
     be = URBackend(ctrl, recv,
                    RG2('127.0.0.1', client=rg, call=lambda *a: None),
                    dt=0.008)

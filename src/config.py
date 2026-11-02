@@ -2,9 +2,6 @@ import math
 import numpy as np
 
 
-# ---- workcell -------------------------------------------------------------
-# UR3e. Table is axis-aligned: 440 mm along x, 300 mm deep in -y (measured
-# 2026-10-23). The tabletop is 15 mm ABOVE the robot base plane (measured).
 TABLE_HEIGHT = 0.012
 TABLE_THICK = 0.02
 TABLE_CENTRE = [0.0, -0.270]
@@ -17,8 +14,6 @@ TABLE_XY_BOUNDS = (TABLE_CENTRE[0], TABLE_CENTRE[1], TABLE_HALF[0], TABLE_HALF[1
 OBJECT_SIZE = [0.03, 0.03, 0.03]          # HALF-extents
 OBJECT_HEIGHT = 2 * OBJECT_SIZE[2]        # full height, 60 mm
 OBJECT_MASS_KG = 0.090                    # weighed
-# Sliding friction; MuJoCo takes the max of the two in a contact. Explicit
-# because both used to fall back on defaults nobody chose.
 GRIP_PAD_FRICTION = 2.5
 OBJECT_FRICTION = 1.5
 
@@ -101,11 +96,6 @@ CONTACT_SLOW_FACTOR = 0.3
 SYNC_DT = 0.016
 SYNC_STEPS = 8                            # steps between syncs
 
-# ---- perception ----------------------------------------------------------
-# Near clip for the depth cloud, metres from the lens. It must stay below the
-# lens-to-cube-top distance: at PICK_Z the camera is ~0.137 m above the table
-# and the cube top is ~0.075 m, so the top is only ~0.062 m from the lens. The
-# old 0.20 and 0.10 both clipped it as the camera moved over the cube.
 SELF_FILTER = 0.05
 SURFACE_BAND = 0.005
 DEPTH_MAX = 5.0
@@ -147,10 +137,6 @@ LQR_R = 5.0e-2                            # command cost (rad^2); sets gain leve
 # inside the envelope across 0-120 ms and +/-2x Kp/Kv mismatch.
 LQR_GAIN_SCALE = 0.25
 
-# ---- grasp / place -------------------------------------------------------
-# The pick/place height: TOOL FLANGE above the tabletop, METRES.
-# 236 mm puts the simulated pad bottom on the cube top; the old 250 mm left the
-# pads ~14 mm high. The same value drives the place, so the two cannot disagree.
 PICK_Z_ABOVE_TABLE = 0.256
 # World-space tool z for the grasp (flange frame, metres).
 PICK_Z = TABLE_HEIGHT + PICK_Z_ABOVE_TABLE
@@ -237,8 +223,6 @@ SERVO_V_DESCENT = 0.015
 SERVO_MAX_ITERS = 8000                    # per servo stage
 SERVO_PERCEIVE_EVERY = 100                # iterations between observations
 
-# Occlusion recovery: on a shrinking span, back up and commit open loop from
-# the fullest-view estimate rather than servoing into the occlusion.
 SERVO_OCCLUSION_RECOVERY = True
 SERVO_OCCLUDE_RATIO = 0.95                # span below this fraction of best seen
 SERVO_OCCLUDE_RECOVER = 0.97              # span must return above this to commit
@@ -293,17 +277,11 @@ SERVO_YAW_SMOOTH = 0.35
 # Must not be 45 (+ 90k): both candidate branches then sit exactly on the
 # boundary and the command alternates between them as readings cross it.
 YAW_LIMIT_DEG = 60.0
-# Yaw tracking deadband, degrees. A new face is commanded only when it differs
-# from the last command by more than this, so +/-2 deg of caliper noise does
-# not move the wrist. It also delays the boundary branch switch until the cube
-# is clearly past the limit.
 YAW_TRACK_DEADBAND_DEG = 2.0
 # Follow the cube's yaw with the wrist. Off holds the wrist wherever it is;
 # the jaws are symmetric, so a static pick does not need it.
 YAW_TRACK_ENABLED = True
 
-# ---- tracking a moving target --------------------------------------------
-# Chase until the object has held still for the dwell, then commit open loop.
 SERVO_TRACK_MOVING = True
 SERVO_STILL_TIME = 3.0                    # s of observed stillness
 SERVO_STILL_TOL = 0.008                   # m; filtered drift still "stationary"

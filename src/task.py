@@ -255,8 +255,6 @@ class TaskStateMachine:
             self.enter_wait('table empty')
             return
 
-        # One tracking step. Returns False if the object left the view, in which
-        # case we stay in TRACK and let the front-end's recovery find it again.
         self._track_step()
 
     def _run_pick(self):
@@ -336,9 +334,6 @@ class TaskStateMachine:
             self.enter_wait('after put-down')
 
     def _step_hold(self):
-        # Holding a cube: nothing to track, nothing to do until the pickup key
-        # is pressed again. If we are in HOLD but not holding, the state is
-        # inconsistent -- fall back to waiting rather than guessing.
         if self.cmd.take('place'):
             self.say('SPAWN ignored -- the gripper is holding a cube')
             return
@@ -349,9 +344,6 @@ class TaskStateMachine:
             self.enter_wait('idle while holding nothing')
 
     def _step_pick(self):
-        # PICK is entered and completed within _run_pick; if we are ever seen
-        # here it is because a front-end interrupted mid-pick. Fall back to a
-        # safe, non-moving state.
         self.enter_track('pick interrupted')
 
     def _put_object(self):

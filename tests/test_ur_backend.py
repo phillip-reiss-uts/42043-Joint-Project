@@ -172,13 +172,6 @@ def main():
     failures += not check('no gripper -> NaN, so grasp_state says unknown',
                           all(np.isnan(gs[k]) for k in ('q', 'v', 'force')))
 
-    # ---------------- 2F-85 register map: REMOVED ----------------
-    #
-    # This section drove Robotiq2F85 through a fake Modbus bus. That class and
-    # its register map are gone (2026-10-26): connect() builds an RG2,
-    # no pymodbus client is ever opened, and nothing in the tree could construct
-    # a 2F-85. The checks passed only because the class still existed -- green
-    # coverage of a device this cell does not have.
 
     # ---------------- import graph ----------------
     print('\nIMPORT GRAPH')

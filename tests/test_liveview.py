@@ -194,9 +194,6 @@ def test_the_feature_is_off_by_default():
     check('perception itself is unaffected with the cache off', len(views) == 1,
           '%d views' % len(views))
 
-    # And when it IS armed, switching it off again stops NEW frames landing: the
-    # old dict stays put rather than being cleared, which matters because the
-    # operator may want the last frame after the fact.
     world.cache_frames = True
     world.perceive()
     first = world.last_perception()

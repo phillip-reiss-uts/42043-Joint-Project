@@ -58,8 +58,6 @@ class RobotBackend(ABC):
         raise NotImplementedError
 
     def time(self):
-        # Monotonic time (s) of the current control cycle. Used to timestamp
-        # the Kalman filter and the stillness timer.
         raise NotImplementedError
 
     @property

@@ -146,9 +146,6 @@ class Arm:
             self.observer.update(self.encoder.read(self.backend.joint_positions()))
 
     def command_step(self, q_ref, grip, qd_ref=None, pre_step=None):
-        # Close the observer/controller loop around an externally generated
-        # joint reference. Used by the PBVS servo on the state-space path.
-        # With no observer attached this is exactly the old raw command path.
         q_ref = np.asarray(q_ref, float).copy()
         if self.observer is not None:
             if qd_ref is None:
@@ -385,9 +382,6 @@ class Arm:
             print('[GRIP] %s: width %s mm after %.2f s'
                   % (verdict, '?' if width is None else '%.1f' % width, secs))
             return ok, width, verdict
-        # Match the hardware: one grip command, held for GRIP_HOLD_S. The old
-        # simulated ramp retargeted the actuator through GRIP_RAMP_LEVELS, which
-        # the real RG2 does not do from the arm's side.
         self._one_shot_grip(position, on_step, stop)
         return None
 
@@ -496,21 +490,6 @@ class Arm:
                 'force': f, 'vel': v, 'detected': det}
 
     def hold(self, grip, q=None):
-        # Command a fixed pose and grip without advancing a ramp.
-        #
-        # `q` MUST be latched by the caller before the loop starts. Passing None
-        # re-reads the current position every call, which makes this an
-        # integrator rather than a hold: gravity moves the arm slightly, that
-        # displaced position becomes the next target, and the arm walks away.
-        # Measured over 2000 steps holding a pose, with gravity compensation
-        # active in both cases:
-        #     feedback target (q=None):  0.214 m of drift
-        #     latched target:            0.012 m of drift
-        # It is slow enough to look like settling, which is why it went
-        # unnoticed; over a WAIT period it reaches ~150 mm at the tool.
-        #
-        # The q=None form is kept for one-shot "hold where you are" uses, but it
-        # must not be called in a loop.
         if q is None:
             q = self.backend.joint_positions()
         self.backend.command(q, grip)

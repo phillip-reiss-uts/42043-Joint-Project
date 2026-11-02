@@ -109,9 +109,6 @@ def check_imports():
         except Exception:
             record("import %s" % name, False, last_line(sys.exc_info()[1]))
 
-    # RG2 gripper. The lab's onRobot package imports pycurl at module level but
-    # declares install_requires=[], so pip does NOT pull pycurl in. Checking
-    # both means the import cannot fail for a reason we did not name.
     try:
         import pycurl  # noqa: F401
         record("import pycurl", True, pkg_version("pycurl"))

@@ -249,11 +249,6 @@ def run_sim(h):
                  'is zero the model is wrong by ~40x on joints 4-6.') as r:
         r.set(np.all(dyn.rotor > 0), 'rotor = %s' % np.round(dyn.rotor, 4))
 
-    # "analytic M/g reproduces the simulator" used to be asserted here as well.
-    # It is not any more: tests/test_dynamics.py owns that comparison from
-    # ArmDynamics.from_mujoco and tests/test_ur_kinematics.py owns it from
-    # ArmDynamics.from_file, which is the shipped data. A third copy here added
-    # nothing and made a payload failure report in three places.
 
     with h.check('DYNAMICS', 'gravity is compensated exactly once',
                  'The plant must carry its own weight, and the backend must feed\n'
@@ -382,9 +377,6 @@ def run_sim(h):
                  'grasp_state reads this through the backend. If it does not\n'
                  'resolve, the grasp verdict is "unknown" and every pick is\n'
                  'abandoned.') as r:
-        # Model-agnostic on purpose: name the joints and this fails on a correct
-        # model. The RG2 is a four-bar linkage driven through one knuckle joint
-        # and has none of the per-side driver joints an earlier proxy exposed.
         _b = MujocoBackend(model, data, ARM_DOF)
         st = _b.gripper_state()
         ok = np.isfinite(st['q'])
@@ -632,11 +624,6 @@ def run_sim(h):
 def main():
     ap = argparse.ArgumentParser(description='Validate model assumptions '
                                             'against the MuJoCo model.')
-    # This harness only ever runs against the model. The --real mode that used to
-    # live here listed hardware checks as TODOs and recorded every one as SKIP:
-    # it could not fail, so a green run was not evidence. It was deleted rather
-    # than left looking like acceptance coverage. The real acceptance tests are
-    # tests/test_arm_control.py (arm) and tests/test_camera_enum.py (camera).
     ap.add_argument('--sim', action='store_true',
                     help='validate against the MuJoCo model (the only mode)')
     ap.parse_args()

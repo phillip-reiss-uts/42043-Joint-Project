@@ -71,9 +71,6 @@ def gravity_feedforward(model, data, n=6):
 
 
 class MujocoBackend(RobotBackend):
-    # Simulation backend: wraps MjData, reproducing the previous behaviour
-    # exactly. Every method below replaces a direct call that used to live in
-    # arm.py / servo.py.
 
     def __init__(self, model, data, n=6, control_dt=UR_CYCLE_DT):
         import mujoco
@@ -124,20 +121,6 @@ class MujocoBackend(RobotBackend):
         f = float(grip) / 255.0                      # 0 = open, 1 = shut
         self.data.ctrl[self._grip_act] = self._grip_open + f * self._grip_span
         gravity_feedforward(self.model, self.data, self._n)
-        # OPENING THE JAWS RELEASES THE OBJECT.
-        #
-        # _carry_object re-writes the cube's pose every step while a carry is
-        # live, so any path that commands the jaws open WITHOUT going through
-        # Arm.open_gripper used to leave the cube welded to the tool as the
-        # fingers withdrew: it then hung ~230 mm below the gripper, directly in
-        # front of the wrist camera, and the next look found a cube where the
-        # table should be. Arm.open_gripper detaches explicitly, but
-        # arm.move(..., GRIP_OPEN), arm.hold(GRIP_OPEN) and the servo's own
-        # per-step command all come through here, and BOTH the failed-pick
-        # re-home and clear_table's recovery search are plain GRIP_OPEN moves.
-        #
-        # Enforcing it at the single funnel is deliberate: the coupling owns the
-        # release rule, so a new GRIP_OPEN call site cannot reintroduce this.
         if self._carry is not None and f <= GRIP_RELEASE_FRAC:
             self.detach_object()
 

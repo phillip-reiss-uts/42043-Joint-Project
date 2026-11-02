@@ -29,9 +29,6 @@ class Detection:
 
 # GEOMETRY
 def _hull2d(P):
-    # Convex hull of (N,2) points, via Qhull (C speed). The old monotone chain
-    # was pure Python and cost ~47 ms per call. scipy is imported lazily so the
-    # observer's deferred-loading arrangement is preserved.
     from scipy.spatial import ConvexHull, QhullError
     P = np.asarray(P, dtype=np.float64)
     if len(P) < 3:
@@ -39,8 +36,6 @@ def _hull2d(P):
     try:
         hull = ConvexHull(P)
     except QhullError:
-        # degenerate (collinear) cloud: no rectangle fit downstream, same as
-        # the old chain returning fewer than 3 points
         return np.zeros((0, 2))
     return hull.points[hull.vertices]
 
@@ -123,13 +118,6 @@ def rotation_with_yaw(yaw_deg, R_down):
 
 
 def _filter_points(model, data, camera, cam_id):
-    # Shared point filter: world points above the surface, in range, finite, and
-    # INSIDE THE TABLE FOOTPRINT. The rule itself is in camera.py so there is one
-    # copy of it -- height alone used to let the robot base and column through
-    # whenever they came into view.
-    #
-    # SURFACE_Z_MIN, not TABLE_HEIGHT + SURFACE_BAND: the floor is shared with
-    # the hardware path so the hand filter (config) applies to both.
     depth = camera.capture_depth(data)
     return camera.surface_points(depth, data, SELF_FILTER, DEPTH_MAX,
                                  SURFACE_Z_MIN,
@@ -151,9 +139,6 @@ def score_cluster(span, n_points):
 
 
 def cluster_objects(points, voxel=0.02):
-    # Split a point cloud into connected components. Voxelise, then label with
-    # scipy.ndimage in C. 6-connectivity matches the old face-neighbour flood
-    # fill exactly, so the components are unchanged.
     if points is None or len(points) == 0:
         return []
 

@@ -218,24 +218,6 @@ def place_cube(model, data, reg, rng, viewer=None, settle=True, index=0,
 
 def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
                   stop=None, world=None, xy=None, grip_index=0):
-    # Controlled release: carry the held cube to `xy`, lower it gently onto the
-    # table and open the jaws.
-    #
-    # "Put it back down" -- the second press of the pickup key. There is no
-    # chute, so a held cube is simply set down on the tabletop.
-    #
-    # WHERE. The caller passes the cube's current xy, so it goes back down
-    # roughly where it was picked from rather than at a random clear spot (the
-    # old behaviour, which was for dropping into a bin). The point is clamped
-    # into the spawn region, which is the part of the table that is BOTH
-    # reachable by the arm and visible to the wrist camera from home:
-    #     x 0.24..0.385, y -0.075..0.145
-    # Without the clamp, releasing near an edge could put the cube somewhere
-    # the tracking servo can never see again -- and the next pick would fail
-    # with no obvious cause.
-    #
-    # HOW. It lowers in two stages (high traverse, then FEED rate down) rather
-    # than dropping from the lift height, so the cube is placed, not thrown.
     pos = reg.pose(data, grip_index)
     if pos[2] < TABLE_HEIGHT + OBJECT_HEIGHT:
         return False                       # not holding anything
@@ -249,9 +231,6 @@ def put_cube_down(model, data, arm, reg, rng, viewer=None, estop=None,
     tx = float(np.clip(tx, SPAWN_X_RANGE[0], SPAWN_X_RANGE[1]))
     ty = float(np.clip(ty, SPAWN_Y_RANGE[0], SPAWN_Y_RANGE[1]))
 
-    # Lower with the arm's CURRENT orientation. The jaws define the cube's yaw
-    # while it is held, so commanding a different one (this used to pick a
-    # random yaw) would spin the cube on the way down.
     _, R = arm.kin.pose(arm.backend.joint_positions())
 
     # PICK_Z is the one grasp/place height, in the same TCP frame that
@@ -337,13 +316,6 @@ def pick_one(model, data, arm, world, i, drop_xy,
 
 def clear_table(model, data, arm, world, rng,
                 viewer=None, aborted=None, estop=None, passes_max=None):
-    # Find the object again and put it back on the table.
-    #
-    # This USED to empty the table into a chute. There is no chute any more, so
-    # the only thing left for it to do is recovery: after a failed grip the
-    # robot re-homes and looks for the object, then re-attempts. It is no
-    # longer an operator-driven mode -- run_simulation binds it to the failure
-    # path of an explicit pickup.
     def stopped():
         return aborted is not None and aborted()
 

@@ -208,14 +208,6 @@ def check_kinematics_seam():
 
 
 def check_world_tick_rate():
-    # A physics loop that calls mj_step must also tick the world, or the
-    # object's demonstration motion runs at the wrong rate. This bit us once:
-    # driving the mover from viewer.sync moved the cube at 1/SYNC_STEPS of its
-    # true speed, because sync runs every 8 physics steps.
-    #
-    # Heuristic and deliberately conservative: in the robot modules and the
-    # task layer, every `mujoco.mj_step` in a live code path should have a
-    # `step_mover`/`_step_world` call nearby.
     failures = []
     for name in ('servo.py', 'pick_place.py'):
         path = os.path.join(SRC, name)

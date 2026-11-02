@@ -52,11 +52,6 @@ class ChainFrames:
         self.dyn = dyn
         self.tool_pos = np.asarray(tool_pos, float)
         self.tool_rot = rot_from_quat(tool_quat)
-        # Root rotation about base z: the model's base frame -> the cell's base
-        # frame. MEASURED on the real UR3e (2026-10-23): FK came out at
-        # -(TCP.x, TCP.y) at all five hand-guided poses, i.e. the cell's base is
-        # turned 180 deg from the model's. Identity by default, so the offline
-        # MuJoCo comparison in tests/test_ur_kinematics.py is unaffected.
         c, s = np.cos(root_yaw), np.sin(root_yaw)
         self.R_root = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 

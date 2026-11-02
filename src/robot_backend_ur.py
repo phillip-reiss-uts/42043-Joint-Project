@@ -128,31 +128,6 @@ class URBackend(RobotBackend):
             self._grip_sent = target
 
     def step(self):
-        # One control cycle: stream the target and block for the cycle time.
-        #
-        # Two binding differences bite here, so both are absorbed rather than
-        # assumed:
-        #
-        #   name   `servoJ` on the ur_rtde build used here; `servoj` in
-        #          URScript and on older bindings.
-        #   args   this build takes six POSITIONAL arguments only, and the
-        #          order is NOT the natural one -- from the binding's own
-        #          docstring:
-        #              servoJ(q, speed, acceleration, time,
-        #                     lookahead_time, gain)
-        #          `speed` and `acceleration` are documented as "NOT used in
-        #          current version", so they go in as 0. Their real slot is
-        #          2nd and 3rd, which is why passing time there raises
-        #          "not within [0.03;0.2]" (that range is lookahead_time's).
-        #          gain's range is [100, 2000]; lookahead_time's is [0.03, 0.2].
-        #
-        # PACING. servoJ's docstring says it blocks for `time`, but this build
-        # returns in ~0.1 ms and the arm keeps travelling afterwards. Measured
-        # on the real UR3e (2026-10-23): 125 calls completed with a mean step of
-        # 0.0 ms and the joint did not move at all, while ONE call moved it
-        # 0.47 deg. So the cycle time is slept out here instead of assumed.
-        # Without this, Arm.move's step count (dist / rate / dt) finishes before
-        # the arm has moved, and the pick races ahead of the hardware.
         fn = getattr(self._control, 'servoJ', None) \
             or getattr(self._control, 'servoj')
         q = [float(v) for v in self._q_cmd]
@@ -407,22 +382,6 @@ def connect(ip, dt=0.008, lookahead_time=0.1, gain=300,
             activate_gripper=True, grip_id=0,
             open_width_mm=None, close_width_mm=None, force_n=None,
             min_step_mm=None):
-    # Build a URBackend against a real controller.
-    #
-    # Only this function needs ur_rtde. The gripper needs nothing beyond the
-    # lazily imported `onRobot` package.
-    #
-    # activate_gripper means "no gripper at all" when False, which is what
-    # run_hardware.py --no-gripper and tests/test_arm_control.py rely on.
-    #
-    # THE ORDER HERE IS LOAD-BEARING. The OnRobot URCap accepts gripper commands
-    # only while an external-control RTDE session is open on the controller --
-    # upstream UR3_RG2_rosbridge commit 92a5c4e (2026-10-28) had to add an RTDE
-    # control+receive session to its own gripper-only example for exactly this
-    # reason. So RTDEControlInterface and RTDEReceiveInterface are opened BEFORE
-    # RG2 is constructed, and must stay open for the whole session. Constructing
-    # the gripper first, or closing the interfaces early, produces an RG2 that
-    # reads width but silently refuses rg_grip.
     from rtde_control import RTDEControlInterface
     from rtde_receive import RTDEReceiveInterface
 
@@ -433,13 +392,6 @@ def connect(ip, dt=0.008, lookahead_time=0.1, gain=300,
         gripper = RG2(ip, grip_id=grip_id, open_width_mm=open_width_mm,
                       close_width_mm=close_width_mm, force_n=force_n,
                       min_step_mm=min_step_mm)
-        # EXERCISE THE ROUTE NOW, while the RTDE session is known to be open.
-        #
-        # The URCap accepts gripper commands only while an external-control
-        # session exists (upstream UR3_RG2_rosbridge 92a5c4e, 2026-10-28). Left
-        # lazy, the first rg_grip happens mid-pick, and if it is refused the
-        # backend treats the route as dead. Probing here makes a dead session
-        # a startup message instead.
         route = gripper.probe()
         if route == 'xmlrpc':
             print('[HW] gripper: XML-RPC answered, width %.1f mm'

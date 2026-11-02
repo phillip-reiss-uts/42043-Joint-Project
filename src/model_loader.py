@@ -60,13 +60,6 @@ def _load_gripper_spec(gripper_model):
 
 def load_robot_model(with_calibration_board=False, arm_model=None,
                      gripper_model=None, camera_model=None):
-    # Compose <arm> + <gripper> + <wrist camera> + table + chute + object pool.
-    #
-    # The arm defaults to ROBOT_ARM. The UR5e simulation this was developed
-    # against is still available:
-    #     load_robot_model(arm_model='universal_robots_ur5e')
-    # Nothing downstream depends on which arm is chosen: joint count comes from
-    # the compiled model, and no module hardcodes UR5e geometry.
     arm_model = arm_model or ROBOT_ARM
     gripper_model = gripper_model or ROBOT_GRIPPER
     camera_model = camera_model or ROBOT_CAMERA
@@ -172,15 +165,6 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     floor_geom.size = [10, 10, 0.1]
     floor_geom.pos = [0, 0, min(_FLOOR_Z, TABLE_HEIGHT - TABLE_THICK)]
 
-    # 5. The bench, exactly as measured on the cell.
-    #
-    #    MEASURED (2026-10-23): a 440 x 300 mm working rectangle with its long
-    #    edge walked as (-0.2200, -0.4200) -> (+0.2200, -0.4200), so the centre is
-    #    150 mm in from that edge: TABLE_CENTRE = [0.0, -0.270], TABLE_HALF =
-    #    [0.22, 0.15]. Top face exactly on TABLE_HEIGHT.
-    #
-    #    Nothing is extended or clamped: the slab is that rectangle and no more,
-    #    spanning x -0.220..+0.220 and y -0.420..-0.120.
     _bench_front = TABLE_CENTRE[1] - TABLE_HALF[1]
     _bench_back = TABLE_CENTRE[1] + TABLE_HALF[1]
     _bench_cy = 0.5 * (_bench_front + _bench_back)
@@ -208,10 +192,6 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
                        (_ped_top - _FLOOR_Z) / 2.0]
         plinth.rgba = [0.42, 0.36, 0.30, 1.0]
 
-    # 6. No chute. There is one flat table and nothing else -- a picked object
-    #    is set back down on the tabletop. The old sunk bin was a simulation
-    #    convenience that does not exist in a real cell, and as placed it sat
-    #    inside the table footprint with half its scatter radius off the edge.
 
     # 7. Object pool: POOL_SIZE bodies, each with its own freejoint.
     for i in range(POOL_SIZE):
@@ -285,23 +265,6 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
                 g.contype = 0
                 g.conaffinity = 0
 
-    # 8. Gravity is left ON for every body, including the arm.
-    #
-    # It used to be switched off here (body.gravcomp = 1.0 on every non-object
-    # body) and that was wrong twice over. First, it made the simulated plant
-    # weightless: a real UR3e carries its own weight, and the point of the model
-    # is to reproduce the load the controller has to hold. Second, the backend
-    # ALSO feeds g(q) forward (see robot_backend_mujoco.gravity_feedforward),
-    # which is the single compensation a UR controller applies internally. With
-    # both active the arm was pushed UP by g against its position servos, so a
-    # commanded grasp pose sat ~7 mm high and ~2-3 mm sideways with the tool
-    # tilted ~1.8 deg -- the offset that put the pads on the cube's side instead
-    # of around it.
-    #
-    # The rule is: the model has honest gravity, and the controller emulation
-    # (or the real UR controller, on hardware) compensates it exactly once.
-    # Nothing to set here -- MuJoCo's default is gravcomp = 0, which is what
-    # every body should keep.
 
     # 9. Compile
     try:
@@ -310,18 +273,6 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
         print(f"[ERROR] Failed to compile composed model: {e}")
         return None
 
-    # 10. Integrator.
-    #
-    # MuJoCo's default Euler integrator evaluates the actuator's velocity term
-    # explicitly. At this model's 2 ms timestep that term is past the explicit
-    # stability limit on the wrist joints -- Kv*dt/M is about 3.9 against a limit
-    # of 2 -- so a commanded hold chattered at ~0.1 rad/s and sat 2-4 mm off its
-    # command. implicitfast integrates that term (and the Coriolis terms), which
-    # removes the chatter exactly: measured 0.000 rad/s and 0.0 mm on a 2 s hold,
-    # and the open-loop grasp commit lands on its target instead of 2 mm off.
-    #
-    # This is a SIMULATION-only choice. On hardware the controller owns its own
-    # integration, and the servo gains are identified from it.
     model.opt.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
 
     # 11. Gripper squeeze force limit.
@@ -333,17 +284,6 @@ def load_robot_model(with_calibration_board=False, arm_model=None,
     # overriding them (pads 2.5, iterations 200, stiffer solimp) made penetration
     # worse, not better, so those experiments are reverted.
 
-    # 12. Stand the simulated arm at the SIM home.
-    #
-    # The vendored MJCF ships the OLD workcell keyframe (joint 1 = -0.366), so it is
-    # overwritten at load: config is the single source of truth and
-    # models/ur3e/ur3e.xml stays a vendored file.
-    #
-    # SIM_HOME_Q, not UR_HOME_Q. The cell's home leaves the wrist camera looking off
-    # to the side of the tabletop, so the simulated pose is chosen to centre the
-    # camera over the table. Hardware still homes to UR_HOME_Q via run_hardware.py.
-    # If SIM_HOME_Q is ever unset this falls back to the cell home, never to the
-    # stale keyframe.
     _home_q = SIM_HOME_Q if SIM_HOME_Q is not None else UR_HOME_Q
     if _home_q is not None:
         home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, 'home')

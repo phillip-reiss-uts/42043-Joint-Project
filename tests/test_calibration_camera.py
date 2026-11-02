@@ -138,11 +138,6 @@ def main():
         obj_base = (Rb @ obj.T).T + Tb[:3, 3]
         K = np.array([[300.0, 0, 160], [0, 300.0, 120], [0, 0, 1]])
 
-        # The PHYSICAL camera: its pose as this repo stores it, then the same
-        # pose in cv2's frame. Projecting through the cv one is what a D435i
-        # does. Projecting through the repo's own frame is what an earlier
-        # version of this test did -- and it passed, because it only ever
-        # checked that pnp_pose inverts its own input.
         T_cam_mj = tools[1] @ X_true
         T_cam_cv = cam_mjocam_to_cv(T_cam_mj)
         R_cb = T_cam_cv[:3, :3].T

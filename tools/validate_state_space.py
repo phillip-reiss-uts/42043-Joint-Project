@@ -187,9 +187,6 @@ def cmd_record(args):
     finally:
         backend.close()
 
-    # The cycle the controller actually achieved, not the one we asked for.
-    # servoJ blocks for longer than dt on this build (~22 ms measured), so a
-    # nominal i*dt time base would stretch every fitted time constant.
     dt_meas = float(rows[-1]['t'] - rows[0]['t']) / max(1, len(rows) - 1) \
         if len(rows) > 1 else float(cfg.UR_CYCLE_DT)
     print('achieved %.1f Hz (dt %.1f ms) over %d rows'

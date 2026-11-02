@@ -303,8 +303,6 @@ def main(argv=None):
 
     def go_home():
         arm.move(cfg.UR_HOME_Q, GRIP_OPEN, rate=RAPID)
-        # The tracker is created below; this closure only runs after that.
-        # Its last command belongs to the pose we just left.
         tracker.reset_command()
 
     def place_object():
@@ -349,10 +347,6 @@ def main(argv=None):
         return bool(tracker.observe())
 
     def track_step():
-        # One closed-loop look-and-follow chunk, called from TRACK.
-        #
-        # track and search are both required: the servo's lost-target branch is
-        # gated on them.
         tracker.servo(cfg.HOVER_TOOL0_Z, max_iters=cfg.UR_TRACK_CHUNK,
                       track=True, search=_reacquire)
         if tracker.stage_obs == 0:
@@ -426,8 +420,6 @@ def main(argv=None):
             grip = GRIP_OPEN
         elif key in ('p', 'P'):
             if paused:
-                # Otherwise the command would fire the moment we resume, with
-                # your hand possibly still in the cell.
                 print('[HW] paused -- press space first, then p')
             else:
                 world.refresh()
@@ -521,9 +513,6 @@ def main(argv=None):
         try:
             task.step()
         except KeyboardInterrupt:
-            # QUIT, do not swallow it. This used to `continue`, which made
-            # Ctrl-C during a pick look like nothing happened: the pick was
-            # abandoned mid-motion and the loop simply started the next one.
             print('\n[HW] interrupted -- stopping')
             break
 

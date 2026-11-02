@@ -233,9 +233,6 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
     arm.move(q_lift, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,
              stop=stopped)
 
-    # The old code confirmed the lift by reading the object's true height from
-    # the simulator. That is not available on hardware and is not needed: the
-    # jaws already reported 'held' above, from the gripper's own registers.
     return not stopped(), q_lift, R
 
 

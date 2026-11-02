@@ -160,7 +160,6 @@ class PBVSServo:
         # velocity for the lead term.
         self.use_kf = bool(use_kf)
         self.lead_s = float(lead_s)
-        # tracking thresholds for the commit gate
         self.track_tol = float(track_tol)
         self.track_tol_rot = float(track_tol_rot)
         self.still_speed = float(still_speed)
@@ -183,8 +182,6 @@ class PBVSServo:
         self.v_max = float(v_max)
         self.v_descent = (float(v_max) if v_descent is None
                           else float(v_descent))
-        # Cartesian speed for the backup and the open-loop commit, so they move
-        # like the servo rather than at a planned-move rate.
         self.retreat_v = (self.v_descent if retreat_v is None
                           else float(retreat_v))
 
@@ -195,8 +192,6 @@ class PBVSServo:
         # held visual estimate, in world frame
         self.p_est = None
         self.yaw_est = None
-        # Last wrist yaw COMMANDED, not the measured tool yaw. Used to latch
-        # the equivalent-face branch across the +/-YAW_LIMIT boundary.
         self._yaw_cmd_last = None
         # last raw measurement, kept unfiltered so the harness can show what
         # the filter is actually removing
@@ -359,8 +354,6 @@ class PBVSServo:
             # the cube's AABB is near-isotropic, so the mean is a stable scalar
             span_norm = float(0.5 * (self.span[0] + self.span[1]))
             if span_norm > self.best_span:
-                # fullest view so far: keep the estimate taken from it, because
-                # it is the one the open-loop commit should fall back on
                 self.best_span = span_norm
                 self.best_p = np.array(self.p_est, float)
                 self.best_yaw = float(self.yaw_est)
@@ -395,9 +388,6 @@ class PBVSServo:
         # z_tcp is an absolute tool0 height: the caller passes HOVER_TOOL0_Z
         # for hover and PICK_Z for the grasp. The estimate does not set it.
         z_want = float(z_tcp)
-        # CONTACT GATE. PICK_Z is the only z floor: a command below it is
-        # clamped, equal to it is the grasp. Remember that we clamped so the
-        # callers report it and retreat rather than driving on.
         z_floor = self.z_floor()
         if z_want < z_floor:
             self.gated = True
@@ -413,15 +403,9 @@ class PBVSServo:
         # YAW_LIMIT_DEG so the wrist cannot wind.
         yaw_ref = self.yaw_est if self.yaw_est is not None else self.best_yaw
         _p_cur, R_cur = self.current_pose()
-        # Latch on the last COMMAND, not the measured tool yaw. The measured
-        # yaw lags a 90 deg branch change, and using it lets boundary noise
-        # flip the branch back before the arm gets there.
         if self._yaw_cmd_last is None:
             self._yaw_cmd_last = _tool_yaw(R_cur)
         if not YAW_TRACK_ENABLED or getattr(self, '_yaw_hold', False):
-            # Hold the wrist where it is. Used by the open-loop commit: the
-            # jaws are symmetric, so no wrist turn is needed at the grasp, and
-            # a turn during the descent swings the tool sideways.
             yaw_cmd = _tool_yaw(R_cur)
         else:
             yaw_cmd = _bounded_yaw(yaw_ref, self._yaw_cmd_last)
@@ -587,8 +571,6 @@ class PBVSServo:
         self.stage_obs = 0
         self.fail_run = 0
         self.occluded = False
-        # tracking state: how long the target has looked still, and where we
-        # last looked for it
         self.still_time = 0.0
         self.target_speed = None
         self.searched = 0
@@ -605,31 +587,6 @@ class PBVSServo:
         if self.p_est is None and not self.observe():
             return False, 0, float('inf')
 
-        # COMMANDED JOINTS PERSIST ACROSS CALLS.
-        #
-        # This used to re-seed q_cmd from data.qpos on every call, on the
-        # reasoning that it made a short chunk "resume from where the arm is".
-        # That is wrong, and it is what made tracking sag and jerk. Measured
-        # with the same 600 physics steps either way:
-        #
-        #   servo(max_iters=600)      z 0.377 -> 0.376   err   1.76 mm
-        #   600 x servo(max_iters=1)  z 0.377 -> 0.469   err 101.94 mm
-        #
-        # The loop is an integrator: it does q_cmd += dq each iteration, and a
-        # P/integral law needs many iterations to close the error. Re-seeding
-        # throws away the accumulated command every call, so a one-iteration
-        # chunk commands a tiny step, the plant barely responds, and the next
-        # call re-seeds from that barely-moved position and commands again. The
-        # result is a command that ratchets downhill under gravity instead of
-        # converging, which is exactly the sag-then-catch on screen.
-        #
-        # Keeping q_cmd on the instance makes repetition equivalent to one long
-        # call, so the chunk size no longer changes the answer -- a caller can
-        # run 1 iteration per frame or 600 and get the same motion.
-        #
-        # It is reset when the servo is pointed at a new target (see
-        # _reset_command), so a genuinely new grasp does not inherit the old
-        # command.
         if self._q_cmd is None or len(self._q_cmd) != ARM_DOF:
             self._q_cmd = np.array(backend.joint_positions(), float)
         q_cmd = np.array(self._q_cmd, float)
@@ -648,7 +605,6 @@ class PBVSServo:
                 # re-observe; hold the last estimate if the view is blocked
                 fresh = self.observe(near=self.p_est)
                 self.fresh = bool(fresh)
-                # the overlay colours the frustum/trail by which regime we are in
                 self._control('closed' if fresh else 'held')
                 self.fail_run = 0 if fresh else self.fail_run + 1
                 # Target gone from view completely: fall back to the search
@@ -670,9 +626,6 @@ class PBVSServo:
                     else:
                         print('[SERVO] search found nothing')
                     last_t = float(backend.time())
-                    # Give up rather than sweeping forever: the target is not on
-                    # the table where we can see it, and spinning to the
-                    # iteration cap only ties up the arm.
                     if not found and self.searched >= self.search_limit:
                         print('[SERVO] %d searches found nothing; giving up'
                               % self.searched)
@@ -680,10 +633,6 @@ class PBVSServo:
                         return False, k, err_norm
                     continue
                 if check_occlusion and self.stage_obs >= 2:
-                    # Two ways the jaws give themselves away: the measured span
-                    # drops because the top face is being clipped, or the object
-                    # disappears from view altogether. Either means the estimate
-                    # is about to be the one we must not trust.
                     if (self.fail_run >= self.occlude_fails
                             or self.span_ratio < self.occlude_ratio):
                         self.occluded = True
@@ -714,16 +663,6 @@ class PBVSServo:
             # decaying to zero on its own.
             self.target_speed = self._target_speed()
             if track and stationary_s:
-                # Stillness measured as drift of the filtered position from an
-                # anchor, not as the filter's velocity. The velocity carries a
-                # few mm/s of noise against a 6 mm/s threshold, which kept
-                # resetting the timer and delayed the commit by ~13 s.
-                #
-                # Only a fresh observation counts. A frozen estimate has zero
-                # drift and would otherwise read as perfectly stationary, which
-                # is exactly backwards: if the object is out of view we have no
-                # evidence about it at all, and committing to the frozen
-                # position grasps at empty table.
                 if not self.fresh:
                     self.still_time = 0.0
                     self._still_ref = None
@@ -771,10 +710,6 @@ class PBVSServo:
                 })
 
             if track and stationary_s:
-                # Commit gate for a target that was allowed to keep moving:
-                # close enough to grasp, and confirmed still for long enough.
-                # The strict tol_p/tol_o below would never be met while the
-                # object is walking, so tracking uses its own looser band.
                 if (self.still_time >= stationary_s
                         and err_norm < track_tol and err_rot < track_tol_rot):
                     self._control('open')
@@ -834,19 +769,6 @@ class PBVSServo:
 
     def _cartesian_descent(self, p_des, R_des, v_cart, viewer=None, estop=None,
                            aborted=None, watch=None):
-        # Drive the tool in a straight line to p_des, holding R_des.
-        #
-        # The commit used to call arm.move() on a JOINT-space target: the
-        # joints interpolate linearly, the tool does not, and the pads swing
-        # out and back on the way down. Measured on the harness scenes: up to
-        # 25 mm of lateral swing during the descent and 6-7 mm at the cube's
-        # top face -- enough to put a pad against the cube before the jaws
-        # close, which is what "the gripper drifts forward and hits it" is.
-        #
-        # Here the TOOL path is the interpolated quantity and the joints are
-        # solved per step, so the pads come down the line the camera aimed at.
-        # The IK is warm-started from the previous solution, so it costs a few
-        # iterations per step rather than a full solve.
         backend = self.arm.backend
         p0, _ = self.world.gripper_pose()
         p0 = np.asarray(p0, float)
@@ -940,15 +862,6 @@ class PBVSServo:
         return False, self.retreat_max
 
     def motion_watch(self, viewer=None):
-        # Called during the open-loop descent. Camera only -- no ground truth,
-        # nothing from the object's own driver. Re-observe and ask whether the
-        # target has walked away from the position we committed to.
-        #
-        # The span guard is what makes this usable: once the jaws start clipping
-        # the object the fitted centre is biased by up to 0.55x any lateral
-        # offset, and that bias grows as the gripper descends. Without it the
-        # robot would read its own approach as the object moving. Past the point
-        # where the view is no longer whole we simply stop judging.
         if not self.observe(near=self.ref_p):
             return
         if self.span_ratio < self.occlude_ratio:
@@ -971,13 +884,6 @@ class PBVSServo:
         self.p_est = np.array(ref, float)
         self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
                              else self.best_yaw)
-        # RE-LATCH THE YAW BRANCH TO THE WRIST THAT IS ACTUALLY THERE.
-        # The jaws are symmetric, so yaw and yaw+-180 are the same grasp -- but
-        # they are a 180 deg wrist turn, and this commit is open loop: the spin
-        # happens during the descent and swings the tool ~25 mm sideways, which
-        # is what made the descent stop 28 mm short with the right height.
-        # Choosing the equivalent face nearest the CURRENT wrist turns at most
-        # 45 deg, normally not at all.
         _p_now, R_now = self.current_pose()
         self._yaw_cmd_last = _tool_yaw(R_now)
         # One height for the grasp and the descent it replaces: PICK_Z, applied
@@ -996,12 +902,6 @@ class PBVSServo:
              'open-loop commit to %6.3f %6.3f' % (self.best_p[0], self.best_p[1]),
              'from the fullest view, span %.4f' % self.best_span)
 
-        # OPEN LOOP, which is what the commit is for: one IK solve from the last
-        # unbiased estimate, then a plain joint move. No per-step Cartesian
-        # servo, no re-solving down the line, no camera in the loop. The reason
-        # the camera must stay out is the same one that makes the servo descent
-        # unusable here -- closer in, the jaws and the housing bias the fitted
-        # centre, so anything that keeps looking drives on a drifting target.
         self.target_moved = False
         q_goal = self.arm.solve_ik_tcp(
             p_des, np.asarray(self.arm.backend.joint_positions(), float),
@@ -1013,10 +913,6 @@ class PBVSServo:
         ik_mm = float(np.linalg.norm(np.asarray(p_ik, float)
                                     - np.asarray(p_des, float)) * 1e3)
         if ik_mm > 5.0:
-            # The solver ran out of iterations or into a clip from this seed.
-            # One retry from the home configuration, which is a known-good
-            # branch, before giving up: a 28 mm horizontal miss on the cell was
-            # the solver landing short, not the arm failing to move.
             q_alt = self.arm.solve_ik_tcp(
                 p_des, np.asarray(UR_HOME_Q, float),
                 R_target=R_des, max_joint=JOINT_RANGE)
@@ -1040,18 +936,12 @@ class PBVSServo:
         self.descent_short = float(np.linalg.norm(
             np.asarray(p_end, float) - np.asarray(p_des, float)))
         if self.gated:
-            # The pose we wanted was below the contact limit, so the descent
-            # stopped short of it. Say so, back off, and report failure rather
-            # than closing the jaws in mid-air over a table we never reached.
             msg = self.gate_report()
             print(msg)
             push(viewer, 'occlusion', 'Z GATE: grasp not reached', msg)
             self.retreat(viewer=viewer, estop=estop, aborted=aborted)
             return False, 0
         if self.target_moved:
-            # The monitor saw the TARGET move during the descent. That is a
-            # different failure from an unreachable pose and used to be hidden
-            # behind the short-descent message below.
             push(viewer, 'occlusion', 'descent abandoned: target moved',
                  '%.0f mm from the grasp pose' % (1e3 * self.descent_short))
             print('[SERVO] DESCENT ABANDONED: the target moved while descending '
@@ -1154,10 +1044,6 @@ class PBVSServo:
                                  v_max=self.v_max)
         if not ok1:
             return False, n1, e1, 0
-        # Reference estimate for the open-loop commit. Taken here, while the
-        # object is still whole in view: closer in, the jaws bias the fitted
-        # centre and the estimate feeds back into the gripper position, so this
-        # is the last unbiased view on the way down.
         self.observe(near=self.p_est)
         self.ref_p = np.array(self.p_est, float)
         self.ref_yaw = float(self.yaw_est)
@@ -1166,9 +1052,6 @@ class PBVSServo:
                                  v_max=self.v_descent,
                                  check_occlusion=check_occlusion)
         if self.gated:
-            # The grasp pose we were asked for is below the contact limit. The
-            # servo has driven to the clamped height instead, so the pick was NOT
-            # reached: say so, back off, and fail.
             msg = self.gate_report()
             print(msg)
             push(viewer, 'occlusion', 'Z GATE: grasp not reached', msg)
@@ -1178,8 +1061,6 @@ class PBVSServo:
             return True, n1 + n2, e2, n1
         if not (recover and self.occluded):
             return False, n1 + n2, e2, n1
-        # the jaws clipped the object on the way down: back off until the view
-        # is whole, then commit the grasp open loop from that estimate
         ok_r, n_r = self.retreat(viewer=viewer, estop=estop, aborted=aborted)
         if not ok_r:
             return False, n1 + n2 + n_r, e2, n1

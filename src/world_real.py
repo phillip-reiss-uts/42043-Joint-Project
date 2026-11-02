@@ -122,14 +122,6 @@ class RealSenseSource(DepthSource):
 
     def capture(self):
         frames = self._pipe.wait_for_frames()
-        # DRAIN THE QUEUE. The depth stream runs at 30 fps but perception polls
-        # it at the servo's look rate (~0.5-0.8 s), so wait_for_frames returns
-        # the OLDEST queued frame and the backlog grows without bound. The
-        # deprojection then pairs an old image with the current FK pose, which
-        # shifts a stationary cube by the distance the arm has travelled since
-        # that frame -- the estimate appears to move WITH the arm, the servo
-        # chases it, overshoots the cube and the points leave TABLE_XY_BOUNDS
-        # (dets 0). Keep only the newest frame available now.
         self.stale_frames = 0
         while True:
             queued = self._pipe.poll_for_frames()
@@ -196,11 +188,6 @@ class FakeDepthSource(DepthSource):
         # filters on, or every point gets discarded.
         self.table_z = float(TABLE_HEIGHT if table_z is None else table_z)
         self.cam_height = float(cam_height)   # camera distance above the table
-        # The cube this project actually uses. It used to default to 0.03 -- a
-        # leftover from the 30 mm cube -- which put the rendered top face at
-        # 30 mm, below the hand filter's floor, so every point was discarded and
-        # the whole depth->detect path reported nothing. OBJECT_HEIGHT is the
-        # single source of truth; a caller may still override it.
         self.object_h = float(OBJECT_HEIGHT if object_h is None else object_h)
         # A realistic-ish D435i intrinsic at 320x240 (fx != fy, off-centre).
         self._K = np.array([[-191.3, 0.0, 160.6],
