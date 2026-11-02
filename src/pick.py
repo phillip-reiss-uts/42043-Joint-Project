@@ -150,6 +150,12 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
                               recover=SERVO_OCCLUSION_RECOVERY,
                               search=reacquire)
     if not ok or stopped():
+        print('[PICK] approach failed: err %.1f mm, looks %d, occluded %s, '
+              'searches %d, stopped %s'
+              % (1e3 * float(getattr(sv, 'err_norm', float('inf'))),
+                 int(getattr(sv, 'stage_obs', 0)),
+                 bool(getattr(sv, 'occluded', False)),
+                 int(getattr(sv, 'searched', 0)), bool(stopped())))
         return False, None, None
 
     # Grasp committed. From here the object is held in the jaws. The mover is

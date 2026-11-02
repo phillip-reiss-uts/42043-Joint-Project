@@ -1,0 +1,235 @@
+==============================================================================
+RUN LOG  2026-11-02T10:31:57
+program  tools/calibrate_mount.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_mount_2026-11-02_103157.txt
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01500                                   
+  CAM_POS              (0.04600, -0.00800, 0.11400)              
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.25100                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+1  TABLE HEIGHT -- tabletop above the robot base plane
+  table height, m [0.0150]: 
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.11400)              
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.24800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+2  CAMERA HEIGHT -- the tool parks at 250 mm and you measure the
+   ruler from the TABLETOP to the centre of the lens.
+[CAL] connecting to 192.168.0.194 ...
+[HW] gripper: XML-RPC answered, width 99.5 mm
+  tool now at z 0.398, moving to 0.262 (table + 250 mm)
+  tool parked at z 0.2623 -- gripper top is clear for the ruler
+  tabletop to lens, m [0.1360]:   CAM_POS_z = 0.10227 (tool 0.250 - lens 0.148)
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.24800                                    (table + above)
+  unsaved changes      2
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+4  ANGLE -- the cube is a fixed point in the BASE frame, so its place
+   in the TOOL frame must not change. Look at it from several poses,
+   rotating ONLY the wrist between them, and the tool fits the
+   rotation that makes them agree.
+   The translation is not fitted here; it comes from step 3.
+   place the cube in view, then Enter >   IK could not reach that pose -- not moving
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.24800                                    (table + above)
+  unsaved changes      2
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the
+   leftover error in the axis being measured, in metres.
+
+   -- x --
+   place the cube in view, then Enter > [PERC] pts    337  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1031/step3_x_01_001.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts  11447  dets 1  best xy (+0.086, -0.337) z 0.045  span 0.066/0.075  n 11283  yaw +6.7  score 9.3
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1031/step3_x_02_002.png
+   cube reads (+0.0859, -0.3372); moving onto it
+  IK could not reach that pose -- not moving
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.24800                                    (table + above)
+  unsaved changes      2
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+4  ANGLE -- the cube is a fixed point in the BASE frame, so its place
+   in the TOOL frame must not change. Look at it from several poses,
+   rotating ONLY the wrist between them, and the tool fits the
+   rotation that makes them agree.
+   The translation is not fitted here; it comes from step 3.
+   place the cube in view, then Enter >   IK could not reach that pose -- not moving
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.24800                                    (table + above)
+  unsaved changes      2
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+5  PICK HEIGHT -- the jaws close to the grip width and descend to the
+   height you enter. TOOL height above the table, metres.
+   MOVE THE CUBE OUT OF THE WAY first: you are judging the jaws.
+  tool height above table, m [0.2360]: [GRIP] fail: width 39.7 mm after 7.00 s
+  tool at z 0.2480 (table + 236.0 mm)
+  accept this pick height? [Y/n]: 
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.24800                                    (table + above)
+  unsaved changes      2
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+5  PICK HEIGHT -- the jaws close to the grip width and descend to the
+   height you enter. TOOL height above the table, metres.
+   MOVE THE CUBE OUT OF THE WAY first: you are judging the jaws.
+  tool height above table, m [0.2360]: [GRIP] fail: width 39.9 mm after 7.00 s
+  tool at z 0.2378 (table + 225.8 mm)
+  accept this pick height? [Y/n]:   tool height above table, m [0.2150]: 
+  step cancelled
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                      CHANGED
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      3
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+>   wrote /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_2026-11-02_1031.json
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                      CHANGED
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      3
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+>   wrote /home/pjreiss/Documents/workspace/42043-Joint-Project/src/config.py
+  wrote /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_2026-11-02_1031.json
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1031   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                      CHANGED
+  CAM_POS              (0.04600, -0.00800, 0.10227)                 CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                      CHANGED
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      3
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> unsaved changes were discarded -- rerun with s or w
+
+[LOG] closed 2026-11-02T10:37:15

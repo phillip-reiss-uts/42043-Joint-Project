@@ -1,0 +1,36 @@
+==============================================================================
+RUN LOG  2026-11-02T14:13:15
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --snapshot shots/
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_141315.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.364 m  camera 0.250 m above table
+  speed scale : 1.000
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : v writes a PNG into shots/
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[PERC] pts   8480  dets 1  best xy (+0.057, -0.308) z 0.042  span 0.065/0.062  n 7817  yaw +88.4  score 9.0  tool (+0.131, -0.242, 0.431)
+[PERC] pts   8372  dets 1  best xy (+0.057, -0.308) z 0.042  span 0.065/0.062  n 7822  yaw +88.7  score 9.0  tool (+0.131, -0.242, 0.431)
+[HW] closing
+
+[LOG] closed 2026-11-02T14:13:37

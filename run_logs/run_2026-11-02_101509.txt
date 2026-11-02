@@ -1,0 +1,52 @@
+==============================================================================
+RUN LOG  2026-11-02T10:15:09
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --raw-servo --snapshot shots/
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_101509.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.329 m  camera 0.200 m above table
+  speed scale : 1.000
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : v writes a PNG into shots/
+
+[HW] gripper: XML-RPC answered, width 99.5 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[STATE] WAIT  holding=False  paused=False  tool=(0.131, -0.242, 0.430)
+[HW] tracking on (entering TRACK if a cube is in view)
+[PERC] pts  12019  dets 1  best xy (+0.122, -0.229) z 0.045  span 0.061/0.065  n 7598  yaw +1.6  score 8.9
+[STATE] TRACK  (object in view, tracking released)
+[PERC] pts  11197  dets 1  best xy (+0.122, -0.230) z 0.045  span 0.061/0.067  n 8277  yaw +2.3  score 9.0
+[PERC] pts  11605  dets 1  best xy (+0.122, -0.227) z 0.045  span 0.061/0.067  n 10911  yaw +2.9  score 9.3
+[PERC] pts  13356  dets 1  best xy (+0.124, -0.224) z 0.045  span 0.062/0.070  n 13175  yaw +2.8  score 9.5
+[PERC] pts  20321  dets 1  best xy (+0.135, -0.212) z 0.045  span 0.066/0.085  n 20276  yaw +3.6  score 9.9
+[PERC] pts   1630  dets 1  best xy (+0.146, -0.169) z 0.045  span 0.045/0.052  n 1630  yaw +1.6  score 5.5
+[PERC] pts    275  dets 0
+[PERC] pts   2552  dets 0
+[PERC] pts   1986  dets 0
+[TRACK] chunk ended with no fresh look -- the cube is out of view; the arm is held where it stopped
+[PERC] pts   1035  dets 0
+[STATE] PICK  (explicit command)
+[STATE] PICK failed -- re-homing and searching
+
+[HW] interrupted -- stopping
+[HW] closing
+
+[LOG] closed 2026-11-02T10:16:47

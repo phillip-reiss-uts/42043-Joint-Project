@@ -1,0 +1,50 @@
+==============================================================================
+RUN LOG  2026-11-02T14:28:54
+program  tools/validate_state_space.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     fit --record ../notes/ss_j1_up.csv
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/validate_state_space_2026-11-02_142854.txt
+replaying 312 rows over 7x7 candidates
+Traceback (most recent call last):
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/tools/validate_state_space.py", line 390, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/tools/validate_state_space.py", line 386, in main
+    return args.fn(args)
+           ^^^^^^^^^^^^^
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/tools/validate_state_space.py", line 247, in cmd_fit
+    rms = _fit_score(meta, rows, kp, kv)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/tools/validate_state_space.py", line 226, in _fit_score
+    obs.predict(u)
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/src/observer.py", line 143, in predict
+    self.relin(self.xhat[:self.n], reset_cov=False)
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/src/observer.py", line 117, in relin
+    self.K_ss, P_ss = kalman_gain(self.A_d, self.C, self.Q_d, self.R)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/src/observer.py", line 44, in kalman_gain
+    P = solve_discrete_are(A_d.T, C.T, Q_d, R)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pjreiss/cell/lib/python3.12/site-packages/scipy/linalg/_solvers.py", line 683, in solve_discrete_are
+    return _solve_discrete_are(a, b, q, r, e, s, balanced)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pjreiss/cell/lib/python3.12/site-packages/scipy/_lib/_util.py", line 1138, in wrapper
+    return f(*arrays, *other_args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pjreiss/cell/lib/python3.12/site-packages/scipy/linalg/_solvers.py", line 689, in _solve_discrete_are
+    a, b, q, r, e, s, m, n, r_or_c, gen_are = _are_validate_args(
+                                              ^^^^^^^^^^^^^^^^^^^
+  File "/home/pjreiss/cell/lib/python3.12/site-packages/scipy/linalg/_solvers.py", line 819, in _are_validate_args
+    a = np.atleast_2d(_asarray_validated(a, check_finite=True))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pjreiss/cell/lib/python3.12/site-packages/scipy/_lib/_util.py", line 409, in _asarray_validated
+    a = toarray(a)
+        ^^^^^^^^^^
+  File "/home/pjreiss/cell/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 684, in asarray_chkfinite
+    raise ValueError(
+ValueError: array must not contain infs or NaNs
+
+[LOG] closed 2026-11-02T14:29:10

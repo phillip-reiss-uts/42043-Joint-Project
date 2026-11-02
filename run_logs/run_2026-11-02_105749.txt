@@ -1,0 +1,34 @@
+==============================================================================
+RUN LOG  2026-11-02T10:57:49
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --raw-servo
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_105749.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.314 m  camera 0.200 m above table
+  speed scale : 1.000
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : OFF (add --snapshot DIR to arm the v key)
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[HW] closing
+
+[LOG] closed 2026-11-02T10:58:32

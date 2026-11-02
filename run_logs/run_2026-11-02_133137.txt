@@ -1,0 +1,58 @@
+==============================================================================
+RUN LOG  2026-11-02T13:31:37
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_133137.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.364 m  camera 0.250 m above table
+  speed scale : 1.000
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : OFF (add --snapshot DIR to arm the v key)
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[HW] tracking on (entering TRACK if a cube is in view)
+[PERC] pts   9955  dets 1  best xy (-0.051, -0.330) z 0.042  span 0.072/0.088  n 9538  yaw +40.7  score 9.2  tool (+0.131, -0.242, 0.431)
+[STATE] TRACK  (object in view, tracking released)
+[PERC] pts   9439  dets 0
+[PERC] pts   9266  dets 1  best xy (-0.058, -0.345) z 0.042  span 0.081/0.073  n 9123  yaw +44.8  score 9.1  tool (+0.067, -0.297, 0.404)
+[PERC] pts   9381  dets 1  best xy (-0.057, -0.342) z 0.042  span 0.075/0.087  n 9084  yaw +47.9  score 9.1  tool (+0.045, -0.309, 0.397)
+[PERC] pts  11386  dets 1  best xy (-0.059, -0.347) z 0.042  span 0.080/0.082  n 11248  yaw +45.5  score 9.3  tool (-0.004, -0.327, 0.382)
+[PERC] pts  13059  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.081/0.080  n 12888  yaw +44.4  score 9.5  tool (-0.046, -0.345, 0.368)
+[PERC] pts  13594  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.081/0.081  n 13524  yaw +44.7  score 9.5  tool (-0.051, -0.347, 0.366)
+[PERC] pts  13886  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.081/0.080  n 13752  yaw +45.6  score 9.5  tool (-0.053, -0.348, 0.365)
+[STATE] PICK  (explicit command)
+[PERC] pts  14015  dets 1  best xy (-0.055, -0.347) z 0.042  span 0.081/0.082  n 13888  yaw +45.3  score 9.5  tool (-0.054, -0.348, 0.365)
+[PERC] pts  14685  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.082/0.080  n 14611  yaw +46.1  score 9.6  tool (-0.054, -0.350, 0.357)
+[PERC] pts  16255  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.082/0.081  n 16098  yaw +45.4  score 9.7  tool (-0.054, -0.352, 0.349)
+[PERC] pts  17659  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.082  n 17578  yaw +44.2  score 9.8  tool (-0.055, -0.354, 0.342)
+[PERC] pts  19276  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.079/0.083  n 19104  yaw +47.2  score 9.9  tool (-0.056, -0.355, 0.334)
+[PERC] pts  21039  dets 1  best xy (-0.057, -0.350) z 0.042  span 0.080/0.082  n 21001  yaw +45.4  score 10.0  tool (-0.056, -0.356, 0.326)
+[PERC] pts    292  dets 0
+[PERC] pts    269  dets 0
+[PERC] pts  20244  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.082  n 20206  yaw +44.5  score 9.9  tool (-0.057, -0.357, 0.329)
+[SERVO] DESCENT SHORT: stopped 28 mm above the grasp pose (wanted z 0.268 at (-0.055, -0.347), reached z 0.268 at (-0.030, -0.360)) -- not closing
+[STATE] PICK failed -- re-homing and searching
+
+[HW] interrupted -- stopping
+[HW] closing
+
+[LOG] closed 2026-11-02T13:32:40

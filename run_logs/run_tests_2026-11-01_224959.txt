@@ -1,0 +1,35 @@
+==============================================================================
+RUN LOG  2026-11-01T22:49:59
+program  run_tests.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --trials 4 --outdir /tmp/sim_pick_check
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_tests_2026-11-01_224959.txt
+[INFO] arm model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/ur3e/ur3e.xml
+[INFO] gripper model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/onrobot_rg2/onrobot_rg2.xml
+[INFO] dummy bracket mass 0.030 kg at the midpoint of the camera offset
+[INFO] Added 'depth_cam' to gripper/base
+[INFO] arm base rotated by UR_ROOT_YAW onto the cell frame
+[INFO] gripper force range = (-0.1428, 0.1428) N
+[INFO] sim home keyframe := SIM_HOME_Q (camera centred on the table)
+
+================================================================================================
+  HEADLESS SERVO HARNESS   band=off  kf=off  trials=4
+================================================================================================
+  seed  band    kf   grasp approach gap mm    jaw q     force    obj mm   est err  occ/rec     kf upd/rej
+  0     off     off  ok    ok       2.33      0.481     3.00     0.0      8.71     False/False 0/0
+  1     off     off  ok    ok       0.70      0.481     3.00     0.0      2.72     True/True   0/0
+  2     off     off  ok    ok       3.13      0.481     3.00     0.0      5.73     False/False 0/0
+  3     off     off  ok    ok       1.91      0.481     3.00     0.0      5.60     False/False 0/0
+
+  grasp gap : mean 2.02  max 3.13 mm   (n=4)
+  approach  : 4/4 complete
+  grasp held: 4/4 verified by the jaws
+  success   : 4/4 picked and lifted (approach AND grasp AND lift)
+  rechecks  : 0 trial(s) needed a lift-and-recheck
+  wrote summary.csv, servo_paths.png, distance_closure.png,
+        estimate_error.png, summary.png  ->  /tmp/sim_pick_check/
+
+[LOG] closed 2026-11-01T22:50:16

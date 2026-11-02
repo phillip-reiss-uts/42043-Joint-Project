@@ -1,0 +1,41 @@
+==============================================================================
+RUN LOG  2026-11-02T12:25:19
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --snapshot shots/
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_122519.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.364 m  camera 0.250 m above table
+  speed scale : 0.500
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : v writes a PNG into shots/
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+Traceback (most recent call last):
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/run_hardware.py", line 557, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/run_hardware.py", line 295, in main
+    arm.move(cfg.UR_HOME_Q, GRIP_OPEN, rate=RAPID)
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/src/arm.py", line 298, in move
+    self._command_step(ctrl_arm, grip)
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/src/arm.py", line 144, in _command_step
+    self.backend.step()
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/src/robot_backend_ur.py", line 168, in step
+    time.sleep(rest)
+KeyboardInterrupt
+
+[LOG] closed 2026-11-02T12:25:25

@@ -249,17 +249,46 @@ def _grip_pos(width_mm):
                          cfg.GRIP_OPEN, cfg.GRIP_CLOSED))
 
 
+def _seed(q):
+    # Every arm joint is revolute, so q and q + 2*pi*k are the same pose. The
+    # IK clips to +-2*pi ABSOLUTE, so a joint sitting on that boundary (seen on
+    # the cell: q6 = -6.283) cannot be moved by the solver at all. Wrap the seed
+    # into (-pi, pi] first; the pose is unchanged.
+    q = np.asarray(q, float)[:cfg.ARM_DOF]
+    return (q + np.pi) % (2.0 * np.pi) - np.pi
+
+
 def _move_tool(cell, session, xy, z, grip=cfg.GRIP_OPEN, rate=None):
     # One IK solve to a flange pose, then a plain joint move. Keeps the current
     # orientation, matching what the servo holds.
     arm = cell.arm()
-    _p, R = cell.kin().pose(cell.backend().joint_positions())
-    q = arm.solve_ik([xy[0], xy[1], z],
-                     np.asarray(cell.backend().joint_positions(), float),
+    q_now = np.asarray(cell.backend().joint_positions(), float)
+    _p, R = cell.kin().pose(q_now)
+    q = arm.solve_ik([xy[0], xy[1], z], _seed(q_now),
                      R_target=R, max_joint=2.0 * np.pi)
     p_ik, _ = cell.kin().pose(q[:cfg.ARM_DOF])
-    if np.linalg.norm(p_ik - np.array([xy[0], xy[1], z])) > 2e-3:
+    miss = np.linalg.norm(p_ik - np.array([xy[0], xy[1], z]))
+    if miss > 2e-3:
+        # The damped solver can pin itself in a straight-elbow/straight-wrist
+        # basin when seeded from a joint vector already near one. The pose is
+        # reachable from the home seed, so retry there once and log it.
+        q_home = arm.solve_ik([xy[0], xy[1], z],
+                              np.asarray(cfg.UR_HOME_Q, float),
+                              R_target=R, max_joint=2.0 * np.pi)
+        p_home, _ = cell.kin().pose(q_home[:cfg.ARM_DOF])
+        if np.linalg.norm(p_home - np.array([xy[0], xy[1], z])) <= 2e-3:
+            print('  IK stalled from the current joints (%.1f mm short); '
+                  're-solved from home' % (miss * 1e3))
+            q = q_home
+            miss = 0.0
+    if miss > 2e-3:
         print('  IK could not reach that pose -- not moving')
+        print('  from flange (%+.4f, %+.4f, %+.4f)' % tuple(_p))
+        print('  to   flange (%+.4f, %+.4f, %+.4f)' % (xy[0], xy[1], z))
+        print('  solved to   (%+.4f, %+.4f, %+.4f), miss %.1f mm'
+              % (p_ik[0], p_ik[1], p_ik[2],
+                 np.linalg.norm(p_ik - np.array([xy[0], xy[1], z])) * 1e3))
+        print('  joints now  %s' % np.round(q_now[:cfg.ARM_DOF], 3))
         return False
     arm.move(q, grip, rate=rate or cfg.FEED)
     return True
@@ -270,7 +299,7 @@ def _move_pose(cell, p, R, grip=cfg.GRIP_OPEN, rate=None, settle=0.30):
     # hold it for a moment so the next look is not taken mid-motion.
     arm = cell.arm()
     p = np.asarray(p, float)
-    q = arm.solve_ik(p, np.asarray(cell.backend().joint_positions(), float),
+    q = arm.solve_ik(p, _seed(cell.backend().joint_positions()),
                      R_target=R, max_joint=2.0 * np.pi)
     p_ik, _ = cell.kin().pose(q[:cfg.ARM_DOF])
     if np.linalg.norm(p_ik - p) > 2e-3:
@@ -345,10 +374,29 @@ def step_camera(cell, session, snaps, log):
                                 cam_pos_z=session.cam_pos[2])
 
 
+def step_home(cell, session, snaps, log):
+    print()
+    print('H  HOME -- send the arm to the home configuration')
+    if not _ask_yes('  move to home?', True):
+        return
+    arm = cell.arm()
+    print('  moving to home ...')
+    arm.move(cfg.UR_HOME_Q, cfg.GRIP_OPEN, rate=cfg.RAPID)
+    q = cell.backend().joint_positions()
+    p, _R = cell.kin().pose(q)
+    print('  joints now  %s' % np.round(q[:cfg.ARM_DOF], 3))
+    print('  flange now  (%+.4f, %+.4f, %+.4f)' % tuple(p))
+    log['home'] = dict(joints=[float(v) for v in q[:cfg.ARM_DOF]],
+                       flange=[float(v) for v in p])
+
+
 def step_translation(cell, session, snaps, log):
     print()
-    print('3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the')
-    print('   leftover error in the axis being measured, in metres.')
+    print('3  TRANSLATION -- x then y. The tool moves ONLY the axis under test,')
+    print('   by exactly the number of millimetres you type. Type a signed')
+    print('   distance, watch the jaws, type the next one; press Enter when the')
+    print('   jaws straddle the cube. Nothing is inferred between entries, so')
+    print('   the same sign always moves the same way.')
     z = session.pick_z() + 0.150          # look from above the pick pose
     p = cell.tool_pose()
     if not _move_tool(cell, session, p[:2], z):
@@ -357,63 +405,68 @@ def step_translation(cell, session, snaps, log):
     for axis, name in ((0, 'x'), (1, 'y')):
         print()
         print('   -- %s --' % name)
+        start = session.cam_pos[axis]
+        input('   place the cube in view, then Enter > ')
+        views = _look(cell, session, 'step 3 %s' % name, snaps,
+                      'step3_%s' % name)
+        v = _best(views, near=cell.tool_pose()[:2])
+        if v is None:
+            print('   no cube seen -- skipping %s' % name)
+            out[name] = dict(residual_m=None, aborted=True)
+            continue
+        c = np.asarray(v.centre, float)
+        # First move: onto the perceived centre, one axis only. Everything
+        # after this is a plain relative jog, with no perception in the loop.
         p = cell.tool_pose()
-        prev_err = None
-        last_applied = None
-        history = []
-        for attempt in range(1, MAX_TRIES + 1):
-            input('   place the cube in view, then Enter > ')
-            views = _look(cell, session, 'step 3 %s try %d' % (name, attempt),
-                          snaps, 'step3_%s_%02d' % (name, attempt))
-            v = _best(views, near=cell.tool_pose()[:2])
-            if v is None:
-                print('   no cube seen -- move it into view and retry')
-                continue
-            c = np.asarray(v.centre, float)
-            print('   cube reads (%+.4f, %+.4f); moving onto it' % (c[0], c[1]))
-            if not _move_tool(cell, session, (c[0], c[1]), z):
-                return
-            err = _ask_float('   error in %s (mm the tool is off, signed)'
-                             % name, 0.0) * 1e-3
-            history.append(err)
+        target = [p[0], p[1]]
+        target[axis] = c[axis]
+        print('   cube reads (%+.4f, %+.4f); moving %s to %+.4f'
+              % (c[0], c[1], name, target[axis]))
+        if not _move_tool(cell, session, target, z):
+            return
 
-            # If the residual grew after the last correction, the last update
-            # went the wrong way. Undo it and stop this axis instead of walking
-            # away for the remaining tries.
-            if prev_err is not None:
-                margin = max(0.002, 0.20 * abs(prev_err))
-                if abs(err) > abs(prev_err) + margin:
-                    if last_applied is not None:
-                        session.cam_pos[axis] -= last_applied
-                    print('   residual grew %.1f -> %.1f mm; undoing the last '
-                          'update and stopping %s'
-                          % (prev_err * 1e3, err * 1e3, name))
-                    print('   CAM_POS[%s] -> %.5f' % (name,
-                                                      session.cam_pos[axis]))
-                    out[name] = dict(residual_m=err, tries=attempt,
-                                     aborted=True,
-                                     residual_history_m=history)
-                    break
-
-            session.cam_pos[axis] += err
-            last_applied = err
-            print('   CAM_POS[%s] -> %.5f' % (name, session.cam_pos[axis]))
-            if abs(err) <= OFFSET_TOL:
-                out[name] = dict(residual_m=err, tries=attempt,
-                                 residual_history_m=history)
-                print('   %s converged at %+.1f mm' % (name, err * 1e3))
+        total = 0.0
+        tries = 0
+        while True:
+            raw = input('   move tool in %s, mm signed  (Enter when the jaws '
+                        'straddle the cube) > ' % name).strip()
+            if not raw:
                 break
-            prev_err = err
+            try:
+                d = float(raw) * 1e-3
+            except ValueError:
+                print('   not a number')
+                continue
+            if d == 0.0:
+                break
             p = cell.tool_pose()
-            _move_tool(cell, session, p[:2], z)
+            tgt = [p[0], p[1]]
+            tgt[axis] = p[axis] + d
+            if not _move_tool(cell, session, tgt, p[2]):
+                break
+            total += d
+            tries += 1
+            print('   moved %+.0f mm in %s; total %+.0f mm from the first look'
+                  % (d * 1e3, name, total * 1e3))
+
+        # The tool ends on the cube, so the mount was short by -total along
+        # that base axis. CAM_POS is in the flange frame: convert through the
+        # flange rotation at the pose the measurement was taken at.
+        _pf, R_flange = cell.kin().pose(cell.backend().joint_positions())
+        delta = np.asarray(R_flange, float).T @ (np.eye(3)[axis] * total)
+        session.cam_pos = [float(a + b) for a, b in
+                           zip(session.cam_pos, delta)]
+        print('   CAM_POS[%s] -> %.5f (%+.0f mm in the flange frame)'
+              % (name, session.cam_pos[axis],
+                 (session.cam_pos[axis] - start) * 1e3))
+        out[name] = dict(residual_m=-total, tries=tries,
+                         residual_history_m=[-total])
+        if abs(total) <= OFFSET_TOL:
+            print('   %s done: the mount was already right (total %+.1f mm)'
+                  % (name, total * 1e3))
         else:
-            out[name] = dict(residual_m=history[-1] if history else None,
-                             tries=MAX_TRIES, aborted=True,
-                             residual_history_m=history)
-            print('   %s did not converge in %d tries -- leaving as is'
-                  % (name, MAX_TRIES))
-        # re-seed the mount for the next axis
-        session.cam_pos = list(session.cam_pos)
+            print('   %s done: mount corrected by %+.1f mm of tool travel'
+                  % (name, -total * 1e3))
     log['translation'] = out
 
 
@@ -512,6 +565,63 @@ def step_wrist_jog(cell, session, snaps, log):
         print('   PASS: centre holds within 5 mm')
 
 
+def step_mount_drift(cell, session, snaps, log):
+    print()
+    print('11 MOUNT DRIFT -- static cube, two poses 100 mm apart, no fit.')
+    print('   Nothing is servoed and nothing is changed. If the reported centre')
+    print('   moves with the tool, the mount rotation is wrong.')
+    input('   place the cube in view, then Enter > ')
+    z = session.pick_z() + 0.150
+    p = cell.tool_pose()
+    if not _move_tool(cell, session, p[:2], z):
+        return
+    views = _look(cell, session, 'drift start', snaps, 'step11_start')
+    v = _best(views, near=cell.tool_pose()[:2])
+    if v is None:
+        print('   no cube in view -- nothing checked')
+        return
+    # Centre on the cube FIRST. With the tool already 100 mm off, the extra
+    # 100 mm takes the cube out of the frame and the test records nothing.
+    c0 = np.asarray(v.centre, float)
+    if not _move_tool(cell, session, (c0[0], c0[1]), z):
+        return
+    views = _look(cell, session, 'drift A', snaps, 'step11_a')
+    v = _best(views, near=cell.tool_pose()[:2])
+    if v is None:
+        print('   no cube after centring -- nothing checked')
+        return
+    a = np.array(v.centre[:2], float)
+    moved = 0
+    b = None
+    for sign in (1.0, -1.0):
+        p = cell.tool_pose()
+        if not _move_tool(cell, session, (p[0] + sign * 0.10, p[1]), p[2]):
+            continue
+        views = _look(cell, session, 'drift %s' % ('B' if sign > 0 else 'C'),
+                      snaps, 'step11_b' if sign > 0 else 'step11_c')
+        v = _best(views, near=cell.tool_pose()[:2])
+        if v is not None:
+            b = np.array(v.centre[:2], float)
+            moved = int(sign * 100)
+            break
+        print('   cube left the frame at %+d mm; trying the other way'
+              % int(sign * 100))
+    if b is None:
+        print('   the cube left the frame in both directions -- nothing checked')
+        return
+    d = float(np.linalg.norm(b - a))
+    print('   A (%+.4f, %+.4f)' % tuple(a))
+    print('   B (%+.4f, %+.4f)   tool moved %+d mm in x'
+          % (b[0], b[1], moved))
+    print('   reported drift %.1f mm' % (d * 1e3))
+    if d > 0.010:
+        print('   FAIL: the report follows the arm -- mount rotation is wrong')
+    else:
+        print('   PASS: the report holds still')
+    log['mount_drift'] = dict(a=[float(v) for v in a],
+                              b=[float(v) for v in b], drift_m=d)
+
+
 def step_angle(cell, session, snaps, log):
     print()
     print('4  ANGLE -- the cube is a fixed point in the BASE frame, so its place')
@@ -520,7 +630,10 @@ def step_angle(cell, session, snaps, log):
     print('   rotation that makes them agree.')
     print('   The translation is not fitted here; it comes from step 3.')
     input('   place the cube in view, then Enter > ')
-    z = session.pick_z() + 0.200
+    # 150 mm, the same look height step 3 uses. At 200 mm the flange pose is
+    # 12 mm beyond the arm's reach from a cube at the front of the table
+    # (elbow fully straight), and the step cannot start.
+    z = session.pick_z() + 0.150
     p = cell.tool_pose()
     if not _move_tool(cell, session, p[:2], z):
         return
@@ -554,9 +667,12 @@ def step_angle(cell, session, snaps, log):
         T_tool = _flange_T(cell)
         ang = np.radians(12.0)
         R_new = T_tool[:3, :3] @ rotvec_to_R(np.array([0.0, 0.0, ang]))
-        p = T_tool[:3, 3] + np.array([0.01, -0.01, 0.0])
+        # 5 mm per nudge, not 10: six poses at 10 mm walk the wrist 60 mm
+        # further out, and the last two are past the reach limit at this
+        # height. 5 mm keeps all six inside it.
+        p = T_tool[:3, 3] + np.array([0.005, -0.005, 0.0])
         arm = cell.arm()
-        q = arm.solve_ik(p, np.asarray(cell.backend().joint_positions(), float),
+        q = arm.solve_ik(p, _seed(cell.backend().joint_positions()),
                          R_target=R_new, max_joint=2.0 * np.pi)
         arm.move(q, cfg.GRIP_OPEN, rate=cfg.FEED)
 
@@ -564,30 +680,48 @@ def step_angle(cell, session, snaps, log):
         print('   need at least 3 poses, got %d -- nothing fitted' % len(pts))
         return
 
-    # q_i = T_tool^-1 * p_cam_i must be ONE point; fit R_extra on p_cam so that
-    # R_extra p_cam lands where the tool sees it.
-    def residual(rv):
-        R = rotvec_to_R(rv)
-        out = []
-        for T_tool, p_cam in pts:
-            q_i = (np.linalg.inv(T_tool) @ np.r_[R @ p_cam, 1.0])[:3]
-            out.append(q_i)
-        out = np.array(out)
+    # The cube's position in the BASE frame is one point. From the mount
+    # (c, R): X = p_tool + R_tool (c + R p_cam), with c from step 3. Fit R, the
+    # camera-to-flange rotation, by making every pose agree on X.
+    #
+    # The camera origin must be in here. An earlier version folded the point
+    # straight into the tool frame and dropped p_cam_w, which leaves the tool's
+    # own translation (the 5 mm nudges) in the residual; it then "explained"
+    # 20 mm and a 60 deg wrist sweep with a 152 deg rotation.
+    # The mount's ROLL about the camera's optical axis is NOT observable from
+    # this data. Rotating the camera about the ray from the lens to the cube
+    # leaves p_cam where it was, so it leaves every X unchanged; a three-axis
+    # fit is free to run 170 deg around that ray and call it a better fit.
+    # Fit only the two tilts, as a correction on the current quat, and hold the
+    # roll. The parameter is a rotation in the CAMERA frame about its own x and
+    # y (z is the optical axis).
+    c_fit = np.asarray(session.cam_pos, float)
+    R_cur = rot_from_quat(tuple(session.cam_quat))
+
+    def make_R(ab):
+        return R_cur @ rotvec_to_R(np.array([ab[0], ab[1], 0.0]))
+
+    def residual(ab):
+        R = make_R(ab)
+        out = np.array([T[:3, 3] + T[:3, :3] @ (c_fit + R @ p_cam)
+                        for T, p_cam in pts])
         # every pose must agree with the first
         return (out - out[0]).ravel()
 
     from scipy.optimize import least_squares
-    sol = least_squares(residual, np.zeros(3))
-    dev = float(np.max(np.abs(residual(sol.x)))) * 1e3
-    R_fix = rotvec_to_R(sol.x)
-    q_old = rot_from_quat(tuple(session.cam_quat))
-    q_new = q_old @ R_fix
-    from src.calibration_camera import quat_from_rot
-    new_quat = quat_from_rot(q_new)
     print()
+    print('   residual with the current quat      : %.2f mm'
+          % (float(np.max(np.abs(residual([0.0, 0.0])))) * 1e3))
+    sol = least_squares(residual, np.zeros(2))
+    dev = float(np.max(np.abs(residual(sol.x)))) * 1e3
+    R_fix = make_R(sol.x)
+    from src.calibration_camera import quat_from_rot
+    new_quat = quat_from_rot(R_fix)
+    delta_deg = float(np.degrees(np.linalg.norm(sol.x)))
     print('   residual after fit                 : %.2f mm' % dev)
     print('   CAM_QUAT -> (%.6f, %.6f, %.6f, %.6f)' % tuple(new_quat))
-    print('   correction %.2f deg' % np.degrees(np.linalg.norm(sol.x)))
+    print('   correction %.2f deg tilt (roll about the optical axis held)'
+          % delta_deg)
     if dev > 2.0:
         print('   ABOVE 2 mm: the poses disagree by more than one rotation can')
         print('   explain. The cube probably moved, or a pose was oblique.')
@@ -834,6 +968,8 @@ def main(argv=None):
             print('  4 angle          5 pick height     6 grip width')
             print('  7 readback       8 empty-table check')
             print('  9 translation check  10 wrist-jog mount check')
+            print('  11 mount drift check (static cube, 100 mm apart)')
+            print('  h home')
             print('  s save to config  w write scratch JSON   r reset   q quit')
             choice = input('> ').strip().lower()
             if choice in ('q', 'quit'):
@@ -851,11 +987,12 @@ def main(argv=None):
                 session.stamp = keep
                 log = {}
                 continue
-            fn = {'1': step_table, '2': step_camera, '3': step_translation,
+            fn = {'h': step_home,
+                  '1': step_table, '2': step_camera, '3': step_translation,
                   '4': step_angle, '5': step_pick_height,
                   '6': step_grip_width, '7': step_readback,
                   '8': step_empty_table, '9': step_translation_check,
-                  '10': step_wrist_jog}.get(choice)
+                  '10': step_wrist_jog, '11': step_mount_drift}.get(choice)
             if fn is None:
                 continue
             try:

@@ -1,0 +1,98 @@
+==============================================================================
+RUN LOG  2026-11-02T12:05:39
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --snapshot shots/
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_120539.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.314 m  camera 0.200 m above table
+  speed scale : 0.500
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : v writes a PNG into shots/
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[HW] no camera look yet -- press p first
+[PERC] pts   7890  dets 1  best xy (+0.073, -0.289) z 0.042  span 0.071/0.072  n 7848  yaw +74.4  score 9.0
+[HW] wrote shots/snap_001.png
+[HW] tracking on (entering TRACK if a cube is in view)
+[PERC] pts   7849  dets 1  best xy (+0.037, -0.226) z 0.042  span 0.076/0.080  n 7808  yaw +27.4  score 9.0
+[STATE] TRACK  (object in view, tracking released)
+[STATE] PICK  (explicit command)
+[PERC] pts   8357  dets 1  best xy (+0.038, -0.226) z 0.042  span 0.074/0.079  n 8357  yaw +27.8  score 9.0
+[PERC] pts   9189  dets 1  best xy (+0.036, -0.227) z 0.042  span 0.075/0.077  n 9076  yaw +26.9  score 9.1
+[PERC] pts  10146  dets 1  best xy (+0.026, -0.236) z 0.042  span 0.075/0.081  n 10073  yaw +27.8  score 9.2
+[PERC] pts  11266  dets 1  best xy (+0.013, -0.251) z 0.042  span 0.073/0.077  n 11150  yaw +27.5  score 9.3
+[PERC] pts  12626  dets 1  best xy (-0.001, -0.272) z 0.042  span 0.073/0.077  n 12580  yaw +27.0  score 9.4
+[PERC] pts  14693  dets 1  best xy (-0.011, -0.300) z 0.042  span 0.076/0.078  n 14646  yaw +27.9  score 9.6
+[PERC] pts  16463  dets 1  best xy (-0.018, -0.333) z 0.042  span 0.076/0.079  n 16384  yaw +27.3  score 9.7
+[PERC] pts  18696  dets 1  best xy (-0.017, -0.372) z 0.042  span 0.078/0.078  n 18672  yaw +26.8  score 9.8
+[PERC] pts  15986  dets 1  best xy (-0.009, -0.406) z 0.042  span 0.079/0.053  n 15963  yaw +25.6  score 8.5
+[PERC] pts      0  dets 0
+[PERC] pts    109  dets 0
+[PERC] pts     47  dets 0
+[PERC] pts    167  dets 0
+[PERC] pts    204  dets 0
+[PERC] pts    207  dets 0
+[PERC] pts    158  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts     20  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts      0  dets 0
+[GRIP] grip: width 61.8 mm after 7.00 s
+[GRASP] closed: finger 0.351  force +nan  vel +0.0000  detected None
+[GRASP] jaws closed on something -- no force sensor, so this is a width verdict, not a measured grip
+[STATE] PICK  (grasped -- press 7 to put it back down)
+[PERC] pts   1112  dets 0
+[STATE] PUTDOWN  (placing the cube back on the table)
+[HW] put-down at -0.0 mm from the grasp height, 0.0 mm from target
+[STATE] PUTDOWN  (cube released)
+[STATE] TRACK  (after put-down)
+[PERC] pts   8601  dets 1  best xy (+0.177, -0.170) z 0.042  span 0.069/0.077  n 8601  yaw +76.5  score 9.1
+[PERC] pts   8867  dets 1  best xy (+0.164, -0.169) z 0.042  span 0.068/0.068  n 8480  yaw +78.2  score 9.0
+[PERC] pts   9413  dets 1  best xy (+0.157, -0.151) z 0.042  span 0.070/0.066  n 9162  yaw +76.7  score 9.1
+[PERC] pts   8825  dets 1  best xy (+0.152, -0.143) z 0.042  span 0.071/0.055  n 8476  yaw +77.6  score 8.2
+[PERC] pts   5730  dets 0
+[PERC] pts   1783  dets 0
+[PERC] pts    352  dets 0
+[PERC] pts     60  dets 0
+[PERC] pts      0  dets 0
+[TRACK] chunk ended with no fresh look -- the cube is out of view; the arm is held where it stopped
+[PERC] pts     99  dets 0
+[PERC] pts      0  dets 0
+[PERC] pts     14  dets 0
+[TRACK] chunk ended with no fresh look -- the cube is out of view; the arm is held where it stopped
+[STATE] WAIT  (table empty)
+[STATE] not at home -- returning home
+
+[HW] interrupted -- stopping
+[HW] closing
+Traceback (most recent call last):
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/run_hardware.py", line 557, in <module>
+    raise SystemExit(main())
+          ^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+
+[LOG] closed 2026-11-02T12:10:00

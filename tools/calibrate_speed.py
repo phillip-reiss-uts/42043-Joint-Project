@@ -55,6 +55,7 @@ CAL_OVERSHOOT_M = 0.003          # m
 CAL_MOVE_M = 0.060               # m, test path
 CAL_BOX_M = 0.080                # m, allowed excursion from start
 CAL_START_CLEAR_M = 0.15         # m above table
+CAL_V_WINDOW_S = 0.20            # s, averaging window for the speed check
 
 CANDIDATE_SPEEDS = (0.004, 0.006, 0.008, 0.012, 0.016, 0.020)
 
@@ -149,22 +150,40 @@ def _run_one(backend, arm, kin, p0, q0, target, speed, scale):
     peak_qd = [0.0]
     reason = [None]
 
+    actual_limit = min(CAL_V_MAX, max(1.5 * speed, speed + 0.003))
+
+    n_calls = [0]
+
     def aborted():
         now = time.monotonic()
-        dt = max(now - last_t[0], 1e-6)
-        last_t[0] = now
         p, _ = _pose(kin, backend)
-        v = float(np.linalg.norm(p - last_p[0]) / dt)
-        last_p[0] = p.copy()
+        n_calls[0] += 1
+        if n_calls[0] % 250 == 0:
+            print('    iter %4d: %.1f mm from target, moved %.1f mm'
+                  % (n_calls[0], float(np.linalg.norm(p - target)) * 1e3,
+                     float(np.linalg.norm(p - p0)) * 1e3))
         qd = np.asarray(backend.joint_velocities(), float)
         qdv = float(np.max(np.abs(qd))) if len(qd) else 0.0
-        peak_v[0] = max(peak_v[0], v)
         peak_qd[0] = max(peak_qd[0], qdv)
-        actual_limit = min(CAL_V_MAX,
-                           max(1.5 * speed, speed + 0.003))
+
+        # Speed over a window, not over one control cycle. This callback runs
+        # once per servo iteration, but those iterations are shorter than the
+        # joint readback resolves: differencing poses ~1 ms apart turns sub-
+        # 0.1 mm of readback noise into 0.06 m/s and latched the run at
+        # candidate 0.004 before the arm had moved (final error 60.0 mm, peak
+        # joint speed 0.00).
+        dt = now - last_t[0]
+        if dt >= CAL_V_WINDOW_S:
+            v = float(np.linalg.norm(p - last_p[0]) / dt)
+            last_t[0] = now
+            last_p[0] = p.copy()
+            peak_v[0] = max(peak_v[0], v)
+        else:
+            v = 0.0
+
         if v > actual_limit:
-            reason[0] = ('actual speed %.3f m/s (requested %.3f, limit %.3f)'
-                         % (v, speed, actual_limit))
+            reason[0] = ('actual speed %.3f m/s over %.0f ms (requested %.3f, '
+                         'limit %.3f)' % (v, dt * 1e3, speed, actual_limit))
         elif qdv > CAL_JOINT_MAX:
             reason[0] = 'joint speed %.2f rad/s' % qdv
         elif np.linalg.norm(p - p0) > CAL_BOX_M:
@@ -175,8 +194,18 @@ def _run_one(backend, arm, kin, p0, q0, target, speed, scale):
 
     max_iters = max(2000, int(3.0 * CAL_MOVE_M / max(speed, 1e-6)
                                / backend.dt))
-    ok, _, _ = sv.servo(target[2], max_iters=max_iters, aborted=aborted)
+    q_start = np.asarray(backend.joint_positions(), float).copy()
+    ok, iters, servo_err = sv.servo(target[2], max_iters=max_iters,
+                                    aborted=aborted)
     p_end, _ = _pose(kin, backend)
+    q_end = np.asarray(backend.joint_positions(), float)
+    # One line that separates "the servo never commanded a step" from "it
+    # commanded and the robot did not follow".
+    print('    servo: ok=%s iters=%d err %.1f mm | commanded dq %.4f rad | '
+          'robot moved %.4f rad'
+          % (ok, iters, servo_err * 1e3,
+             float(np.linalg.norm(np.asarray(sv._q_cmd, float) - q_start)),
+             float(np.linalg.norm(q_end - q_start))))
     final = float(np.linalg.norm(p_end - target))
     d = target - p0
     length = float(np.linalg.norm(d))

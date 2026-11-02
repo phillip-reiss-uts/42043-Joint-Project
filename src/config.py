@@ -5,7 +5,7 @@ import numpy as np
 # ---- workcell -------------------------------------------------------------
 # UR3e. Table is axis-aligned: 440 mm along x, 300 mm deep in -y (measured
 # 2026-10-23). The tabletop is 15 mm ABOVE the robot base plane (measured).
-TABLE_HEIGHT = 0.015
+TABLE_HEIGHT = 0.012
 TABLE_THICK = 0.02
 TABLE_CENTRE = [0.0, -0.270]
 TABLE_HALF = [0.22, 0.15]
@@ -46,8 +46,8 @@ PARK_POS = [5.0, 5.0, -0.6]
 # TOOL FLANGE -> D435i optical frame (flange, not gripper base). Measured pair
 # on the cell: tool0 300 mm and lens 186 mm above the base plane, i.e. the lens
 # is 114 mm below the flange, so CAM_POS_z = 0.114 m.
-CAM_POS = (0.046, -0.0080, 0.114)
-CAM_QUAT = (0.008026, -0.695654, -0.718261, -0.010057)
+CAM_POS = (-0.002999, -0.03, 0.102002)
+CAM_QUAT = (0.001436, 0.999789, 0.015986, 0.012787)
 # Simulated camera vertical FOV, chosen to match the D435i depth stream's
 # ~64 deg vertical field at 320x240. Hardware reads its own intrinsics.
 SIM_CAM_FOVY = 64.2
@@ -151,7 +151,7 @@ LQR_GAIN_SCALE = 0.25
 # The pick/place height: TOOL FLANGE above the tabletop, METRES.
 # 236 mm puts the simulated pad bottom on the cube top; the old 250 mm left the
 # pads ~14 mm high. The same value drives the place, so the two cannot disagree.
-PICK_Z_ABOVE_TABLE = 0.236
+PICK_Z_ABOVE_TABLE = 0.256
 # World-space tool z for the grasp (flange frame, metres).
 PICK_Z = TABLE_HEIGHT + PICK_Z_ABOVE_TABLE
 
@@ -166,7 +166,7 @@ STEPS_CLOSE = 3000
 GRIP_RAMP_LEVELS = 8
 # How long a real gripper's single grip command is held before moving on,
 # seconds. Assumes rg_grip blocks until the stroke ends.
-GRIP_HOLD_S = 2.0
+GRIP_HOLD_S = 7.0 #2.0
 STEPS_RELEASE = 2000
 DROP_HOLD_STEPS = 500                     # hold open after a drop
 
@@ -250,7 +250,7 @@ SERVO_RETREAT_V = 0.03                    # m/s for backup and open-loop commit
 # Camera height above the tabletop at hover. This is the one viewing number;
 # the tool0 height is derived from it and the calibrated flange->camera
 # offset. The lens sits CAM_POS[2] below tool0, so tool0 is that much higher.
-CAM_HOVER_HEIGHT = 0.200
+CAM_HOVER_HEIGHT = 0.250
 HOVER_TOOL0_Z = TABLE_HEIGHT + CAM_HOVER_HEIGHT + CAM_POS[2]
 
 # Moving-target demo: bands cycled live with '.', index 0 is off. All below
@@ -298,6 +298,9 @@ YAW_LIMIT_DEG = 60.0
 # not move the wrist. It also delays the boundary branch switch until the cube
 # is clearly past the limit.
 YAW_TRACK_DEADBAND_DEG = 2.0
+# Follow the cube's yaw with the wrist. Off holds the wrist wherever it is;
+# the jaws are symmetric, so a static pick does not need it.
+YAW_TRACK_ENABLED = True
 
 # ---- tracking a moving target --------------------------------------------
 # Chase until the object has held still for the dwell, then commit open loop.
@@ -339,7 +342,7 @@ RG2_XMLRPC_PORT = 41414
 # Jaw widths, in MILLIMETRES: rg_grip() and the datasheet speak mm.
 # Grip is sent as GRIP_OPEN..GRIP_CLOSED (0..255), interpolated onto these.
 RG2_OPEN_WIDTH_MM = 110.0                 # datasheet full stroke
-RG2_CLOSE_WIDTH_MM = 40.0                 # closes past the 60 mm cube
+RG2_CLOSE_WIDTH_MM = 50  # closes past the 60 mm cube
 # Force in newtons, requested from rg_grip(). Write-only, never readable.
 RG2_MIN_GRIP_FORCE_N = 3.0                # floor; do not go below
 RG2_GRIP_FORCE_N = 3.0

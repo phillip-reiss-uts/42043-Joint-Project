@@ -1,0 +1,315 @@
+==============================================================================
+RUN LOG  2026-11-02T11:27:25
+program  tools/calibrate_mount.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_mount_2026-11-02_112725.txt
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.01400, -0.01300, 0.10227)             
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+H  HOME -- send the arm to the home configuration
+  move to home? [Y/n]: [CAL] connecting to 192.168.0.194 ...
+[HW] gripper: XML-RPC answered, width 100.2 mm
+  moving to home ...
+  joints now  [ 1.553 -1.616  0.966 -0.923 -1.571 -6.301]
+  flange now  (+0.1268, -0.2466, +0.4321)
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.01400, -0.01300, 0.10227)             
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the
+   leftover error in the axis being measured, in metres.
+   After the first placement the tool re-looks and re-moves by
+   itself, so type corrections one after another until it
+   converges (residual <= 5 mm).
+
+   -- x --
+   place the cube in view, then Enter > [PERC] pts      0  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_01_001.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   8507  dets 1  best xy (+0.110, -0.279) z 0.042  span 0.061/0.067  n 8453  yaw +89.0  score 9.0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_02_002.png
+   cube reads (+0.1097, -0.2788); moving x to +0.1097
+  IK stalled from the current joints (3.2 mm short); re-solved from home
+   residual x (mm, cube minus tool, signed) [0.0000]:    CAM_POS[x] -> -0.05400 (-40 mm from the start of this axis)
+[PERC] pts   8716  dets 1  best xy (+0.127, -0.300) z 0.042  span 0.061/0.066  n 8529  yaw +89.9  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_03_003.png
+   cube reads (+0.1271, -0.3002); moving x to +0.1271
+   residual x (mm, cube minus tool, signed) [0.0000]:    CAM_POS[x] -> -0.03400 (-20 mm from the start of this axis)
+[PERC] pts   8578  dets 1  best xy (+0.126, -0.285) z 0.042  span 0.061/0.069  n 8535  yaw +89.8  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_04_004.png
+   cube reads (+0.1261, -0.2849); moving x to +0.1261
+   residual x (mm, cube minus tool, signed) [0.0000]:    CAM_POS[x] -> -0.01400 (-0 mm from the start of this axis)
+[PERC] pts   8856  dets 1  best xy (+0.104, -0.287) z 0.042  span 0.061/0.069  n 8564  yaw +89.4  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_05_005.png
+   cube reads (+0.1045, -0.2868); moving x to +0.1045
+  IK stalled from the current joints (3.4 mm short); re-solved from home
+   residual x (mm, cube minus tool, signed) [0.0000]:    80 mm would move the tool +80 mm in x and CAM_POS with it
+  accept this correction? [y/N]:    residual grew 20.0 -> 80.0 mm; undoing the last update and stopping x
+   CAM_POS[x] -> -0.03400
+
+   -- y --
+   place the cube in view, then Enter > 
+  step cancelled
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.03400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the
+   leftover error in the axis being measured, in metres.
+   After the first placement the tool re-looks and re-moves by
+   itself, so type corrections one after another until it
+   converges (residual <= 5 mm).
+
+   -- x --
+   place the cube in view, then Enter > [PERC] pts   9072  dets 1  best xy (+0.102, -0.307) z 0.042  span 0.060/0.067  n 8627  yaw +89.9  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_01_006.png
+   cube reads (+0.1022, -0.3066); moving x to +0.1022
+  IK stalled from the current joints (3.7 mm short); re-solved from home
+   residual x (mm, cube minus tool, signed) [0.0000]:    -60 mm would move the tool -60 mm in x and CAM_POS with it
+  accept this correction? [y/N]:    CAM_POS[x] -> -0.09400 (-60 mm from the start of this axis)
+[PERC] pts   8655  dets 1  best xy (+0.160, -0.310) z 0.042  span 0.061/0.066  n 8586  yaw +89.1  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_02_007.png
+   cube reads (+0.1598, -0.3097); moving x to +0.1598
+   residual x (mm, cube minus tool, signed) [0.0000]:    CAM_POS[x] -> -0.09400 (-60 mm from the start of this axis)
+   x converged at +0.0 mm
+
+   -- y --
+   place the cube in view, then Enter > [PERC] pts   4496  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_01_008.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4442  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_02_009.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4734  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_03_010.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4757  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_04_011.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4750  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_05_012.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4743  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_06_013.png
+   no cube seen -- move it into view and retry
+   y did not converge in 6 tries -- leaving as is
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.09400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.09400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.09400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.09400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.09400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+H  HOME -- send the arm to the home configuration
+  move to home? [Y/n]:   moving to home ...
+  joints now  [ 1.628 -1.615  1.008 -0.966 -1.571 -6.217]
+  flange now  (+0.1450, -0.2421, +0.4247)
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.09400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the
+   leftover error in the axis being measured, in metres.
+   After the first placement the tool re-looks and re-moves by
+   itself, so type corrections one after another until it
+   converges (residual <= 5 mm).
+
+   -- x --
+   place the cube in view, then Enter > [PERC] pts   8564  dets 1  best xy (+0.187, -0.261) z 0.042  span 0.065/0.068  n 8458  yaw +3.4  score 9.0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_01_014.png
+   cube reads (+0.1873, -0.2614); moving x to +0.1873
+   residual x (mm, cube minus tool, signed) [0.0000]:    CAM_POS[x] -> -0.05400 (+40 mm from the start of this axis)
+[PERC] pts   5969  dets 1  best xy (+0.198, -0.200) z 0.042  span 0.046/0.061  n 5969  yaw +2.8  score 6.7
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_x_02_015.png
+   cube reads (+0.1980, -0.2000); moving x to +0.1980
+   residual x (mm, cube minus tool, signed) [0.0000]:    CAM_POS[x] -> -0.05400 (+40 mm from the start of this axis)
+   x converged at +0.0 mm
+
+   -- y --
+   place the cube in view, then Enter > [PERC] pts   4651  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_01_016.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4629  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_02_017.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4643  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_03_018.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4657  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_04_019.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   4642  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1127/step3_y_05_020.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > 
+  step cancelled
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1127   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (-0.05400, -0.01300, 0.10227)                CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  h home
+  s save to config  w write scratch JSON   r reset   q quit
+> unsaved changes were discarded -- rerun with s or w
+
+[LOG] closed 2026-11-02T11:31:34

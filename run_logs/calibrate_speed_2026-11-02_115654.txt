@@ -1,0 +1,29 @@
+==============================================================================
+RUN LOG  2026-11-02T11:56:54
+program  tools/calibrate_speed.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_speed_2026-11-02_115654.txt
+STAGE 1: pendant at 10%. This proves the safety checks.
+Cell clear, no cube, hand on the pendant stop.
+Press Enter to confirm > start  (+0.0873, -0.2202, 0.3624)
+target (+0.1473, -0.2202, 0.3624)  distance 60 mm
+  candidate 0.004 m/s  scale 0.050
+    iter  250: 54.8 mm from target, moved 5.2 mm
+    iter  500: 49.6 mm from target, moved 10.6 mm
+    iter  750: 44.3 mm from target, moved 15.9 mm
+    iter 1000: 39.1 mm from target, moved 21.1 mm
+    iter 1250: 33.9 mm from target, moved 26.4 mm
+    iter 1500: 28.7 mm from target, moved 31.6 mm
+    iter 1750: 23.5 mm from target, moved 36.8 mm
+    iter 2000: 18.3 mm from target, moved 42.0 mm
+    iter 2250: 13.1 mm from target, moved 47.2 mm
+    iter 2500: 7.9 mm from target, moved 52.3 mm
+    servo: ok=True iters=2688 err 4.0 mm | commanded dq 0.4001 rad | robot moved 0.3990 rad
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.002  peak qd 0.01
+recommended UR_SPEED_SCALE = 0.0500  (0.004 m/s)
+
+[LOG] closed 2026-11-02T11:58:02

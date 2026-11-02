@@ -1,0 +1,57 @@
+{
+  "stamp": "2026-11-02_1113",
+  "values": {
+    "TABLE_HEIGHT": 0.012,
+    "CAM_POS": [
+      -0.034,
+      0.232,
+      0.102269
+    ],
+    "CAM_QUAT": [
+      0.008026,
+      -0.695654,
+      -0.718261,
+      -0.010057
+    ],
+    "PICK_Z_ABOVE_TABLE": 0.256,
+    "PICK_Z": 0.268,
+    "RG2_CLOSE_WIDTH_MM": 55.0
+  },
+  "snaps": "/home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1113",
+  "log": {
+    "home": {
+      "joints": [
+        1.5707921981811523,
+        -1.629918714562887,
+        0.9852665106402796,
+        -0.9275715512088318,
+        -1.570815388356344,
+        -6.283215173074993
+      ],
+      "flange": [
+        0.13104724733835324,
+        -0.24150368878188486,
+        0.4311126355377829
+      ]
+    },
+    "translation": {
+      "x": {
+        "residual_m": 0.02,
+        "tries": 3,
+        "aborted": true,
+        "residual_history_m": [
+          -0.01,
+          0.02
+        ]
+      },
+      "y": {
+        "residual_m": 0.14,
+        "tries": 6,
+        "aborted": true,
+        "residual_history_m": [
+          0.14
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+==============================================================================
+RUN LOG  2026-11-02T14:33:40
+program  tools/capture_bundle.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/capture_bundle_2026-11-02_143340.txt
+CAPTURE BUNDLE: still, per-joint steps, chirp. No tuning.
+Pendant 10%, cell clear, no cube, hand on the stop.
+Press Enter to confirm >   still 20 s
+  step_j0_up 3 s
+  step_j0_dn 3 s
+  step_j1_up 3 s
+  step_j1_dn 3 s
+  step_j2_up 3 s
+  step_j2_dn 3 s
+  step_j3_up 3 s
+  step_j3_dn 3 s
+  step_j4_up 3 s
+  step_j4_dn 3 s
+  step_j5_up 3 s
+  step_j5_dn 3 s
+  chirp j1 0.2-3.0 Hz 12 s
+  chirp j3 0.2-3.0 Hz 12 s
+
+wrote /home/pjreiss/Documents/workspace/42043-Joint-Project/hw_bundle_2026-11-02_1435.csv / .json  (9693 rows, 15 phases)
+achieved 121.1 Hz (dt 8.3 ms)
+still qd std (rad/s): 0.0000 0.0000 0.0000 0.0000 0.0000 0.0000
+
+[LOG] closed 2026-11-02T14:35:06

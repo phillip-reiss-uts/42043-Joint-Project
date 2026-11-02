@@ -1,0 +1,130 @@
+==============================================================================
+RUN LOG  2026-11-02T10:51:46
+program  tools/calibrate_mount.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_mount_2026-11-02_105146.txt
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1051   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (0.04600, -0.00800, 0.10227)              
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the
+   leftover error in the axis being measured, in metres.
+[CAL] connecting to 192.168.0.194 ...
+[HW] gripper: XML-RPC answered, width 100.2 mm
+
+   -- x --
+   place the cube in view, then Enter > [PERC] pts    239  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_x_01_001.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   8804  dets 1  best xy (+0.055, -0.253) z 0.042  span 0.060/0.070  n 8701  yaw +0.2  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_x_02_002.png
+   cube reads (+0.0547, -0.2528); moving onto it
+  IK stalled from the current joints (11.4 mm short); re-solved from home
+   error in x (mm the tool is off, signed) [0.0000]:    CAM_POS[x] -> 0.04606
+   x converged at +0.1 mm
+
+   -- y --
+   place the cube in view, then Enter > [PERC] pts   9197  dets 1  best xy (-0.014, -0.338) z 0.042  span 0.061/0.068  n 8616  yaw +0.8  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_01_003.png
+   cube reads (-0.0145, -0.3379); moving onto it
+  IK stalled from the current joints (12.2 mm short); re-solved from home
+   error in y (mm the tool is off, signed) [0.0000]:    CAM_POS[y] -> 0.01200
+   place the cube in view, then Enter > [PERC] pts    487  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_02_004.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts    598  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_03_005.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts    653  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_04_006.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts  32931  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_05_007.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   9377  dets 1  best xy (-0.055, -0.313) z 0.042  span 0.069/0.069  n 8832  yaw +77.2  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_06_008.png
+   cube reads (-0.0552, -0.3126); moving onto it
+  IK stalled from the current joints (17.2 mm short); re-solved from home
+   error in y (mm the tool is off, signed) [0.0000]:    CAM_POS[y] -> 0.01202
+   y converged at +0.0 mm
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1051   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (0.04606, 0.01202, 0.10227)                  CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the
+   leftover error in the axis being measured, in metres.
+  IK stalled from the current joints (17.2 mm short); re-solved from home
+
+   -- x --
+   place the cube in view, then Enter > [PERC] pts   9194  dets 1  best xy (-0.124, -0.331) z 0.042  span 0.070/0.076  n 9022  yaw +77.6  score 9.1
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_x_01_009.png
+   cube reads (-0.1242, -0.3309); moving onto it
+  IK stalled from the current joints (18.7 mm short); re-solved from home
+   error in x (mm the tool is off, signed) [0.0000]:    CAM_POS[x] -> 0.04594
+   x converged at -0.1 mm
+
+   -- y --
+   place the cube in view, then Enter > [PERC] pts   5777  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_01_010.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts  12060  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_02_011.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts   8501  dets 1  best xy (-0.189, -0.329) z 0.042  span 0.061/0.062  n 8434  yaw +88.6  score 9.0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1051/step3_y_03_012.png
+   cube reads (-0.1889, -0.3294); moving onto it
+  IK stalled from the current joints (19.9 mm short); re-solved from home
+   error in y (mm the tool is off, signed) [0.0000]:    CAM_POS[y] -> 0.01202
+   y converged at +0.0 mm
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1051   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (0.04594, 0.01202, 0.10227)                  CHANGED
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      1
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> unsaved changes were discarded -- rerun with s or w
+
+[LOG] closed 2026-11-02T10:55:04

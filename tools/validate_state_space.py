@@ -84,12 +84,22 @@ def _columns(prefix, n=cfg.ARM_DOF):
     return ['%s%d' % (prefix, i) for i in range(n)]
 
 
+def _ensure_parent(path):
+    # --out notes/x is relative to the CWD, and the notes repo lives outside
+    # this tree; creating the parent turns a half-finished 2.5 s hardware run
+    # into a written record instead of a FileNotFoundError at the end.
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
 def _csv_write(path, rows):
     qc = _columns('q')
     vc = _columns('qd')
     uc = _columns('u')
     hc = _columns('qhat')
     dvc = _columns('qdhat')
+    _ensure_parent(path)
     with open(path, 'w', newline='') as fh:
         w = csv.writer(fh)
         w.writerow(['t'] + qc + vc + uc + hc + dvc)
@@ -129,6 +139,13 @@ def _write_config(kp, kv):
     return True
 
 
+def _time_limit(n):
+    # servoJ blocks past dt on this build (~22 ms/cycle measured), so a timeout
+    # sized from the NOMINAL rate aborts a perfectly good step. Allow 40 ms per
+    # cycle, which is still a watchdog for a stuck loop.
+    return max(CAL_HOLD_S + 2.0, 0.040 * int(n) + 1.0)
+
+
 def _safety(qd, t0, limit_s):
     if float(np.max(np.abs(qd))) > CAL_QD_MAX:
         return 'joint speed %.2f rad/s' % float(np.max(np.abs(qd)))
@@ -161,24 +178,33 @@ def cmd_record(args):
             q = np.asarray(backend.joint_positions(), float)
             qd = np.asarray(backend.joint_velocities(), float)
             obs.update(q)
-            rows.append(dict(t=i * cfg.UR_CYCLE_DT, q=q.copy(), qd=qd.copy(),
+            rows.append(dict(t=time.monotonic() - t0, q=q.copy(), qd=qd.copy(),
                              u=u.copy(), qhat=obs.xhat[:cfg.ARM_DOF].copy(),
                              qdhat=obs.xhat[cfg.ARM_DOF:].copy()))
-            aborted = _safety(qd, t0, CAL_HOLD_S + 2.0)
+            aborted = _safety(qd, t0, _time_limit(n))
             if aborted:
                 break
     finally:
         backend.close()
 
+    # The cycle the controller actually achieved, not the one we asked for.
+    # servoJ blocks for longer than dt on this build (~22 ms measured), so a
+    # nominal i*dt time base would stretch every fitted time constant.
+    dt_meas = float(rows[-1]['t'] - rows[0]['t']) / max(1, len(rows) - 1) \
+        if len(rows) > 1 else float(cfg.UR_CYCLE_DT)
+    print('achieved %.1f Hz (dt %.1f ms) over %d rows'
+          % (1.0 / dt_meas, dt_meas * 1e3, len(rows)))
     base = args.out or os.path.join(
         ROOT, 'state_space_record_%s' % time.strftime('%Y-%m-%d_%H%M'))
     base = os.path.splitext(base)[0]
     _csv_write(base + '.csv', rows)
-    meta = dict(q0=list(map(float, q0)), dt=cfg.UR_CYCLE_DT,
+    meta = dict(q0=list(map(float, q0)), dt=dt_meas,
+                target_dt=float(cfg.UR_CYCLE_DT),
                 joint=int(args.joint), step_deg=float(args.step),
                 kp=float(cfg.UR_SERVO_KP), kv=float(cfg.UR_SERVO_KV),
                 aborted=aborted, n=len(rows),
                 created=time.strftime('%Y-%m-%dT%H:%M:%S'))
+    _ensure_parent(base + '.json')
     with open(base + '.json', 'w') as fh:
         json.dump(meta, fh, indent=2)
     print('wrote %s.csv / .json  (%d rows)' % (base, len(rows)))
@@ -189,19 +215,29 @@ def cmd_record(args):
 
 
 def _fit_score(meta, rows, kp, kv):
-    kin = _kin(kp=kp, kv=kv)
-    obs = ArmObserver(None, None, np.asarray(meta['q0'], float),
-                      dt=float(meta['dt']), kin=kin)
-    errs = []
-    for r in rows:
-        q = np.array([r[c] for c in _columns('q')])
-        qd = np.array([r[c] for c in _columns('qd')])
-        u = np.array([r[c] for c in _columns('u')])
-        obs.predict(u)
-        obs.update(q)
-        errs.append(obs.xhat[cfg.ARM_DOF:] - qd)
-    e = np.asarray(errs)
-    return float(np.sqrt(np.mean(e * e)))
+    # A gain pair can be UNSTABLE at the achieved timestep: at 45 Hz a high
+    # Kv relative to Kp makes the discretised closed loop diverge, the state
+    # goes non-finite, and the DARE inside the observer raises. Such a pair is
+    # simply not a candidate -- score it as unusable rather than crashing the
+    # whole fit on the first bad corner of the grid.
+    try:
+        kin = _kin(kp=kp, kv=kv)
+        obs = ArmObserver(None, None, np.asarray(meta['q0'], float),
+                          dt=float(meta['dt']), kin=kin)
+        errs = []
+        for r in rows:
+            q = np.array([r[c] for c in _columns('q')])
+            qd = np.array([r[c] for c in _columns('qd')])
+            u = np.array([r[c] for c in _columns('u')])
+            obs.predict(u)
+            obs.update(q)
+            errs.append(obs.xhat[cfg.ARM_DOF:] - qd)
+        e = np.asarray(errs)
+        if not np.all(np.isfinite(e)):
+            return float('inf')
+        return float(np.sqrt(np.mean(e * e)))
+    except Exception:
+        return float('inf')
 
 
 def cmd_fit(args):
@@ -228,6 +264,7 @@ def cmd_fit(args):
                passed=passed, fit_max_rms=FIT_MAX_RMS,
                joint=meta.get('joint'), step_deg=meta.get('step_deg'))
     path = args.out or os.path.splitext(args.record)[0] + '_fit.json'
+    _ensure_parent(path)
     with open(path, 'w') as fh:
         json.dump(out, fh, indent=2)
     print('wrote %s' % path)
@@ -261,7 +298,7 @@ def _run_step(backend, arm, q0, u, state_space, kin):
             q = np.asarray(backend.joint_positions(), float)
             qd = np.asarray(backend.joint_velocities(), float)
             rows.append((i * cfg.UR_CYCLE_DT, q.copy(), qd.copy()))
-            aborted = _safety(qd, t0, CAL_HOLD_S + 2.0)
+            aborted = _safety(qd, t0, _time_limit(n))
             if aborted:
                 break
     finally:

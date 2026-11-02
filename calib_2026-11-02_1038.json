@@ -1,0 +1,54 @@
+{
+  "stamp": "2026-11-02_1038",
+  "values": {
+    "TABLE_HEIGHT": 0.012,
+    "CAM_POS": [
+      0.046,
+      -0.008,
+      0.102269
+    ],
+    "CAM_QUAT": [
+      0.008026,
+      -0.695654,
+      -0.718261,
+      -0.010057
+    ],
+    "PICK_Z_ABOVE_TABLE": 0.256,
+    "PICK_Z": 0.268,
+    "RG2_CLOSE_WIDTH_MM": 55.0
+  },
+  "snaps": "/home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1038",
+  "log": {
+    "pick_height": {
+      "above_table_m": 0.256,
+      "tool_z": 0.268
+    },
+    "grip_width": {
+      "width_mm": 55.0,
+      "pos": 200.35714285714286,
+      "force_n": 3.0,
+      "settled_mm": 59.59999847412109,
+      "verdict": "grip",
+      "lifted": true
+    },
+    "readback": {
+      "fk": [
+        0.15730299608214326,
+        -0.3331559910716102,
+        0.2704876624178085
+      ],
+      "tcp": [
+        0.157148067355581,
+        -0.33356289663270705,
+        0.27057737785131625,
+        0.06715540232340603,
+        -3.137699471960392,
+        -0.029314465155731335
+      ]
+    },
+    "empty_table": {
+      "detections": 0,
+      "passed": true
+    }
+  }
+}

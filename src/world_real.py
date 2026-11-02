@@ -105,6 +105,7 @@ class RealSenseSource(DepthSource):
             self._profile.get_device().first_depth_sensor()
             .get_depth_scale())            # metres per unit (usually 0.001)
         self._units_mm = None              # decided from the data in capture()
+        self.stale_frames = 0              # frames discarded as queued/old
         self._K_cache = self._read_intrinsics()
 
     def _read_intrinsics(self):
@@ -121,6 +122,21 @@ class RealSenseSource(DepthSource):
 
     def capture(self):
         frames = self._pipe.wait_for_frames()
+        # DRAIN THE QUEUE. The depth stream runs at 30 fps but perception polls
+        # it at the servo's look rate (~0.5-0.8 s), so wait_for_frames returns
+        # the OLDEST queued frame and the backlog grows without bound. The
+        # deprojection then pairs an old image with the current FK pose, which
+        # shifts a stationary cube by the distance the arm has travelled since
+        # that frame -- the estimate appears to move WITH the arm, the servo
+        # chases it, overshoots the cube and the points leave TABLE_XY_BOUNDS
+        # (dets 0). Keep only the newest frame available now.
+        self.stale_frames = 0
+        while True:
+            queued = self._pipe.poll_for_frames()
+            if not queued:
+                break
+            frames = queued
+            self.stale_frames += 1
         depth = frames.get_depth_frame()
         if not depth:
             raise RuntimeError('RealSense returned no depth frame')
@@ -296,14 +312,22 @@ class DepthWorld(ObjectWorld):
         if not changed and (now - getattr(self, '_log_t', 0.0)) < PERCEPTION_LOG_S:
             return
         self._log_t, self._log_n = now, n_dets
+        stale = int(getattr(self.src, 'stale_frames', 0) or 0)
         if not views:
-            print('[PERC] pts %6d  dets 0' % n_points)
+            print('[PERC] pts %6d  dets 0%s'
+                  % (n_points, '  stale %d' % stale if stale else ''))
             return
         v = views[0]
+        try:
+            pf = np.asarray(self._flange_pose()[0], float)
+            tool = '  tool (%+.3f, %+.3f, %.3f)' % (pf[0], pf[1], pf[2])
+        except Exception:
+            tool = ''
         print('[PERC] pts %6d  dets %d  best xy (%+.3f, %+.3f) z %.3f  '
-              'span %.3f/%.3f  n %d  yaw %+.1f  score %.1f'
+              'span %.3f/%.3f  n %d  yaw %+.1f  score %.1f%s%s'
               % (n_points, n_dets, v.centre[0], v.centre[1], v.centre[2],
-                 v.span[0], v.span[1], v.n_points, v.yaw, v.score))
+                 v.span[0], v.span[1], v.n_points, v.yaw, v.score,
+                 '  stale %d' % stale if stale else '', tool))
 
     def camera_pose(self):
         # (p, R) of the camera in the base frame. Subclasses supply it.

@@ -9,6 +9,7 @@ gets geometry from arm.kin (src/kinematics.py) and steps through arm.backend
 import numpy as np
 
 from src.config import (
+    YAW_TRACK_ENABLED,
     ARM_DOF, PICK_Z, R_DOWN, JOINT_RANGE, YAW_LIMIT_DEG,
     YAW_TRACK_DEADBAND_DEG, UR_SPEED_SCALE,
     GRIP_OPEN, SYNC_STEPS, RAPID, FEED,
@@ -23,6 +24,7 @@ from src.config import (
     SERVO_MOVE_TOL, SERVO_COMMIT_TRIES,
     TABLE_HEIGHT,
     CONTACT_SLOW_ZONE, CONTACT_SLOW_FACTOR,
+    UR_HOME_Q,
 )
 from src.tracking import TargetFilter
 # Pure geometry helper; carries no object or simulator state.
@@ -416,7 +418,13 @@ class PBVSServo:
         # flip the branch back before the arm gets there.
         if self._yaw_cmd_last is None:
             self._yaw_cmd_last = _tool_yaw(R_cur)
-        yaw_cmd = _bounded_yaw(yaw_ref, self._yaw_cmd_last)
+        if not YAW_TRACK_ENABLED or getattr(self, '_yaw_hold', False):
+            # Hold the wrist where it is. Used by the open-loop commit: the
+            # jaws are symmetric, so no wrist turn is needed at the grasp, and
+            # a turn during the descent swings the tool sideways.
+            yaw_cmd = _tool_yaw(R_cur)
+        else:
+            yaw_cmd = _bounded_yaw(yaw_ref, self._yaw_cmd_last)
         self._yaw_cmd_last = yaw_cmd
         R_des = rotation_with_yaw(yaw_cmd, R_DOWN)
         return p_des, R_des
@@ -963,10 +971,24 @@ class PBVSServo:
         self.p_est = np.array(ref, float)
         self.yaw_est = float(self.ref_yaw if self.ref_yaw is not None
                              else self.best_yaw)
+        # RE-LATCH THE YAW BRANCH TO THE WRIST THAT IS ACTUALLY THERE.
+        # The jaws are symmetric, so yaw and yaw+-180 are the same grasp -- but
+        # they are a 180 deg wrist turn, and this commit is open loop: the spin
+        # happens during the descent and swings the tool ~25 mm sideways, which
+        # is what made the descent stop 28 mm short with the right height.
+        # Choosing the equivalent face nearest the CURRENT wrist turns at most
+        # 45 deg, normally not at all.
+        _p_now, R_now = self.current_pose()
+        self._yaw_cmd_last = _tool_yaw(R_now)
         # One height for the grasp and the descent it replaces: PICK_Z, applied
         # in desired_pose. The contact gate still clamps it to the pad limit, so
-        # it cannot drive into the table.
-        p_des, R_des = self.desired_pose(PICK_Z)
+        # it cannot drive into the table. The yaw hold is only for THIS target:
+        # it is cleared immediately after, so later looks track normally.
+        self._yaw_hold = True
+        try:
+            p_des, R_des = self.desired_pose(PICK_Z)
+        finally:
+            self._yaw_hold = False
         ov = getattr(self.viewer, 'overlay', None)
         if ov is not None:
             ov.set_target(p_des, R_des)
@@ -984,6 +1006,28 @@ class PBVSServo:
         q_goal = self.arm.solve_ik_tcp(
             p_des, np.asarray(self.arm.backend.joint_positions(), float),
             R_target=R_des, max_joint=JOINT_RANGE)
+        # What the solver actually produced. A joint move ends at FK(q_goal),
+        # so a horizontal miss here is the SOLVER's residual, not the move's:
+        # the arm cannot land anywhere else than q_goal.
+        p_ik, _ = self.arm.kin.pose(np.asarray(q_goal[:ARM_DOF], float))
+        ik_mm = float(np.linalg.norm(np.asarray(p_ik, float)
+                                    - np.asarray(p_des, float)) * 1e3)
+        if ik_mm > 5.0:
+            # The solver ran out of iterations or into a clip from this seed.
+            # One retry from the home configuration, which is a known-good
+            # branch, before giving up: a 28 mm horizontal miss on the cell was
+            # the solver landing short, not the arm failing to move.
+            q_alt = self.arm.solve_ik_tcp(
+                p_des, np.asarray(UR_HOME_Q, float),
+                R_target=R_des, max_joint=JOINT_RANGE)
+            p_alt, _ = self.arm.kin.pose(np.asarray(q_alt[:ARM_DOF], float))
+            alt_mm = float(np.linalg.norm(np.asarray(p_alt, float)
+                                          - np.asarray(p_des, float)) * 1e3)
+            print('[IK] seed gave %.1f mm, home seed gives %.1f mm'
+                  % (ik_mm, alt_mm))
+            if alt_mm < ik_mm:
+                q_goal, ik_mm = q_alt, alt_mm
+        self.descent_info = dict(ik_mm=ik_mm, lag=0.0, steps=0)
         self.arm.move(q_goal, GRIP_OPEN, rate=FEED, estop=estop)
         # SETTLE. move() returns when the last target has been STREAMED, not
         # when the arm has arrived; servoJ lags it. Measuring straight away
@@ -1028,8 +1072,11 @@ class PBVSServo:
                 why = ('  [ik %.0f mm, joint lag %.2f rad, %d steps]'
                        % (info['ik_mm'], info['lag'], info['steps']))
             msg = ('[SERVO] DESCENT SHORT: stopped %.0f mm above the grasp pose '
-                   '-- not closing%s%s'
-                   % (1e3 * self.descent_short, extra, why))
+                   '(wanted z %.3f at (%+.3f, %+.3f), reached z %.3f at '
+                   '(%+.3f, %+.3f)) -- not closing%s%s'
+                   % (1e3 * self.descent_short,
+                      p_des[2], p_des[0], p_des[1],
+                      p_end[2], p_end[0], p_end[1], extra, why))
             print(msg)
             push(viewer, 'occlusion', 'descent short -- not closing', msg)
             return False, 0

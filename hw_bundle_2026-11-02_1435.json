@@ -1,0 +1,48 @@
+{
+  "q_start": [
+    1.5707236528396606,
+    -1.4723793131164093,
+    0.9853099028216761,
+    -0.9277342122844239,
+    -1.570810619984762,
+    3.270617526140995e-05
+  ],
+  "target_dt": 0.008,
+  "dt_measured": 0.008259811139496179,
+  "rate_hz": 121.06814346132818,
+  "phases": [
+    "chirp_j1",
+    "chirp_j3",
+    "step_j0_dn",
+    "step_j0_up",
+    "step_j1_dn",
+    "step_j1_up",
+    "step_j2_dn",
+    "step_j2_up",
+    "step_j3_dn",
+    "step_j3_up",
+    "step_j4_dn",
+    "step_j4_up",
+    "step_j5_dn",
+    "step_j5_up",
+    "still"
+  ],
+  "rows": 9693,
+  "aborted": null,
+  "still_qd_std": {
+    "qd0": 1.3903002226580965e-08,
+    "qd1": 0.0,
+    "qd2": 0.0,
+    "qd3": 1.7480218008203023e-08,
+    "qd4": 2.0499864188078446e-09,
+    "qd5": 7.754827604001024e-06
+  },
+  "config": {
+    "UR_SERVO_KP": 1000.0,
+    "UR_SERVO_KV": 200.0,
+    "UR_LOOKAHEAD_TIME": 0.1,
+    "UR_SERVO_GAIN": 300,
+    "UR_CYCLE_DT": 0.008
+  },
+  "created": "2026-11-02T14:35:05"
+}

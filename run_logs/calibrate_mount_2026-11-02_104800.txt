@@ -1,0 +1,87 @@
+==============================================================================
+RUN LOG  2026-11-02T10:48:00
+program  tools/calibrate_mount.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_mount_2026-11-02_104800.txt
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1048   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (0.04600, -0.00800, 0.10227)              
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+7  READBACK -- what the robot will actually do
+[CAL] connecting to 192.168.0.194 ...
+[HW] gripper: XML-RPC answered, width 100.2 mm
+  FK flange pose      : (0.1313, -0.2434, 0.4180)
+  controller TCP pose : (0.1310, -0.2437, 0.4183)
+  |FK - TCP|          : 0.5 mm
+  commanded pick z    : 0.2680 (FK now 0.4180)
+  HW_CAM_DELTA_*      : identity
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1048   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (0.04600, -0.00800, 0.10227)              
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+3  TRANSLATION -- x then y. The tool jogs onto the cube; you type the
+   leftover error in the axis being measured, in metres.
+
+   -- x --
+   place the cube in view, then Enter > [PERC] pts    289  dets 0
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1048/step3_x_01_001.png
+   no cube seen -- move it into view and retry
+   place the cube in view, then Enter > [PERC] pts  20178  dets 1  best xy (-0.055, -0.362) z 0.042  span 0.043/0.048  n 2932  yaw +16.6  score 5.7
+  snapshot: /home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1048/step3_x_02_002.png
+   cube reads (-0.0551, -0.3623); moving onto it
+  IK could not reach that pose -- not moving
+  from flange (+0.1313, -0.2434, +0.4180)
+  to   flange (-0.0551, -0.3623, +0.4180)
+  solved to   (-0.0434, -0.3683, +0.4180), miss 13.2 mm
+  joints now  [ 1.572 -1.658  1.085 -0.999 -1.571 -6.283]
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1048   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01200                                   
+  CAM_POS              (0.04600, -0.00800, 0.10227)              
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.25600                                   
+  RG2_CLOSE_WIDTH_MM   55.00000                                  
+  PICK_Z               0.26800                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+[LOG] closed 2026-11-02T10:51:44

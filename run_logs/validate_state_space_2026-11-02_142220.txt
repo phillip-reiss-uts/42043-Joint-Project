@@ -1,0 +1,15 @@
+==============================================================================
+RUN LOG  2026-11-02T14:22:20
+program  tools/validate_state_space.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     record --joint 1 --step 1.5
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/validate_state_space_2026-11-02_142220.txt
+RECORD: raw joint step, observer prediction logged only.
+Pendant 10%, cell clear, no cube, hand on the stop.
+Press Enter to confirm > wrote /home/pjreiss/Documents/workspace/42043-Joint-Project/state_space_record_2026-11-02_1422.csv / .json  (182 rows)
+ABORTED: timeout -- do not use this record
+
+[LOG] closed 2026-11-02T14:22:27

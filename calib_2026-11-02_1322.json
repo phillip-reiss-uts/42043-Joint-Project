@@ -1,0 +1,35 @@
+{
+  "stamp": "2026-11-02_1322",
+  "values": {
+    "TABLE_HEIGHT": 0.012,
+    "CAM_POS": [
+      -0.002999,
+      -0.03,
+      0.102002
+    ],
+    "CAM_QUAT": [
+      0.001436,
+      0.999789,
+      0.015986,
+      0.012787
+    ],
+    "PICK_Z_ABOVE_TABLE": 0.256,
+    "PICK_Z": 0.268,
+    "RG2_CLOSE_WIDTH_MM": 55.0
+  },
+  "snaps": "/home/pjreiss/Documents/workspace/42043-Joint-Project/calib_snaps_2026-11-02_1322",
+  "log": {
+    "pick_height": {
+      "above_table_m": 0.256,
+      "tool_z": 0.268
+    },
+    "grip_width": {
+      "width_mm": 55.0,
+      "pos": 200.35714285714286,
+      "force_n": 3.0,
+      "settled_mm": 87.69999694824217,
+      "verdict": "grip",
+      "lifted": true
+    }
+  }
+}

@@ -1,0 +1,28 @@
+==============================================================================
+RUN LOG  2026-11-02T10:24:47
+program  tools/calibrate_mount.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_mount_2026-11-02_102447.txt
+
+==========================================================================
+WRIST MOUNT CALIBRATION            2026-11-02_1024   (all metres unless _MM)
+==========================================================================
+  TABLE_HEIGHT         0.01500                                   
+  CAM_POS              (0.04600, -0.00800, 0.11400)              
+  CAM_QUAT             (0.00803, -0.69565, -0.71826, -0.01006)   
+  PICK_Z_ABOVE_TABLE   0.23600                                   
+  RG2_CLOSE_WIDTH_MM   40.00000                                  
+  PICK_Z               0.25100                                    (table + above)
+  unsaved changes      0
+==========================================================================
+  1 table height   2 camera height   3 translation
+  4 angle          5 pick height     6 grip width
+  7 readback       8 empty-table check
+  9 translation check  10 wrist-jog mount check
+  s save to config  w write scratch JSON   r reset   q quit
+> 
+[LOG] closed 2026-11-02T10:24:51

@@ -1,0 +1,69 @@
+==============================================================================
+RUN LOG  2026-11-02T13:34:35
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_133435.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.364 m  camera 0.250 m above table
+  speed scale : 1.000
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : OFF (add --snapshot DIR to arm the v key)
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[HW] tracking on (entering TRACK if a cube is in view)
+[PERC] pts   9928  dets 1  best xy (-0.050, -0.331) z 0.042  span 0.072/0.086  n 9601  yaw +43.1  score 9.2  tool (+0.131, -0.242, 0.431)
+[STATE] TRACK  (object in view, tracking released)
+[PERC] pts   9385  dets 0
+[PERC] pts   8838  dets 1  best xy (-0.056, -0.342) z 0.042  span 0.080/0.066  n 8641  yaw +49.6  score 9.1  tool (+0.071, -0.304, 0.401)
+[PERC] pts   8444  dets 1  best xy (-0.054, -0.341) z 0.042  span 0.066/0.089  n 8086  yaw +49.5  score 9.0  tool (+0.049, -0.315, 0.395)
+[PERC] pts  11559  dets 1  best xy (-0.060, -0.345) z 0.042  span 0.078/0.081  n 11437  yaw +46.9  score 9.3  tool (-0.002, -0.331, 0.381)
+[PERC] pts  13273  dets 1  best xy (-0.057, -0.348) z 0.042  span 0.081/0.082  n 13070  yaw +45.1  score 9.5  tool (-0.048, -0.345, 0.368)
+[PERC] pts  13667  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.082/0.080  n 13423  yaw +45.8  score 9.5  tool (-0.052, -0.347, 0.366)
+[PERC] pts  13913  dets 1  best xy (-0.055, -0.348) z 0.042  span 0.083/0.083  n 13602  yaw +44.7  score 9.5  tool (-0.053, -0.348, 0.365)
+[PERC] pts  14126  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.083  n 13946  yaw +46.5  score 9.5  tool (-0.058, -0.350, 0.364)
+[PERC] pts  13865  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.082/0.082  n 13615  yaw +45.8  score 9.5  tool (-0.051, -0.346, 0.365)
+[PERC] pts  13937  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.082/0.081  n 13770  yaw +45.1  score 9.5  tool (-0.056, -0.348, 0.364)
+[STATE] PICK  (explicit command)
+[PERC] pts  15017  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.082  n 14794  yaw +45.4  score 9.6  tool (-0.057, -0.350, 0.356)
+[PERC] pts  16644  dets 1  best xy (-0.055, -0.348) z 0.042  span 0.083/0.083  n 16407  yaw +46.2  score 9.7  tool (-0.057, -0.352, 0.349)
+[PERC] pts  17771  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.079/0.083  n 17676  yaw +46.3  score 9.8  tool (-0.057, -0.354, 0.341)
+[PERC] pts  19599  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.080/0.085  n 19481  yaw +46.2  score 9.9  tool (-0.058, -0.355, 0.333)
+[PERC] pts  21286  dets 1  best xy (-0.056, -0.350) z 0.042  span 0.079/0.082  n 21203  yaw +44.3  score 10.0  tool (-0.058, -0.356, 0.325)
+[PERC] pts    288  dets 0
+[PERC] pts    232  dets 0
+[PERC] pts  20535  dets 1  best xy (-0.057, -0.349) z 0.042  span 0.080/0.082  n 20535  yaw +46.2  score 9.9  tool (-0.058, -0.357, 0.329)
+[IK] seed gave 27.9 mm, home seed gives 0.0 mm
+[GRIP] grip: width 59.9 mm after 7.00 s
+[GRASP] closed: finger 0.364  force +nan  vel +0.0000  detected None
+[GRASP] jaws closed on something -- no force sensor, so this is a width verdict, not a measured grip
+[STATE] PICK  (grasped -- press 7 to put it back down)
+[PERC] pts   2764  dets 0
+[STATE] PUTDOWN  (placing the cube back on the table)
+[HW] put-down at +0.0 mm from the grasp height, 0.0 mm from target
+[STATE] PUTDOWN  (cube released)
+[STATE] TRACK  (after put-down)
+[PERC] pts   8382  dets 1  best xy (-0.057, -0.340) z 0.042  span 0.048/0.063  n 8061  yaw +88.2  score 7.2  tool (+0.131, -0.242, 0.431)
+
+[HW] interrupted -- stopping
+[HW] closing
+
+[LOG] closed 2026-11-02T13:37:14

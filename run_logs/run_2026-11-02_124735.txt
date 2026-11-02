@@ -1,0 +1,68 @@
+==============================================================================
+RUN LOG  2026-11-02T12:47:35
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --snapshot shots/
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_124735.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.364 m  camera 0.250 m above table
+  speed scale : 0.500
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : v writes a PNG into shots/
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[HW] tracking on (entering TRACK if a cube is in view)
+[PERC] pts   8074  dets 1  best xy (+0.145, -0.239) z 0.042  span 0.061/0.071  n 7799  yaw +88.1  score 9.0
+[STATE] TRACK  (object in view, tracking released)
+[PERC] pts   8938  dets 1  best xy (+0.153, -0.245) z 0.042  span 0.061/0.066  n 8652  yaw +89.5  score 9.1
+[PERC] pts  10801  dets 1  best xy (+0.157, -0.258) z 0.042  span 0.061/0.071  n 10250  yaw +88.2  score 9.2
+[PERC] pts  11505  dets 1  best xy (+0.156, -0.268) z 0.042  span 0.060/0.073  n 10872  yaw +88.2  score 9.3
+[PERC] pts  14091  dets 1  best xy (+0.134, -0.286) z 0.042  span 0.062/0.080  n 12909  yaw +89.4  score 9.5
+[PERC] pts  14109  dets 1  best xy (+0.098, -0.290) z 0.042  span 0.062/0.066  n 13967  yaw +88.6  score 9.5
+[PERC] pts  13822  dets 1  best xy (+0.083, -0.280) z 0.042  span 0.062/0.066  n 13822  yaw +89.2  score 9.5
+[PERC] pts  14069  dets 1  best xy (+0.071, -0.251) z 0.042  span 0.063/0.075  n 13980  yaw +88.1  score 9.5
+[PERC] pts  13812  dets 1  best xy (+0.079, -0.221) z 0.042  span 0.061/0.067  n 13447  yaw +89.0  score 9.5
+[PERC] pts  13529  dets 1  best xy (+0.091, -0.210) z 0.042  span 0.061/0.064  n 13197  yaw +88.6  score 9.5
+[PERC] pts  13874  dets 1  best xy (+0.123, -0.195) z 0.042  span 0.062/0.067  n 13559  yaw +89.6  score 9.5
+[PERC] pts  14001  dets 1  best xy (+0.160, -0.192) z 0.042  span 0.061/0.066  n 13437  yaw +88.2  score 9.5
+[PERC] pts  14990  dets 1  best xy (+0.175, -0.199) z 0.042  span 0.063/0.065  n 13646  yaw +88.2  score 9.5
+[PERC] pts  13309  dets 1  best xy (+0.191, -0.217) z 0.042  span 0.059/0.066  n 12776  yaw +89.0  score 9.3
+[PERC] pts  11881  dets 1  best xy (+0.197, -0.244) z 0.042  span 0.045/0.069  n 10435  yaw +90.0  score 7.0
+[PERC] pts  12591  dets 1  best xy (+0.197, -0.258) z 0.042  span 0.047/0.075  n 11385  yaw +89.2  score 7.3
+[PERC] pts  15339  dets 1  best xy (+0.190, -0.294) z 0.042  span 0.060/0.063  n 14260  yaw +88.5  score 9.6
+[PERC] pts  16479  dets 1  best xy (+0.167, -0.318) z 0.042  span 0.061/0.067  n 14896  yaw +88.2  score 9.6
+[PERC] pts  15014  dets 1  best xy (+0.150, -0.327) z 0.042  span 0.062/0.062  n 14873  yaw +87.7  score 9.6
+[PERC] pts  14725  dets 1  best xy (+0.111, -0.329) z 0.042  span 0.061/0.064  n 14725  yaw +88.1  score 9.6
+[PERC] pts  14886  dets 1  best xy (+0.076, -0.314) z 0.042  span 0.062/0.066  n 14886  yaw +88.2  score 9.6
+[PERC] pts  15138  dets 1  best xy (+0.063, -0.301) z 0.042  span 0.061/0.068  n 15106  yaw +88.2  score 9.6
+[PERC] pts  14926  dets 1  best xy (+0.047, -0.273) z 0.042  span 0.062/0.068  n 14926  yaw +88.1  score 9.6
+[PERC] pts  14111  dets 1  best xy (+0.044, -0.241) z 0.042  span 0.062/0.064  n 13974  yaw +88.7  score 9.5
+[PERC] pts  14593  dets 1  best xy (+0.048, -0.225) z 0.042  span 0.063/0.064  n 13891  yaw +88.3  score 9.5
+[PERC] pts  14007  dets 1  best xy (+0.068, -0.197) z 0.042  span 0.062/0.072  n 13371  yaw +88.8  score 9.5
+[PERC] pts  14865  dets 1  best xy (+0.098, -0.176) z 0.042  span 0.064/0.073  n 13916  yaw +87.8  score 9.5
+[PERC] pts  14454  dets 1  best xy (+0.115, -0.170) z 0.042  span 0.063/0.075  n 13744  yaw +0.3  score 9.5
+[PERC] pts  14868  dets 1  best xy (+0.153, -0.173) z 0.042  span 0.064/0.070  n 14223  yaw +0.1  score 9.6
+[PERC] pts  15666  dets 1  best xy (+0.182, -0.176) z 0.042  span 0.063/0.070  n 14307  yaw +89.0  score 9.6
+[HW] tracking off -- holding
+[HW] PAUSED -- holding position; p is ignored until you resume
+[HW] closing
+
+[LOG] closed 2026-11-02T12:48:25

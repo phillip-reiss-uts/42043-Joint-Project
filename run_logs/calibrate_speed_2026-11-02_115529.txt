@@ -1,0 +1,18 @@
+==============================================================================
+RUN LOG  2026-11-02T11:55:29
+program  tools/calibrate_speed.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_speed_2026-11-02_115529.txt
+STAGE 1: pendant at 10%. This proves the safety checks.
+Cell clear, no cube, hand on the pendant stop.
+Press Enter to confirm > start  (+0.0872, -0.2202, 0.3624)
+target (+0.1472, -0.2202, 0.3624)  distance 60 mm
+  candidate 0.004 m/s  scale 0.050
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.002  peak qd 0.01
+recommended UR_SPEED_SCALE = 0.0500  (0.004 m/s)
+
+[LOG] closed 2026-11-02T11:56:35

@@ -1,0 +1,63 @@
+==============================================================================
+RUN LOG  2026-11-02T11:58:11
+program  tools/calibrate_speed.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --stage full --write
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/calibrate_speed_2026-11-02_115811.txt
+STAGE 2: pendant at 100%. The saved scale comes from here.
+Cell clear, no cube, hand on the pendant stop.
+Press Enter to confirm > start  (+0.0873, -0.2202, 0.3624)
+target (+0.1473, -0.2202, 0.3624)  distance 60 mm
+  candidate 0.004 m/s  scale 0.050
+    iter  250: 54.8 mm from target, moved 5.2 mm
+    iter  500: 49.6 mm from target, moved 10.6 mm
+    iter  750: 44.3 mm from target, moved 15.9 mm
+    iter 1000: 39.1 mm from target, moved 21.1 mm
+    iter 1250: 33.9 mm from target, moved 26.4 mm
+    iter 1500: 28.7 mm from target, moved 31.6 mm
+    iter 1750: 23.5 mm from target, moved 36.8 mm
+    iter 2000: 18.3 mm from target, moved 42.0 mm
+    iter 2250: 13.1 mm from target, moved 47.2 mm
+    iter 2500: 7.9 mm from target, moved 52.3 mm
+    servo: ok=True iters=2688 err 4.0 mm | commanded dq 0.4001 rad | robot moved 0.3991 rad
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.002  peak qd 0.01
+  candidate 0.006 m/s  scale 0.075
+    iter  250: 52.3 mm from target, moved 7.8 mm
+    iter  500: 44.4 mm from target, moved 15.8 mm
+    iter  750: 36.6 mm from target, moved 23.7 mm
+    iter 1000: 28.8 mm from target, moved 31.5 mm
+    iter 1250: 21.0 mm from target, moved 39.3 mm
+    iter 1500: 13.2 mm from target, moved 47.1 mm
+    iter 1750: 5.4 mm from target, moved 54.8 mm
+    servo: ok=True iters=1795 err 4.0 mm | commanded dq 0.4008 rad | robot moved 0.3992 rad
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.003  peak qd 0.01
+  candidate 0.008 m/s  scale 0.100
+    iter  250: 49.7 mm from target, moved 10.4 mm
+    iter  500: 39.2 mm from target, moved 21.0 mm
+    iter  750: 28.8 mm from target, moved 31.4 mm
+    iter 1000: 18.4 mm from target, moved 41.9 mm
+    iter 1250: 8.1 mm from target, moved 52.2 mm
+    servo: ok=True iters=1348 err 4.0 mm | commanded dq 0.4013 rad | robot moved 0.3992 rad
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.003  peak qd 0.02
+  candidate 0.012 m/s  scale 0.150
+    iter  250: 44.6 mm from target, moved 15.6 mm
+    iter  500: 29.0 mm from target, moved 31.3 mm
+    iter  750: 13.4 mm from target, moved 46.9 mm
+    servo: ok=True iters=905 err 4.0 mm | commanded dq 0.4012 rad | robot moved 0.3991 rad
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.004  peak qd 0.02
+  candidate 0.016 m/s  scale 0.200
+    iter  250: 39.5 mm from target, moved 20.7 mm
+    iter  500: 18.8 mm from target, moved 41.5 mm
+    servo: ok=True iters=691 err 4.0 mm | commanded dq 0.4011 rad | robot moved 0.3989 rad
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.006  peak qd 0.03
+  candidate 0.020 m/s  scale 0.250
+    iter  250: 34.5 mm from target, moved 25.8 mm
+    iter  500: 8.7 mm from target, moved 51.6 mm
+    servo: ok=True iters=567 err 4.0 mm | commanded dq 0.4011 rad | robot moved 0.3989 rad
+    PASS  final 4.0 mm  over 0.0 mm  peak v 0.007  peak qd 0.04
+recommended UR_SPEED_SCALE = 0.2500  (0.020 m/s)
+write this to src/config.py? [y/N] > 
+[LOG] closed 2026-11-02T12:02:07

@@ -1,0 +1,107 @@
+==============================================================================
+RUN LOG  2026-11-02T13:28:17
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-02_132817.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.364 m  camera 0.250 m above table
+  speed scale : 1.000
+  servo path  : raw
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : OFF (add --snapshot DIR to arm the v key)
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+[HW] raw servo path: no observer/LQR
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[HW] tracking on (entering TRACK if a cube is in view)
+[PERC] pts   8230  dets 1  best xy (+0.064, -0.332) z 0.042  span 0.081/0.081  n 7860  yaw +54.8  score 9.0  tool (+0.131, -0.242, 0.431)
+[STATE] TRACK  (object in view, tracking released)
+[PERC] pts  10139  dets 1  best xy (+0.066, -0.335) z 0.042  span 0.082/0.080  n 8980  yaw +53.0  score 9.1  tool (+0.096, -0.283, 0.409)
+[PERC] pts  12085  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 11745  yaw +55.3  score 9.4  tool (+0.073, -0.323, 0.380)
+[PERC] pts  13340  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.082/0.081  n 12861  yaw +55.5  score 9.5  tool (+0.073, -0.329, 0.372)
+[PERC] pts  13988  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13627  yaw +55.1  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13908  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13601  yaw +55.7  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13879  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13569  yaw +55.7  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13827  dets 1  best xy (+0.073, -0.333) z 0.042  span 0.081/0.080  n 13596  yaw +55.7  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13874  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13598  yaw +55.6  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13916  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13613  yaw +55.6  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13946  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13604  yaw +55.7  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13851  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13647  yaw +55.7  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13854  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.082/0.081  n 13592  yaw +55.0  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  13869  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.081  n 13582  yaw +55.6  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  16023  dets 2  best xy (+0.073, -0.334) z 0.042  span 0.081/0.080  n 13599  yaw +55.7  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  17857  dets 1  best xy (+0.073, -0.334) z 0.042  span 0.081/0.080  n 13589  yaw +55.6  score 9.5  tool (+0.073, -0.333, 0.367)
+[PERC] pts  14341  dets 1  best xy (+0.040, -0.354) z 0.042  span 0.074/0.071  n 13661  yaw +16.8  score 9.5  tool (+0.082, -0.338, 0.364)
+[PERC] pts  14711  dets 1  best xy (+0.032, -0.356) z 0.042  span 0.075/0.073  n 14586  yaw +18.6  score 9.6  tool (+0.042, -0.358, 0.361)
+[PERC] pts  14567  dets 1  best xy (+0.031, -0.356) z 0.042  span 0.074/0.074  n 14470  yaw +18.9  score 9.6  tool (+0.040, -0.358, 0.362)
+[PERC] pts  13993  dets 1  best xy (+0.028, -0.360) z 0.042  span 0.072/0.074  n 13821  yaw +19.1  score 9.5  tool (+0.035, -0.358, 0.363)
+[PERC] pts  20391  dets 2  best xy (+0.028, -0.360) z 0.042  span 0.073/0.073  n 13986  yaw +16.9  score 9.5  tool (+0.028, -0.362, 0.363)
+[PERC] pts  14074  dets 1  best xy (-0.029, -0.369) z 0.042  span 0.077/0.080  n 13886  yaw +28.4  score 9.5  tool (+0.031, -0.357, 0.365)
+[PERC] pts  14405  dets 1  best xy (-0.030, -0.374) z 0.042  span 0.079/0.078  n 14234  yaw +29.0  score 9.6  tool (-0.020, -0.368, 0.362)
+[PERC] pts  14586  dets 1  best xy (-0.029, -0.375) z 0.042  span 0.079/0.079  n 14373  yaw +26.7  score 9.6  tool (-0.023, -0.371, 0.362)
+[PERC] pts  14782  dets 1  best xy (-0.042, -0.356) z 0.042  span 0.079/0.081  n 14333  yaw +45.6  score 9.6  tool (-0.026, -0.373, 0.362)
+[PERC] pts  13753  dets 1  best xy (-0.045, -0.360) z 0.042  span 0.082/0.084  n 13634  yaw +44.5  score 9.5  tool (-0.045, -0.352, 0.368)
+[PERC] pts  14143  dets 1  best xy (-0.055, -0.349) z 0.042  span 0.080/0.083  n 14068  yaw +45.2  score 9.6  tool (-0.044, -0.362, 0.363)
+[PERC] pts  13958  dets 1  best xy (-0.056, -0.347) z 0.042  span 0.082/0.080  n 13668  yaw +45.3  score 9.5  tool (-0.051, -0.355, 0.365)
+[PERC] pts  13618  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.082/0.081  n 13552  yaw +45.3  score 9.5  tool (-0.056, -0.349, 0.365)
+[PERC] pts  13680  dets 1  best xy (-0.057, -0.348) z 0.042  span 0.083/0.081  n 13626  yaw +45.0  score 9.5  tool (-0.056, -0.349, 0.365)
+[PERC] pts  13655  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.083/0.080  n 13621  yaw +45.1  score 9.5  tool (-0.056, -0.349, 0.365)
+[STATE] PICK  (explicit command)
+[PERC] pts  14743  dets 1  best xy (-0.055, -0.348) z 0.042  span 0.080/0.082  n 14500  yaw +46.0  score 9.6  tool (-0.057, -0.351, 0.358)
+[PERC] pts  15960  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.082  n 15878  yaw +45.6  score 9.7  tool (-0.057, -0.353, 0.350)
+[PERC] pts  17398  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.083  n 17291  yaw +45.3  score 9.8  tool (-0.057, -0.355, 0.342)
+[PERC] pts  19188  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.081/0.084  n 19093  yaw +46.2  score 9.9  tool (-0.057, -0.356, 0.334)
+[PERC] pts  20776  dets 1  best xy (-0.056, -0.350) z 0.042  span 0.080/0.082  n 20776  yaw +44.9  score 9.9  tool (-0.057, -0.357, 0.326)
+[PERC] pts    299  dets 0
+[PERC] pts     68  dets 0
+[PERC] pts  20186  dets 1  best xy (-0.057, -0.349) z 0.042  span 0.081/0.081  n 20091  yaw +44.9  score 9.9  tool (-0.058, -0.358, 0.330)
+[SERVO] DESCENT SHORT: stopped 28 mm above the grasp pose -- not closing
+[STATE] PICK failed -- re-homing and searching
+[STATE] TRACK  (after pick)
+[PERC] pts  10205  dets 1  best xy (-0.051, -0.330) z 0.042  span 0.072/0.087  n 9653  yaw +40.3  score 9.2  tool (+0.129, -0.244, 0.430)
+[PERC] pts   9512  dets 0
+[PERC] pts   9972  dets 1  best xy (-0.060, -0.342) z 0.042  span 0.085/0.078  n 9497  yaw +49.1  score 9.2  tool (+0.067, -0.289, 0.406)
+[PERC] pts   9108  dets 1  best xy (-0.057, -0.346) z 0.042  span 0.078/0.078  n 8766  yaw +41.0  score 9.1  tool (+0.046, -0.301, 0.400)
+[PERC] pts  11451  dets 1  best xy (-0.058, -0.347) z 0.042  span 0.074/0.082  n 11098  yaw +45.8  score 9.3  tool (-0.001, -0.328, 0.383)
+[PERC] pts  13146  dets 1  best xy (-0.058, -0.348) z 0.042  span 0.081/0.081  n 12920  yaw +45.5  score 9.5  tool (-0.046, -0.342, 0.369)
+[PERC] pts  13684  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.082/0.084  n 13531  yaw +44.7  score 9.5  tool (-0.053, -0.346, 0.366)
+[PERC] pts  13966  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.081/0.082  n 13829  yaw +45.2  score 9.5  tool (-0.057, -0.350, 0.364)
+[PERC] pts  13885  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.080/0.082  n 13836  yaw +45.4  score 9.5  tool (-0.057, -0.350, 0.364)
+[PERC] pts  13893  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.080/0.082  n 13837  yaw +45.3  score 9.5  tool (-0.057, -0.350, 0.364)
+[PERC] pts  13918  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.080/0.081  n 13756  yaw +45.3  score 9.5  tool (-0.057, -0.350, 0.364)
+[PERC] pts  13770  dets 1  best xy (-0.057, -0.348) z 0.042  span 0.084/0.080  n 13699  yaw +45.9  score 9.5  tool (-0.052, -0.346, 0.365)
+[PERC] pts  14022  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.082/0.082  n 13857  yaw +45.9  score 9.5  tool (-0.058, -0.348, 0.364)
+[PERC] pts  13732  dets 1  best xy (-0.055, -0.348) z 0.042  span 0.083/0.081  n 13672  yaw +45.5  score 9.5  tool (-0.054, -0.344, 0.365)
+[PERC] pts  13924  dets 1  best xy (-0.055, -0.347) z 0.042  span 0.082/0.084  n 13884  yaw +45.1  score 9.5  tool (-0.055, -0.347, 0.364)
+[STATE] PICK  (explicit command)
+[PERC] pts  15115  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.081/0.081  n 14938  yaw +45.3  score 9.6  tool (-0.056, -0.350, 0.356)
+[PERC] pts  16259  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.081/0.083  n 16199  yaw +45.6  score 9.7  tool (-0.056, -0.351, 0.348)
+[PERC] pts  17949  dets 1  best xy (-0.055, -0.348) z 0.042  span 0.081/0.084  n 17856  yaw +45.5  score 9.8  tool (-0.057, -0.353, 0.341)
+[PERC] pts  19663  dets 1  best xy (-0.056, -0.348) z 0.042  span 0.081/0.083  n 19571  yaw +45.7  score 9.9  tool (-0.057, -0.354, 0.332)
+[PERC] pts  21272  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.082  n 21196  yaw +46.2  score 10.0  tool (-0.057, -0.355, 0.325)
+[PERC] pts    194  dets 0
+[PERC] pts    306  dets 0
+[PERC] pts  20800  dets 1  best xy (-0.056, -0.349) z 0.042  span 0.080/0.083  n 20616  yaw +44.7  score 9.9  tool (-0.057, -0.357, 0.328)
+[SERVO] DESCENT SHORT: stopped 28 mm above the grasp pose -- not closing
+[STATE] PICK failed -- re-homing and searching
+
+[HW] interrupted -- stopping
+[HW] closing
+
+[LOG] closed 2026-11-02T13:30:46
