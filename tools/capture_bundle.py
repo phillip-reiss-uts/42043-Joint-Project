@@ -131,6 +131,8 @@ def main():
     ap.add_argument('--joints', default='0,1,2,3,4,5',
                     help='comma-separated joint indices for the step phase')
     ap.add_argument('--no-chirp', action='store_true')
+    ap.add_argument('--gain', type=float, default=cfg.UR_SERVO_GAIN)
+    ap.add_argument('--lookahead', type=float, default=cfg.UR_LOOKAHEAD_TIME)
     args = ap.parse_args()
     start_run_log(sys.argv[1:], ROOT, tag='capture_bundle')
 
@@ -146,8 +148,8 @@ def main():
     input('Press Enter to confirm > ')
 
     backend = connect(args.ip, activate_gripper=False, dt=cfg.UR_CYCLE_DT,
-                      lookahead_time=cfg.UR_LOOKAHEAD_TIME,
-                      gain=cfg.UR_SERVO_GAIN)
+                      lookahead_time=args.lookahead,
+                      gain=args.gain)
     cap = None
     try:
         q0 = np.asarray(backend.joint_positions(), float).copy()
