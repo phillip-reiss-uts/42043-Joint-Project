@@ -113,6 +113,11 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     world = SimObjectWorld(model, data, camera, cam_id, reg)
     mover = TM.TargetMover(model, data, reg, idx, rng=rng,
                            dt=backend.dt)
+    custom_speed = None if args is None else getattr(args, 'speed', None)
+    if custom_speed is not None:
+        mover.follow_band = False
+        mover.speed = float(custom_speed) * 1e-3
+    band_label = 'sweep' if custom_speed is not None else TM.band_names()[band]
     world.set_mover(mover)
     sv = PBVSServo(model, data, arm, world, smooth=1.0, use_kf=use_kf,
                    perceive_every=SERVO_PERCEIVE_EVERY,
@@ -137,7 +142,10 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     def _step(d):
         # Emulate the operator: shut the band off after move_s seconds.
         if move_s and d.time - t_start >= move_s:
-            TM.set_band(0)
+            if custom_speed is not None:
+                mover.speed = 0.0
+            else:
+                TM.set_band(0)
         return _orig_step(d)
 
     mover.step = _step
@@ -242,7 +250,8 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     #                     the GRIPPER's mean speed -- servo effort rather than a
     #                     trial condition. A slow trial that reaches the same
     #                     place is fine; a route three times longer is not.
-    band_speed = float(TM.current_band()[1] * 1e3)
+    band_speed = (float(custom_speed) if custom_speed is not None
+                  else float(TM.current_band()[1] * 1e3))
     obj_speed = _mean_speed(s['obj'])
     tool_speed = _mean_speed(s['ee'])
 
@@ -251,11 +260,11 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     # outcome. Report the empty trial instead of crashing the whole harness.
     if s['t'].size == 0:
         print('  %-5d %-6s %-4s  ABORTED before any observation '
-              '(approach_ok=%s)' % (seed, TM.band_names()[band],
+              '(approach_ok=%s)' % (seed, band_label,
                                     'on' if use_kf else 'off', ok_approach))
         nan = float('nan')
         return dict(
-            seed=seed, band=TM.band_names()[band], kf=bool(use_kf),
+            seed=seed, band=band_label, kf=bool(use_kf),
             ok=False, sabotage_mm=float(sabotage_mm),
             spawn_x_m=float(p0[0]), spawn_y_m=float(p0[1]),
             band_speed_mm_s=nan,
@@ -280,7 +289,7 @@ def run_trial(model, camera, cam_id, seed, band, use_kf, args=None):
     dist = np.linalg.norm(s['ee'] - s['obj'], axis=1)
 
     return dict(
-        seed=seed, band=TM.band_names()[band], kf=bool(use_kf),
+        seed=seed, band=band_label, kf=bool(use_kf),
         ok=ok, sabotage_mm=float(sabotage_mm),
         spawn_x_m=float(p0[0]), spawn_y_m=float(p0[1]),
         band_speed_mm_s=band_speed,
@@ -426,6 +435,8 @@ def main():
     ap.add_argument('--band', default='off',
                     help="off|slow|medium|fast, or an index")
     ap.add_argument('--kf', default='off', help='on|off|both')
+    ap.add_argument('--speed', type=float, default=None,
+                    help='target speed in mm/s; overrides --band')
     ap.add_argument('--move-s', type=float, default=8.0,
                     help='seconds to let the object walk before stopping it;'
                          ' 0 leaves it moving forever (trial cannot complete)')
@@ -440,6 +451,9 @@ def main():
 
     names = TM.band_names()
     band = int(args.band) if args.band.isdigit() else names.index(args.band)
+    if args.speed is not None:
+        band = names.index('fast')
+    band_label = 'sweep' if args.speed is not None else names[band]
     kfs = [True, False] if args.kf == 'both' else [args.kf != 'off']
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -451,7 +465,8 @@ def main():
     print()
     print('=' * 96)
     print('  HEADLESS SERVO HARNESS   band=%s  kf=%s  trials=%d%s'
-          % (names[band], args.kf, args.trials,
+          % (band_label if args.speed is None
+             else '%.0f mm/s' % args.speed, args.kf, args.trials,
              '   SABOTAGE %.0f mm at close' % args.sabotage
              if args.sabotage else ''))
     print('=' * 96)

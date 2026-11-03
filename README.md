@@ -85,6 +85,30 @@ supplies the lead velocity, but costs about 0.36 mm of static grasp gap.
 The static pick therefore uses raw detections (use_kf=False); tracking uses
 the filter. This is a deliberate trade-off, not a universal gain.
 
+Fast band, twelve seeds per condition:
+
+| Condition | KF | Success | Gap mean | Gap max |
+|---|---|---:|---:|---:|
+| fast moving | on | 12/12 | 2.53 mm | 6.07 mm |
+| fast moving | off | 12/12 | 6.10 mm | 21.20 mm |
+
+Natural-trial total across static, slow and fast bands: 28/28 successful, no
+failed picks.
+
+Speed sweep, KF on, 8 s of motion:
+
+| Speed | Trials | Success | Result |
+|---:|---:|---:|---|
+| 45 mm/s | 1 | 1 | no failure in the fast-band set above |
+| 55 mm/s | 3 | 3 | clean tracking |
+| 65 mm/s | 3 | 2 | first failure |
+| 75 mm/s | 3 | 2 | failure repeats |
+
+The first failure is at **65 mm/s**. The failed trial gave an estimate error of
+192 mm and the approach did not complete, so no grasp was attempted. Above
+75 mm/s the single-seed sweep generally failed; one 115 mm/s seed succeeded,
+so the boundary is stochastic rather than a sharp cutoff.
+
 Offline verification:
 
     preflight_cell.py        23/23
@@ -97,6 +121,27 @@ Limits: two hardware sessions and four picked/placed cubes in total (two raw,
 two state-space), not a repeated-trial study. The simulation uses a separate
 camera mount because the cell bracket was moved; the hardware and simulation
 are not identical geometry.
+
+## Roadblocks
+
+Over the course of the project, I encountered a number of roadblocks that had to be overcome. 
+
+| # | Roadblock | What happened | Consequence | What was done |
+|---|---|---|---|---|
+| 1 | Hardware platform constraint | macOS could not reliably handle the D435i USB connection; work moved to an older ThinkPad running Debian | Lower compute headroom; state-space loop limited to about 45 Hz; video shot at 80% pendant speed | Accepted the limit; 45 Hz and 80% are reported as the main state-space constraints |
+| 2 | Library/toolchain mismatch | The older laptop and the required onRobot client did not line up cleanly; onRobot also depends on pycurl, which it does not declare | Setup time lost to dependency and compatibility work before the cell could run | Pinned the working dependency set; preflight checks ur_rtde, pycurl, onRobot, RealSense and OpenCV |
+| 3 | Calibration approach abandoned under time pressure | ArUco and ruler-based camera calibration were attempted and abandoned; the fallback was cruder than intended | The fallback did not detect that the physical camera mount was in the wrong orientation | Recalibrated the mount in the next session at the measured 92.5 degree correction |
+| 4 | Near-wasted session and sim/hardware divergence | The wrong mount pose invalidated the 11/02 session's pose and deprojection; simulation still used the old mount | One session largely lost; simulation and hardware camera geometry diverged; simulation initially fell to 0/3 | Recalibrated hardware; added separate SIM_CAM values; simulation restored to 4/4 |
+
+The causal chain is the important part:
+
+    macOS USB failure
+      -> older laptop
+      -> library mismatch and lost setup time
+      -> calibration shortcut under time pressure
+      -> wrong camera mount pose
+      -> near-wasted session
+      -> hardware/sim camera divergence
 
 ## Videos
 
