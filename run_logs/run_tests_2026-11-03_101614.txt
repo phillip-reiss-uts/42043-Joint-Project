@@ -1,0 +1,34 @@
+==============================================================================
+RUN LOG  2026-11-03T10:16:14
+program  run_tests.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --trials 3 --seed0 0 --band off --outdir /tmp/probe_new
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_tests_2026-11-03_101614.txt
+[INFO] arm model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/ur3e/ur3e.xml
+[INFO] gripper model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/onrobot_rg2/onrobot_rg2.xml
+[INFO] dummy bracket mass 0.030 kg at the midpoint of the camera offset
+[INFO] Added 'depth_cam' to gripper/base
+[INFO] arm base rotated by UR_ROOT_YAW onto the cell frame
+[INFO] gripper force range = (-0.1428, 0.1428) N
+[INFO] sim home keyframe := SIM_HOME_Q (camera centred on the table)
+
+================================================================================================
+  HEADLESS SERVO HARNESS   band=off  kf=off  trials=3
+================================================================================================
+  seed  band    kf   grasp approach gap mm    jaw q     force    obj mm   est err  occ/rec     kf upd/rej
+  0     off     off  not a FAILED   50.81     nan       nan      0.0      39.39    False/False 0/0
+  1     off     off  empty ok       237.31    1.000     0.18     0.0      213.88   False/False 0/0
+  2     off     off  not a FAILED   79.08     nan       nan      0.0      60.86    False/False 0/0
+
+  grasp gap : mean 122.40  max 237.31 mm   (n=3)
+  approach  : 1/3 complete
+  grasp held: 0/3 verified by the jaws
+  success   : 0/3 picked and lifted (approach AND grasp AND lift)
+  rechecks  : 1 trial(s) needed a lift-and-recheck
+  wrote summary.csv, servo_paths.png, distance_closure.png,
+        estimate_error.png, summary.png  ->  /tmp/probe_new/
+
+[LOG] closed 2026-11-03T10:16:35

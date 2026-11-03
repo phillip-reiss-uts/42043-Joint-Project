@@ -1,0 +1,14 @@
+==============================================================================
+RUN LOG  2026-11-03T10:48:11
+program  tools/validate_state_space.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     fit --record ../notes/ss_1000.csv
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/validate_state_space_2026-11-03_104811.txt
+replaying 312 rows over 7x7 candidates
+best RMS 0.0078 rad/s at Kp 8000.0 Kv 400.0
+wrote ../notes/ss_1000_fit.json
+
+[LOG] closed 2026-11-03T10:50:08

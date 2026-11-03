@@ -1,0 +1,20 @@
+==============================================================================
+RUN LOG  2026-11-03T10:39:05
+program  tools/capture_bundle.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --out ../notes/hw_g2000_l03 --joints  --gain 2000 --lookahead 0.03
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/capture_bundle_2026-11-03_103905.txt
+CAPTURE BUNDLE: still, per-joint steps, chirp. No tuning.
+Pendant 10%, cell clear, no cube, hand on the stop.
+Press Enter to confirm > Traceback (most recent call last):
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/tools/capture_bundle.py", line 259, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/pjreiss/Documents/workspace/42043-Joint-Project/tools/capture_bundle.py", line 148, in main
+    input('Press Enter to confirm > ')
+KeyboardInterrupt
+
+[LOG] closed 2026-11-03T10:39:09

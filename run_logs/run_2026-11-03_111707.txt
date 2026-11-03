@@ -1,0 +1,62 @@
+==============================================================================
+RUN LOG  2026-11-03T11:17:07
+program  run_hardware.py
+cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
+python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+argv     --state-space --snapshot shots/
+==============================================================================
+
+[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/run_2026-11-03_111707.txt
+
+==========================================================================
+HARDWARE  UR3e + OnRobot RG2 + D435i
+==========================================================================
+  controller  : 192.168.0.194
+  cycle       : 125.0 Hz (servoj period 0.008 s)
+  hover       : tool0 0.364 m  camera 0.250 m above table
+  speed scale : 1.000
+  servo path  : state-space
+  the pendant stop is the only e-stop; speed starts at FEED
+  perception : hand filter 15 mm (points below table+15 mm ignored), log every 0.5 s
+  snapshots  : v writes a PNG into shots/
+
+[HW] gripper: XML-RPC answered, width 100.2 mm
+
+[HW] STATE-SPACE PATH -- risks:
+     - UR_SERVO_KP/KV are the fitted pair (record/fit/ab); only run this after the A/B passed
+     - the observer/LQR loop is not hardware-validated
+     - it can fight the UR servo or oscillate at speed
+     - run tools/validate_state_space.py fit AND ab first
+type 'state-space' to continue > [HW] state-space: observer attached; UR_SERVO_KP/KV are the the fitted pair (Kp 8000 Kv 400); A/B validated
+[HW] camera: wrist-mounted (eye-in-hand)
+[HW] moving to the home configuration
+
+  p = pick up / put down (toggle)
+  h = go home    s = status    q or Ctrl-C = quit
+  space = pause / resume (holds position; p is ignored while paused)
+  t = start / stop tracking (starts held; nothing moves until t)
+[HW] tracking on (entering TRACK if a cube is in view)
+[PERC] pts   7758  dets 1  best xy (+0.098, -0.351) z 0.042  span 0.063/0.064  n 7604  yaw +86.7  score 8.9  tool (+0.131, -0.241, 0.431)
+[STATE] TRACK  (object in view, tracking released)
+[PERC] pts  10024  dets 1  best xy (+0.100, -0.352) z 0.042  span 0.064/0.063  n 9577  yaw +87.8  score 9.2  tool (+0.121, -0.291, 0.405)
+[PERC] pts  12478  dets 1  best xy (+0.101, -0.353) z 0.042  span 0.064/0.061  n 12054  yaw +87.7  score 9.4  tool (+0.106, -0.334, 0.377)
+[PERC] pts  13469  dets 1  best xy (+0.100, -0.353) z 0.042  span 0.062/0.062  n 13113  yaw +89.2  score 9.5  tool (+0.104, -0.344, 0.371)
+[PERC] pts  13563  dets 1  best xy (+0.101, -0.353) z 0.042  span 0.062/0.061  n 13286  yaw +87.9  score 9.5  tool (+0.100, -0.351, 0.365)
+[PERC] pts  14844  dets 1  best xy (+0.077, -0.357) z 0.042  span 0.081/0.081  n 14171  yaw +50.5  score 9.6  tool (+0.107, -0.354, 0.364)
+[PERC] pts  14103  dets 1  best xy (+0.080, -0.360) z 0.042  span 0.082/0.082  n 13841  yaw +50.8  score 9.5  tool (+0.059, -0.359, 0.365)
+[PERC] pts  14059  dets 1  best xy (+0.082, -0.361) z 0.042  span 0.082/0.082  n 13834  yaw +50.0  score 9.5  tool (+0.070, -0.359, 0.364)
+[PERC] pts  13969  dets 1  best xy (+0.083, -0.362) z 0.042  span 0.080/0.080  n 13867  yaw +50.6  score 9.5  tool (+0.080, -0.360, 0.363)
+[PERC] pts  13829  dets 1  best xy (+0.084, -0.362) z 0.042  span 0.081/0.080  n 13714  yaw +49.9  score 9.5  tool (+0.081, -0.361, 0.363)
+[PERC] pts  16976  dets 2  best xy (+0.083, -0.362) z 0.042  span 0.081/0.080  n 13763  yaw +49.5  score 9.5  tool (+0.081, -0.361, 0.364)
+[PERC] pts  15707  dets 1  best xy (+0.083, -0.362) z 0.042  span 0.081/0.080  n 13712  yaw +49.9  score 9.5  tool (+0.081, -0.361, 0.364)
+[PERC] pts  15595  dets 2  best xy (+0.083, -0.362) z 0.042  span 0.081/0.080  n 13716  yaw +50.3  score 9.5  tool (+0.081, -0.361, 0.364)
+[PERC] pts  14210  dets 1  best xy (+0.083, -0.362) z 0.042  span 0.080/0.080  n 13690  yaw +49.4  score 9.5  tool (+0.081, -0.361, 0.364)
+[PERC] pts  13840  dets 1  best xy (+0.037, -0.373) z 0.042  span 0.065/0.066  n 13692  yaw +84.6  score 9.5  tool (+0.088, -0.356, 0.364)
+[PERC] pts  14216  dets 1  best xy (+0.032, -0.373) z 0.042  span 0.064/0.065  n 14137  yaw +85.1  score 9.6  tool (+0.044, -0.373, 0.362)
+[PERC] pts  14255  dets 1  best xy (+0.033, -0.372) z 0.042  span 0.065/0.065  n 14085  yaw +83.8  score 9.6  tool (+0.043, -0.372, 0.363)
+[PERC] pts  14046  dets 1  best xy (+0.034, -0.373) z 0.042  span 0.069/0.065  n 13833  yaw +82.8  score 9.5  tool (+0.035, -0.373, 0.364)
+[PERC] pts  13962  dets 1  best xy (+0.035, -0.372) z 0.042  span 0.069/0.065  n 13852  yaw +83.0  score 9.5  tool (+0.035, -0.373, 0.364)
+[HW] tracking off -- holding
+[HW] closing
+
+[LOG] closed 2026-11-03T11:18:04

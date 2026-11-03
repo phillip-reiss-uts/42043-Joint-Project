@@ -92,6 +92,14 @@ class ArmObserver:
         self.P = np.diag(np.r_[np.full(self.n, sigma_q ** 2),
                                np.full(self.n, 1.0)])
         self.n_since_relin = 0
+        # M(q)/g(q) are the expensive part of predict (9.65 ms per cycle
+        # measured on the cell, against an 8 ms budget -- the loop fell to
+        # 45 Hz and the 22 ms target staircase was visible at high servo gains).
+        # They are smooth in q, so they are recomputed only when the
+        # configuration has moved, not every cycle.
+        self._mg_cache = None
+        self._mg_cache_q = None
+        self.mg_tol = 5.0e-3            # rad, ~0.3 deg of accumulated motion
         self.relin(self.xhat[:self.n], reset_cov=True)
 
     # MODEL
@@ -124,7 +132,11 @@ class ArmObserver:
         u = np.asarray(u, float)
         q = self.xhat[:self.n].copy()
         v = self.xhat[self.n:].copy()
-        M, g = self._mass_gravity(q)
+        if (self._mg_cache is None
+                or np.max(np.abs(q - self._mg_cache_q)) > self.mg_tol):
+            self._mg_cache = self._mass_gravity(q)
+            self._mg_cache_q = q.copy()
+        M, g = self._mg_cache
 
         h = self.dt / self.substeps
         for _ in range(self.substeps):

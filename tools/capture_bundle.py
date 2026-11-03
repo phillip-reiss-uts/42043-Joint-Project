@@ -22,7 +22,8 @@ noise in your own script -- the CSV has the raw command and real timestamps.
     python tools/capture_bundle.py --out ../notes/hw_bundle --no-chirp
 
 Safety: 2 deg steps, 0.30 rad/s joint-speed limit, per-phase timeout, one
-Enter to start, nothing retried. Pendant at 10%, cell clear, hand on the stop.
+Enter to start, nothing retried. The prompt below prints the pendant setting
+that matches the gains you passed (100% for a preset test, 10% otherwise).
 """
 
 import argparse
@@ -144,7 +145,11 @@ def main():
         raise SystemExit('steps above 3 deg are refused')
 
     print('CAPTURE BUNDLE: still, per-joint steps, chirp. No tuning.')
-    print('Pendant 10%, cell clear, no cube, hand on the stop.')
+    faster = (args.gain > cfg.UR_SERVO_GAIN
+              or args.lookahead < cfg.UR_LOOKAHEAD_TIME)
+    print('Pendant %s, cell clear, no cube, hand on the stop.'
+          % ('100% (preset test: the point is the faster servo)'
+             if faster else '10%'))
     input('Press Enter to confirm > ')
 
     backend = connect(args.ip, activate_gripper=False, dt=cfg.UR_CYCLE_DT,

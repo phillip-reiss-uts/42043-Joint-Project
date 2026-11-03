@@ -41,7 +41,7 @@ PARK_POS = [5.0, 5.0, -0.6]
 # TOOL FLANGE -> D435i optical frame (flange, not gripper base). Measured pair
 # on the cell: tool0 300 mm and lens 186 mm above the base plane, i.e. the lens
 # is 114 mm below the flange, so CAM_POS_z = 0.114 m.
-CAM_POS = (-0.002999, -0.03, 0.102002)
+CAM_POS = (-0.012999, -0.03, 0.102002)
 CAM_QUAT = (0.001436, 0.999789, 0.015986, 0.012787)
 # Simulated camera vertical FOV, chosen to match the D435i depth stream's
 # ~64 deg vertical field at 320x240. Hardware reads its own intrinsics.
@@ -111,7 +111,7 @@ MIN_OBJECT_POINTS = 1500
 PERCEPTION_LOG_S = 0.5
 
 # ---- state observer ------------------------------------------------------
-ENCODER_NOISE = 1.0e-4                    # rad, measurement noise (R)
+ENCODER_NOISE = 2.0e-5                    # rad, measurement noise (R) -- measured
 TAU_NOISE = 0.30                          # N.m, process noise
 OBSERVER_RELIN = 100                      # steps between re-linearisations
 OBSERVER_SUBSTEPS = 4                     # minimum integration sub-steps
@@ -137,7 +137,7 @@ LQR_R = 5.0e-2                            # command cost (rad^2); sets gain leve
 # inside the envelope across 0-120 ms and +/-2x Kp/Kv mismatch.
 LQR_GAIN_SCALE = 0.25
 
-PICK_Z_ABOVE_TABLE = 0.256
+PICK_Z_ABOVE_TABLE = 0.255
 # World-space tool z for the grasp (flange frame, metres).
 PICK_Z = TABLE_HEIGHT + PICK_Z_ABOVE_TABLE
 
@@ -354,14 +354,14 @@ VERBOSE = False                           # per-stage logging
 # Cell properties. Link data ships separately in models/ur3e/arm_dynamics.json.
 UR_IP = '192.168.0.194'                   # controller address
 UR_CYCLE_DT = 0.008                       # s, servoj period (125 Hz)
-UR_LOOKAHEAD_TIME = 0.1                   # s, servoj lookahead
-UR_SERVO_GAIN = 300                       # servoj gain
+UR_LOOKAHEAD_TIME = 0.05                  # s, servoj lookahead -- 0.1 was a 1.3 s lag
+UR_SERVO_GAIN = 1000                      # servoj gain -- 300 gave a 1.3 s lag
 UR_TRACK_CHUNK = 250                      # servo iterations per track step
 
 # Identified servo gains for the observer/linearisation. PLACEHOLDER: these are
 # the simulated actuator's, not the real controller's.
-UR_SERVO_KP = 1000.0
-UR_SERVO_KV = 200.0
+UR_SERVO_KP = 8000.000
+UR_SERVO_KV = 400.000
 # Global hardware servo speed scale, calibrated by tools/calibrate_speed.py.
 # 1.0 is the uncalibrated command; the tool lowers it until the arm follows
 # without overshoot or lunge. Applies to PBVSServo's twist cap and joint step.

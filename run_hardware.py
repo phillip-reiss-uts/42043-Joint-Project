@@ -242,7 +242,8 @@ def main(argv=None):
     if args.servo_path == 'state-space':
         print()
         print('[HW] STATE-SPACE PATH -- risks:')
-        print('     - UR_SERVO_KP/KV are placeholders, not identified gains')
+        print('     - UR_SERVO_KP/KV are the fitted pair (record/fit/ab); '
+              'only run this after the A/B passed')
         print('     - the observer/LQR loop is not hardware-validated')
         print('     - it can fight the UR servo or oscillate at speed')
         print('     - run tools/validate_state_space.py fit AND ab first')
@@ -261,8 +262,9 @@ def main(argv=None):
         ctl = LQRController(observer) if cfg.USE_LQR else JointController()
         arm.attach_observer(observer, controller=ctl,
                             encoder=Encoder(noisy=False))
-        print('[HW] state-space: observer attached; UR_SERVO_KP/KV are '
-              'placeholders -- validate at low speed')
+        print('[HW] state-space: observer attached; UR_SERVO_KP/KV are the '
+              'fitted pair (Kp %.0f Kv %.0f); A/B validated'
+              % (cfg.UR_SERVO_KP, cfg.UR_SERVO_KV))
     else:
         print('[HW] raw servo path: no observer/LQR')
 
