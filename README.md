@@ -277,3 +277,17 @@ MuJoCo or device driver. The hardware world is wrist-mounted only.
 
 Model changes and rationale are recorded in `models/README.md`. Cell
 measurements are recorded at their point of use in `src/config.py`.
+
+## Statement on the Use of Generative AI
+
+During the course of this assignment I used the DeepSeek model to assist me in all areas of the project. The primary areas I used it for include:
+
+- Generating boilerplate and application code
+- Implementing algorithms and control architecture
+- Generating test harnesses
+- Designing experiments and analysing results
+- Diagnosing hardware and software failures
+- Annotating code and reviewing/refactoring it
+- Editing and formatting technical documentation
+- Managing, condensing or removing orphaned files
+- Auditing code and requirements for completeness, correctness and bugs
