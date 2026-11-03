@@ -1,5 +1,10 @@
 # Vision-Guided Pick: UR3e + RG2 + D435i
 
+Name: Phillip Reiss  
+Email: phillip.j.reiss@student.uts.edu.au  
+Student ID: 26546453  
+Subject: 42043 Robotics Studio 1
+
 A UR3e arm with a wrist-mounted Intel RealSense D435i and an OnRobot RG2
 gripper. The system detects a cube, tracks it, grasps it, holds it, and places
 it at the pick location. The same robot code runs in MuJoCo and on the cell.
@@ -76,7 +81,7 @@ Simulation, four static random spawns, current sim camera mount:
 | 2 | picked and lifted | 1.06 mm |
 | 3 | picked and lifted | 1.07 mm |
 
-Hardware, one state-space session:
+Hardware, state-space session:
 
 | Item | Result |
 |---|---|
@@ -127,6 +132,18 @@ Fast band, twelve seeds per condition:
 Natural-trial total across static, slow and fast bands: 28/28 successful, no
 failed picks.
 
+Failure counts:
+
+| Set | Trials | Success | Failed |
+|---|---:|---:|---:|
+| Natural simulation (static, slow, fast) | 28 | 28 | 0 |
+| Hardware picks (raw and state-space) | 4 | 4 | 0 |
+| 65 mm/s sweep | 3 | 2 | 1 |
+| 75 mm/s sweep | 3 | 2 | 1 |
+
+The failed sweep trials are the 65/75 mm/s tracking losses described below,
+not grasp or release failures.
+
 Speed sweep, KF on, 8 s of motion:
 
 | Speed | Trials | Success | Result |
@@ -140,6 +157,15 @@ The first failure is at **65 mm/s**. The failed trial gave an estimate error of
 192 mm and the approach did not complete, so no grasp was attempted. Above
 75 mm/s the single-seed sweep generally failed; one 115 mm/s seed succeeded,
 so the boundary is stochastic rather than a sharp cutoff.
+
+Evidence logs: [static KF](run_logs/run_tests_2026-11-03_161056.txt),
+[slow KF](run_logs/run_tests_2026-11-03_161133.txt),
+[fast KF 1](run_logs/run_tests_2026-11-03_162122.txt),
+[fast KF 2](run_logs/run_tests_2026-11-03_164015.txt),
+[45 mm/s](run_logs/run_tests_2026-11-03_164400.txt),
+[55 mm/s](run_logs/run_tests_2026-11-03_164607.txt),
+[65 mm/s](run_logs/run_tests_2026-11-03_164622.txt),
+[75 mm/s](run_logs/run_tests_2026-11-03_164639.txt).
 
 Offline verification:
 
@@ -216,7 +242,11 @@ python tests/test_hardware.py --sim
 python tests/test_gripper_backend.py
 python tests/test_yaw_sweep.py
 python run_tests.py --trials 4
+python run_tests.py --trials 3 --kf on --speed 65 --move-s 8
 ```
+
+The last command runs the 65 mm/s tracking sweep point; `--speed` is in mm/s
+and overrides the named band.
 
 `preflight_cell.py` is the offline gate. Hardware acceptance requires
 `test_arm_control.py` and `test_camera_enum.py` on the cell.
