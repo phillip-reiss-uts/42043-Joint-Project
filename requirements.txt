@@ -1,52 +1,24 @@
-# Vision-guided pick: simulation
+# Vision-guided pick dependencies
 #
-# Verified on macOS 13.7.8 (x86_64) with Python 3.12.10:
-#     mujoco 3.10.0, numpy 2.5.2, scipy 1.18.1, matplotlib 3.11.1
-#
+# Reference environment: Debian trixie, Python 3.12, x86_64.
 # Install with:
 #     python -m pip install -r requirements.txt
 
-# ---- core simulation -------------------------------------------------------
-# mujoco >= 3.0 for the passive viewer and MjSpec; 3.10 is what was tested.
-mujoco>=3.0.0
-# Fallback source of MJCF models. It is NOT needed for this project's gripper:
-# the RG2 is vendored at models/onrobot_rg2/. menagerie has no UR3e either --
-# that MJCF is vendored under models/ur3e/. Only a model name that models/ does
-# not resolve reaches menagerie at all.
-mujoco-menagerie>=0.1.0
+# ---- simulation and control ----
+mujoco>=3.0
+mujoco-menagerie>=0.1.0     # fallback model lookup; this cell's models are vendored
+numpy>=1.24
+scipy>=1.10                 # observer discretisation, LQR, optimisation
+matplotlib>=3.11            # run_tests.py plots
 
-# ---- maths -----------------------------------------------------------------
-numpy>=1.24.0
-# expm for the discrete observer, solve_discrete_are for the LQR design.
-scipy>=1.10.0
-# run_tests.py plots; nothing on the control path needs it.
-matplotlib>=3.11.1
+# ---- hardware ----
+ur_rtde>=1.6                # RTDE servoJ and joint readback
+pycurl>=7.45                # required by onRobot but not declared by it
+pyrealsense2>=2.50          # D435i depth stream
+opencv-contrib-python>=4.8  # ArUco calibration only
 
-# ---- hardware only (NOT installed here, not needed for simulation) ----------
-# Listed for the eventual port. See "Camera calibration" and "Run" in README.md.
+# The RG2 client is not on PyPI. Install it before the hardware dependencies:
+#     python -m pip install "git+https://github.com/RianPolMacCionaoith/onRobot.git@main#subdirectory=onRobot"
 #
-# ur_rtde            # RTDE: servoj/movej for URBackend, joint readback
-# pycurl             # imported by onRobot at module level and NOT declared by
-#                    #   its setup.py, so pip will not pull it in. Install first.
-# onRobot            # the RG2 client (XML-RPC to the OnRobot URCap, port 41414):
-#                    #   pip install "git+https://github.com/RianPolMacCionaoith/onRobot.git@main#subdirectory=onRobot"
-# pyrealsense2       # D435i depth stream for RealObjectWorld
-# opencv-contrib-python  # tools/calibrate_camera.py only (aruco + solvePnP)
-#
-# pymodbus is deliberately absent: this cell's gripper is an OnRobot RG2 reached
-# over XML-RPC, and the Modbus path (a Robotiq 2F-85) has been removed.
-#
-# pyrealsense2 has NO wheel for Python 3.12 on macOS, so src/world_real.py
-# imports it lazily and falls back to FakeDepthSource. On Linux and Windows it
-# installs from PyPI. Alternatively install the librealsense SDK and use its own
-# Python bindings.
-
-# ---- deliberately NOT used -------------------------------------------------
-# mink: tried for IK and rejected. arm.solve_ik uses damped least squares, which
-# converges to the solution nearest the seed; mink's QP finds *a* solution.
-
-# ---- optional: camera calibration tool -------------------------------------
-# Only tools/calibrate_camera.py --aruco needs this; --touch (the robot-as-ruler
-# method) is numpy/scipy only. Neither the simulation nor the robot pick path
-# imports OpenCV.
-# opencv-contrib-python>=4.8   # aruco + solvePnP
+# pyrealsense2 has no macOS wheel for Python 3.12. Linux and Windows use the
+# PyPI package; macOS uses the librealsense Python bindings instead.

@@ -35,26 +35,41 @@ physics substeps. Arm moves, the observer and the target advance at 125 Hz.
 
 ## Results
 
-Simulation, four static random spawns:
+Simulation, four static random spawns, current sim camera mount:
 
 | Trial | Outcome | Grasp gap |
 |---|---|---|
-| 0 | picked and lifted | 2.33 mm |
-| 1 | picked and lifted | 0.70 mm |
-| 2 | picked and lifted | 3.13 mm |
-| 3 | picked and lifted | 1.91 mm |
+| 0 | picked and lifted | 2.12 mm |
+| 1 | picked and lifted | 1.91 mm |
+| 2 | picked and lifted | 1.06 mm |
+| 3 | picked and lifted | 1.07 mm |
 
-Hardware, one cell run:
+Hardware, one state-space session:
 
 | Item | Result |
 |---|---|
 | Camera mount | recalibrated after a measured 92.5 degree mount rotation error |
 | Table height | 12 mm |
-| Gripper close | 50 mm command, 60.5 mm measured at the cube |
-| Tracking | the arm servos while the cube is moved and rotated |
-| Pick | grasped, held and carried after the target settles |
-| Place | released at the recorded pick xy; 0.0 mm from the target |
-| Video | 42043_integrated_project_video.mp4, including the tracking phase |
+| Servo preset | gain 1000, lookahead 0.05, 31 ms lag measured |
+| Gripper close | 50 mm command, 59.7 and 59.9 mm measured at the cube |
+| Tracking | position and rotation servoing while the cube moves |
+| Picks | two, both held |
+| Put-downs | two, both 0.0 mm from target and released |
+| Videos | raw path and state-space path; links below |
+
+State-space A/B on a 0.4 degree joint-1 step:
+
+| Metric | Raw | State-space |
+|---|---|---|
+| final error | 0.001 deg | 0.004 deg |
+| overshoot | 0.002 deg | 0.111 deg |
+| settling | 0.216 s | 0.032 s |
+| peak joint speed | 0.045 rad/s | 0.160 rad/s |
+
+Observer fit: Kp 8000, Kv 400, qdot RMS 0.0078 rad/s. Prediction cost was
+reduced from 10.79 ms to 2.41 ms by caching M(q) and g(q) to 0.3 degrees.
+The state-space loop runs at about 45 Hz, not the 125 Hz servo rate; this is
+visible as jerk at high pendant speed and is the main limit of the result.
 
 Offline verification:
 
@@ -64,15 +79,16 @@ Offline verification:
     test_gripper_backend     pass
     test_task_flow           pass
 
-State-space is an experimental path. A one-joint step fit gave Kp 125,
-Kv 400 and qdot RMS 0.0091 rad/s. The observer runs at about 45 Hz because
-M(q) and g(q) are evaluated every cycle, and the measured hardware response
-has a 1.3 s lag that the current model does not represent. The fitted gains
-are therefore not part of the delivered pick.
+Limits: one hardware session and two picks, not a repeated-trial study. The
+simulation uses a separate camera mount because the cell bracket was moved;
+the hardware and simulation are not identical geometry.
 
-Limits of the evidence: the hardware result is one successful run that
-includes moving/rotating-target tracking, but it is not a repeated-trial
-study. The state-space path is not used in the video.
+## Videos
+
+| Video | Log | Content |
+|---|---|---|
+| [42043_integrated_project_raw.mp4](42043_integrated_project_raw.mp4) | [run_2026-11-02_140524.txt](run_logs/run_2026-11-02_140524.txt) | Raw servo path: two picks at 60.0 and 60.4 mm jaw width, two put-downs at 0.0 mm from target. |
+| [42043_integrated_project_state_space.mp4](42043_integrated_project_state_space.mp4) | [run_2026-11-03_112801.txt](run_logs/run_2026-11-03_112801.txt) | State-space path at 80% pendant speed: two picks at 59.7 and 59.9 mm jaw width, two put-downs at 0.0 mm from target. |
 
 ## Calibration
 

@@ -104,7 +104,7 @@ def _ik_reaches(arm, q, target, tol=1e-3):
 
 
 def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
-                   estop=None):
+                   estop=None, hover_z=HOVER_TOOL0_Z):
     # Approach, close, verify and lift. Returns (ok, q_lift, R).
     #
     # `i` is scene bookkeeping only; everything the robot learns about the
@@ -142,7 +142,7 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
         return search_for_object(model, data, arm, perceive, viewer=viewer,
                                  estop=estop, stop=stopped, wide=True)
 
-    ok, _, _, _ = sv.approach(hover_z=HOVER_TOOL0_Z, viewer=viewer,
+    ok, _, _, _ = sv.approach(hover_z=hover_z, viewer=viewer,
                               estop=estop,
                               aborted=stopped, coarse=False,
                               max_iters=SERVO_MAX_ITERS,
@@ -237,7 +237,7 @@ def grasp_and_lift(model, data, arm, world, i, viewer=None, aborted=None,
 
 
 def pick_and_hold(model, data, arm, world, i, q_hold, viewer=None,
-                  aborted=None, estop=None):
+                  aborted=None, estop=None, hover_z=HOVER_TOOL0_Z):
     # Grasp the object, lift, then carry it to `q_hold` with the jaws closed.
     #
     # The cube is NOT released. That is the point: the operator's pickup command
@@ -248,7 +248,8 @@ def pick_and_hold(model, data, arm, world, i, q_hold, viewer=None,
         return aborted is not None and aborted()
 
     ok, q_lift, R = grasp_and_lift(model, data, arm, world, i, viewer=viewer,
-                                   aborted=aborted, estop=estop)
+                                   aborted=aborted, estop=estop,
+                                   hover_z=hover_z)
     if not ok:
         return False
     arm.move(q_hold, GRIP_CLOSED, rate=FEED, viewer=viewer, estop=estop,

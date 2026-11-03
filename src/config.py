@@ -46,8 +46,11 @@ CAM_QUAT = (0.001436, 0.999789, 0.015986, 0.012787)
 # Simulated camera vertical FOV, chosen to match the D435i depth stream's
 # ~64 deg vertical field at 320x240. Hardware reads its own intrinsics.
 SIM_CAM_FOVY = 64.2
+SIM_CAM_POS = (0.046, -0.0080, 0.07689)
+SIM_CAM_QUAT = (0.008026, -0.695654, -0.718261, -0.010057)
+SIM_CAM_MOUNT_POS = SIM_CAM_POS
 MESH_QUAT = [0.707, 0.0, 0.0, 0.707]
-MESH_POS = CAM_POS
+MESH_POS = SIM_CAM_POS
 
 # Printed bracket mass, modelled as a point mass at the midpoint between palm
 # and lens. GUESS for PLA, not a measurement; 0.0 models the camera alone.
@@ -236,6 +239,7 @@ SERVO_RETREAT_V = 0.03                    # m/s for backup and open-loop commit
 # offset. The lens sits CAM_POS[2] below tool0, so tool0 is that much higher.
 CAM_HOVER_HEIGHT = 0.250
 HOVER_TOOL0_Z = TABLE_HEIGHT + CAM_HOVER_HEIGHT + CAM_POS[2]
+SIM_HOVER_TOOL0_Z = TABLE_HEIGHT + CAM_HOVER_HEIGHT + SIM_CAM_POS[2]
 
 # Moving-target demo: bands cycled live with '.', index 0 is off. All below
 # SERVO_V_TRANSIT so the arm can close the gap.
@@ -396,6 +400,8 @@ CAM_MOUNT_QUAT = CAM_QUAT
 # Same mount, in the gripper-base frame the MJCF builds the gripper in.
 CAM_MOUNT_POS_GRIPPER = tuple(np.array(CAM_POS, float)
                               - np.array(TOOL_MOUNT_POS, float))
+SIM_CAM_MOUNT_POS_GRIPPER = tuple(np.array(SIM_CAM_POS, float)
+                                  - np.array(TOOL_MOUNT_POS, float))
 # Hardware-only measured correction on top of the above. Identity = unmeasured.
 HW_CAM_DELTA_POS = (0.0, 0.0, 0.0)
 HW_CAM_DELTA_QUAT = (1.0, 0.0, 0.0, 0.0)  # wxyz

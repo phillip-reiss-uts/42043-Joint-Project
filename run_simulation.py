@@ -325,7 +325,7 @@ def main(sensor_size=(320, 240), lightweight=False):
             # HOVER_TOOL0_Z means "hover, do not descend": the same servo the
             # pick uses, at camera height rather than the grasp pose.
             _p0 = np.array(data.xpos[arm.base_id], float)
-            tracker.servo(cfg.HOVER_TOOL0_Z,
+            tracker.servo(cfg.SIM_HOVER_TOOL0_Z,
                           max_iters=TRACK_CHUNK_ITERS,
                           viewer=viewer, estop=estop,
                           aborted=_time_slice(TRACK_SLICE_S),
@@ -335,7 +335,7 @@ def main(sensor_size=(320, 240), lightweight=False):
             if TRACK_DEBUG[0]:
                 _p1 = np.array(data.xpos[arm.base_id], float)
                 _R = np.array(data.xmat[arm.base_id], float).reshape(3, 3)
-                _pd, _ = tracker.desired_pose(cfg.HOVER_TOOL0_Z)
+                _pd, _ = tracker.desired_pose(cfg.SIM_HOVER_TOOL0_Z)
                 print('[TRACK] tool z %.4f -> %.4f (d %.4f)  axis=%s  '
                       'p_des=%s  err=%.4f' % (
                           _p0[2], _p1[2], _p1[2] - _p0[2],
@@ -391,7 +391,8 @@ def main(sensor_size=(320, 240), lightweight=False):
             # command means "take it". The cube stays held at home until the
             # key is pressed again (HOLD -> PUTDOWN -> put_down below).
             ok = pick_and_hold(model, data, arm, world, i, home_q,
-                               viewer=viewer, aborted=give_up, estop=estop)
+                               viewer=viewer, aborted=give_up, estop=estop,
+                               hover_z=cfg.SIM_HOVER_TOOL0_Z)
             if not ok and _time.perf_counter() >= mission_deadline:
                 print('[PICK] abandoned after %.1f s of a %.1f s budget -- this '
                       'is the HANG GUARD, not a failed grasp; raise '
