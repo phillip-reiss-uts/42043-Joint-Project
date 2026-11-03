@@ -23,8 +23,8 @@ python main.py --hardware --ip 192.168.0.194 --state-space
 ```
 
 The hardware front-end defaults to the raw servo path. `--state-space` selects
-the experimental observer/LQR path after a risk prompt. `--raw-servo` is the
-default alias.
+the fitted observer/LQR path after a risk prompt; raw remains the default.
+`--raw-servo` is the default alias.
 
 Simulation keys: `6` spawn, `7` pick/place, `8` pause, `9` reset,
 `.` object speed. Hardware keys: `t` tracking, `p` pick/place, `space`
@@ -79,9 +79,10 @@ Offline verification:
     test_gripper_backend     pass
     test_task_flow           pass
 
-Limits: one hardware session and two picks, not a repeated-trial study. The
-simulation uses a separate camera mount because the cell bracket was moved;
-the hardware and simulation are not identical geometry.
+Limits: two hardware sessions and four picked/placed cubes in total (two raw,
+two state-space), not a repeated-trial study. The simulation uses a separate
+camera mount because the cell bracket was moved; the hardware and simulation
+are not identical geometry.
 
 ## Videos
 
@@ -106,7 +107,8 @@ python tools/calibrate_speed.py --stage low
 python tools/calibrate_speed.py --stage full
 ```
 
-The state-space observer is optional and must be fitted and A/B-tested:
+The state-space observer is fitted and A/B-tested; the current config carries
+Kp 8000 and Kv 400. The fitting workflow is:
 
 ```
 python tools/validate_state_space.py record --joint 1 --step 1.5

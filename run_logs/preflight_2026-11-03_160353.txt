@@ -1,34 +1,34 @@
 ==============================================================================
-RUN LOG  2026-11-03T11:44:25
+RUN LOG  2026-11-03T16:03:53
 program  tests/preflight_cell.py
-cwd      /home/pjreiss/Documents/workspace/42043-Joint-Project
-python   3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+cwd      D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project
+python   3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]
 argv     
 ==============================================================================
 
-[LOG] writing terminal output to /home/pjreiss/Documents/workspace/42043-Joint-Project/run_logs/preflight_2026-11-03_114425.txt
+[LOG] writing terminal output to D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\run_logs\preflight_2026-11-03_160353.txt
 
 PREFLIGHT -- cell stack, no hardware
-  repo        : /home/pjreiss/Documents/workspace/42043-Joint-Project
-  interpreter : /home/pjreiss/cell/bin/python
-  python      : 3.12.3
+  repo        : D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project
+  interpreter : C:\Users\pjreiss\AppData\Local\Programs\Python\Python312\python.exe
+  python      : 3.12.10
 
 ==============================================================================
 1. hardware modules import into one interpreter
 ==============================================================================
-  [PASS] import rtde_control  -- /home/pjreiss/cell/lib/python3.12/site-packages/rtde_control.cpython-312-x86_64-linux-gnu.so
-  [PASS] import rtde_receive  -- /home/pjreiss/cell/lib/python3.12/site-packages/rtde_receive.cpython-312-x86_64-linux-gnu.so
-  [PASS] import pyrealsense2  -- /home/pjreiss/cell/lib/python3.12/site-packages/pyrealsense2/__init__.py
-  [PASS] import cv2  -- /home/pjreiss/cell/lib/python3.12/site-packages/cv2/__init__.py
+  [PASS] import rtde_control  -- C:\Users\pjreiss\AppData\Local\Programs\Python\Python312\Lib\site-packages\rtde_control.cp312-win_amd64.pyd
+  [PASS] import rtde_receive  -- C:\Users\pjreiss\AppData\Local\Programs\Python\Python312\Lib\site-packages\rtde_receive.cp312-win_amd64.pyd
+  [PASS] import pyrealsense2  -- C:\Users\pjreiss\AppData\Local\Programs\Python\Python312\Lib\site-packages\pyrealsense2\__init__.py
+  [PASS] import cv2  -- C:\Users\pjreiss\AppData\Local\Programs\Python\Python312\Lib\site-packages\cv2\__init__.py
   [PASS] import run_hardware
   [PASS] import src.config
   [PASS] import pycurl  -- 7.48.0
-  [PASS] import onRobot.gripper  -- /home/pjreiss/cell/lib/python3.12/site-packages/onRobot/gripper.py
+  [PASS] import onRobot.gripper  -- C:\Users\pjreiss\AppData\Local\Programs\Python\Python312\Lib\site-packages\onRobot\gripper.py
   [PASS] onRobot.gripper.RG exists
   [PASS]   RG.rg_grip()
   [PASS]   RG.get_rg_width()
   [info] RG.rg_get_grip_detected: absent (unimplemented upstream)
-  [info] ur_rtde 1.6.5 | opencv 4.11.0 | pyrealsense2 2.59.1.11053
+  [info] ur_rtde 1.6.5 | opencv 5.0.0 | pyrealsense2 2.59.1.11053
 
 ==============================================================================
 2. ur_rtde exposes what src/robot_backend_ur.py calls
@@ -164,7 +164,7 @@ OPTIONAL grip_detected
 ==============================================================================
 
 --- tests/test_arm_control.py stdout ---
-machine: /home/pjreiss/cell/bin/python
+machine: C:\Users\pjreiss\AppData\Local\Programs\Python\Python312\python.exe
 
 ======================================================================
 1. config is the measured cell
@@ -193,8 +193,8 @@ machine: /home/pjreiss/cell/bin/python
 ==============================================================================
 
 --- tests/test_ur_kinematics.py stdout ---
-[INFO] arm model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/ur3e/ur3e.xml
-[INFO] gripper model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/onrobot_rg2/onrobot_rg2.xml
+[INFO] arm model: local MJCF D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\models\ur3e\ur3e.xml
+[INFO] gripper model: local MJCF D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\models\onrobot_rg2\onrobot_rg2.xml
 [INFO] dummy bracket mass 0.030 kg at the midpoint of the camera offset
 [INFO] Added 'depth_cam' to gripper/base
 [INFO] arm base rotated by UR_ROOT_YAW onto the cell frame
@@ -205,9 +205,9 @@ machine: /home/pjreiss/cell/bin/python
 HARDWARE KINEMATICS (chain) vs MUJOCO
 ======================================================================
   configurations checked : 10
-  worst |dp|             : 2.220e-16 m
+  worst |dp|             : 1.388e-16 m
   worst |dR|             : 9.992e-16
-  worst |dJ|             : 1.332e-15
+  worst |dJ|             : 1.221e-15
   worst |dM|             : 8.882e-16
   worst |dg|             : 1.066e-14
 
@@ -229,8 +229,8 @@ PASS: the hardware kinematics chain reproduces the simulator.
 ==============================================================================
 
 --- tests/test_kinematics_parity.py stdout ---
-[INFO] arm model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/ur3e/ur3e.xml
-[INFO] gripper model: local MJCF /home/pjreiss/Documents/workspace/42043-Joint-Project/models/onrobot_rg2/onrobot_rg2.xml
+[INFO] arm model: local MJCF D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\models\ur3e\ur3e.xml
+[INFO] gripper model: local MJCF D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\models\onrobot_rg2\onrobot_rg2.xml
 [INFO] dummy bracket mass 0.030 kg at the midpoint of the camera offset
 [INFO] Added 'depth_cam' to gripper/base
 [INFO] arm base rotated by UR_ROOT_YAW onto the cell frame
@@ -243,16 +243,16 @@ KINEMATICS FRAME PARITY  (chain vs MuJoCo, cell frame)
   configurations          : 12
   root_yaw                : 3.141593 rad
   tool frame              : [ 0.    -0.     0.023]
-  worst |dp|              : 2.220e-16 m
+  worst |dp|              : 1.388e-16 m
   worst |dR|              : 9.992e-16
   unrotated chain |dp|    : 5.400e-01 m  (must be large)
-  Rz(pi) puts it back     : 2.220e-16
+  Rz(pi) puts it back     : 1.388e-16
   tool +z vs world up     : 4.629e-06  (0 means it points down)
 
-  [PASS] the chain reproduces the TCP position  -- worst 2.22e-16 m
+  [PASS] the chain reproduces the TCP position  -- worst 1.39e-16 m
   [PASS] and the orientation  -- worst 9.99e-16
   [PASS] dropping root_yaw visibly breaks it  -- 540.0 mm apart -- the flag is load-bearing
-  [PASS] and Rz(UR_ROOT_YAW) explains the whole difference  -- residual 2.22e-16 m
+  [PASS] and Rz(UR_ROOT_YAW) explains the whole difference  -- residual 1.39e-16 m
   [PASS] the tool axis points down at home  -- worst component 4.63e-06
 
 ======================================================================
@@ -299,11 +299,11 @@ WRIST MOUNT
   [PASS] the quaternion is wxyz and pastes into config
 
 PNP CONVENTION (needs OpenCV)
-  [PASS] solvePnP returns the camera pose in the OpenCV frame  -- max diff 1.89e-12, reprojection 1.04e-11 px
-  [PASS] converting it recovers the pose config stores  -- max diff 1.89e-12
+  [PASS] solvePnP returns the camera pose in the OpenCV frame  -- max diff 3.93e-13, reprojection 1.77e-11 px
+  [PASS] converting it recovers the pose config stores  -- max diff 3.93e-13
 
 WRIST RECOVERY FROM IMAGES
-  [PASS] recovers the mount from projected images of one fixed board  -- off 7.72e-12 m, spread 2.9e-08 mm / 1.2e-06 deg
+  [PASS] recovers the mount from projected images of one fixed board  -- off 7.18e-08 m, spread 2.9e-04 mm / 1.5e-05 deg
 
 ==========================================================================
   Solvers recover a known pose; conventions round-trip.
@@ -369,12 +369,12 @@ all yaw sweep checks passed
 ==============================================================================
 9. pyrealsense2 loads and enumerates
 ==============================================================================
-  [PASS] rs.context() enumerates  -- 1 device(s) attached
+  [PASS] rs.context() enumerates  -- 0 devices -- correct with the camera unplugged
 
 ==============================================================================
 11. opencv (calibration only -- not on the pick path)
 ==============================================================================
-  [info] cv2 4.11.0
+  [info] cv2 5.0.0
   [info] cv2.aruco: present
   [info] cv2.solvePnP: present
 
@@ -385,4 +385,4 @@ all yaw sweep checks passed
     python tests/test_arm_control.py     # UR3e accepts servoJ
     python tests/test_camera_enum.py     # D435i streams here
 
-[LOG] closed 2026-11-03T11:44:45
+[LOG] closed 2026-11-03T16:04:42
