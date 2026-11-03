@@ -1,0 +1,48 @@
+==============================================================================
+RUN LOG  2026-11-03T16:10:56
+program  run_tests.py
+cwd      D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project
+python   3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]
+argv     --trials 4 --kf both --seed0 0 --band off --outdir test_output_kf
+==============================================================================
+
+[LOG] writing terminal output to D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\run_logs\run_tests_2026-11-03_161056.txt
+[INFO] arm model: local MJCF D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\models\ur3e\ur3e.xml
+[INFO] gripper model: local MJCF D:\pjreiss\Documents\deepseek-harness\default-workspace\42043-Joint-Project\models\onrobot_rg2\onrobot_rg2.xml
+[INFO] dummy bracket mass 0.030 kg at the midpoint of the camera offset
+[INFO] Added 'depth_cam' to gripper/base
+[INFO] arm base rotated by UR_ROOT_YAW onto the cell frame
+[INFO] gripper force range = (-0.1428, 0.1428) N
+[INFO] sim home keyframe := SIM_HOME_Q (camera centred on the table)
+
+================================================================================================
+  HEADLESS SERVO HARNESS   band=off  kf=both  trials=4
+================================================================================================
+  seed  band    kf   grasp approach gap mm    jaw q     force    obj mm   est err  occ/rec     kf upd/rej
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  0     off     on   ok    ok       2.77      0.482     3.00     0.0      7.18     True/True   11/0
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  1     off     on   ok    ok       2.75      0.482     3.00     0.0      3.42     True/True   12/0
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  2     off     on   ok    ok       1.41      0.482     3.00     0.0      7.87     True/True   9/0
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  3     off     on   ok    ok       0.68      0.482     3.00     0.0      6.77     True/True   9/0
+
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  0     off     off  ok    ok       2.12      0.482     3.00     0.0      7.19     True/True   0/0
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  1     off     off  ok    ok       1.91      0.482     3.00     0.0      3.40     True/True   0/0
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  2     off     off  ok    ok       1.06      0.482     3.00     0.0      7.89     True/True   0/0
+[IK] seed gave 23.0 mm, home seed gives 23.0 mm
+  3     off     off  ok    ok       1.07      0.482     3.00     0.0      6.75     True/True   0/0
+
+  grasp gap : mean 1.72  max 2.77 mm   (n=8)
+  approach  : 8/8 complete
+  grasp held: 8/8 verified by the jaws
+  success   : 8/8 picked and lifted (approach AND grasp AND lift)
+  rechecks  : 0 trial(s) needed a lift-and-recheck
+  wrote summary.csv, servo_paths.png, distance_closure.png,
+        estimate_error.png, summary.png  ->  test_output_kf/
+
+[LOG] closed 2026-11-03T16:11:24

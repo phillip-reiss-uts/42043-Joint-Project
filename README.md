@@ -71,6 +71,20 @@ reduced from 10.79 ms to 2.41 ms by caching M(q) and g(q) to 0.3 degrees.
 The state-space loop runs at about 45 Hz, not the 125 Hz servo rate; this is
 visible as jerk at high pendant speed and is the main limit of the result.
 
+KF on/off, four seeds per condition:
+
+| Condition | KF | Success | Gap mean | Gap max |
+|---|---|---:|---:|---:|
+| static | on | 4/4 | 1.90 mm | 2.77 mm |
+| static | off | 4/4 | 1.54 mm | 2.12 mm |
+| slow moving | on | 4/4 | 2.62 mm | 3.28 mm |
+| slow moving | off | 4/4 | 4.90 mm | 8.27 mm |
+
+The filter helps a moving target, where it bridges intermittent looks and
+supplies the lead velocity, but costs about 0.36 mm of static grasp gap.
+The static pick therefore uses raw detections (use_kf=False); tracking uses
+the filter. This is a deliberate trade-off, not a universal gain.
+
 Offline verification:
 
     preflight_cell.py        23/23
