@@ -33,6 +33,38 @@ pause, `h` home, `s` status, `v` snapshot when enabled, `q` quit.
 The simulation control period matches the hardware: 8 ms, with four 2 ms
 physics substeps. Arm moves, the observer and the target advance at 125 Hz.
 
+## Method
+
+The pipeline separates perception, estimation and control:
+
+    depth frame
+      -> object localisation -> TargetView
+      -> target Kalman filter -> position and velocity
+      -> PBVS -> joint reference
+      -> state-space controller + arm observer -> joint command
+
+- **Object localisation** deprojects the wrist depth image, removes the table,
+  hand and out-of-bounds points, clusters the rest, fits the cube's top face and
+  returns its centre and yaw. The hardware camera pose is forward kinematics
+  composed with the measured flange-to-camera transform.
+- **Target Kalman filter** is a six-state constant-velocity filter on the cube
+  centre. It smooths intermittent depth measurements, bridges short gaps and
+  supplies the velocity used for lead. It is used for moving targets; the static
+  pick uses raw detections.
+- **PBVS** is the outer loop. It builds the desired tool pose from the estimated
+  cube position and yaw, computes the Cartesian pose error and converts it to a
+  joint increment with damped least squares.
+- **State-space controller** is the optional inner loop. It linearises the arm
+  and joint servo about the current configuration, applies an LQR correction to
+  the PBVS joint reference and sends the corrected command to the joint servo.
+- **Arm observer** is a model-based estimator of joint position and velocity.
+  It predicts through the arm dynamics and corrects position with the encoder;
+  velocity is the unmeasured state supplied to the state-space controller.
+
+The raw path sends the PBVS joint reference directly to the servo. The
+state-space path inserts the observer/LQR correction. Both share the same
+localisation, target filter, PBVS and task logic.
+
 ## Results
 
 Simulation, four static random spawns, current sim camera mount:
